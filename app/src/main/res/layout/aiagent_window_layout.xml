@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="2560px"
+    android:layout_height="800px"
+    android:layout_marginTop="74px"
+    android:padding="1dp">
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+
+        android:id="@+id/aiagentlinearLayout"
+
+        android:orientation="horizontal">
+        <WebView
+            android:id="@+id/responseWebView"
+            android:layout_width="800px"
+            android:layout_height="800px"
+            android:layout_marginStart="880px"
+            android:layout_marginTop="16dp"
+            android:layout_marginEnd="20dp"
+            android:layout_weight="1"
+            android:background="#FFFFFF"
+            android:elevation="2dp" />
+
+    </LinearLayout>
+</FrameLayout>
