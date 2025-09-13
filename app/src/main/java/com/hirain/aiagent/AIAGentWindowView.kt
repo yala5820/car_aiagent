@@ -85,10 +85,11 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
     }
     private fun appendToWebView(text: String, idx:Int, sessionid:Int) {
-        if (mLogCnt % 100 == 0) {
-            Log.d("TAG", "appendToWebView: text  = " + text + " idx = " + idx);
-        }
+
         mHandler.post {
+            if (mLogCnt % 100 == 0) {
+                Log.d("TAG", "appendToWebView: text  = " + text + " idx = " + idx);
+            }
             mCount = 15 //5秒后消失
 
             if (isFirstUpdate) {
@@ -381,13 +382,14 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
         mWebView!!.loadDataWithBaseURL(null, myHtml, "text/html", "UTF-8", null)
     }
     fun updateTextInfo(content:String, idx: Int) {
-        if (idx == 0) {
-            m_curSessionId ++;
-        }
-        appendToWebView(content, idx, m_curSessionId)
+        mHandler.post {
+            if (idx == 0) {
+                m_curSessionId++;
+            }
+            appendToWebView(content, idx, m_curSessionId)
 
-       // Log.d("TAG", "update TextInfo content = " + content)
-    /*    recyclerView?.post(Runnable {
+            // Log.d("TAG", "update TextInfo content = " + content)
+            /*    recyclerView?.post(Runnable {
             if (content.equals("\n")) {
                 addLine("")
             }
@@ -406,6 +408,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 }
             }
         })*/
+        }
     }
 
 

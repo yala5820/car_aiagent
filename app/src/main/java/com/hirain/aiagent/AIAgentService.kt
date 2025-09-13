@@ -326,27 +326,33 @@ class AIAgentService : Service() {
 
         @Throws(RemoteException::class)
         override fun registerListener(listener: IAIAgentAidlListener?) {
-            Log.d("TAG", "registerListener count1 = " + mIAIAgentAidlListeners.size)
-            val recp = DeathRecipient {
-                Log.d("TAG", "binderDied")
-                mIAIAgentAidlListeners.remove(listener)
-            }
-            mIAIAgentAidlListeners.put(listener!!, recp)
+            mainHandler.post {
+                Log.d("TAG", "registerListener count1 = " + mIAIAgentAidlListeners.size)
+                val recp = DeathRecipient {
+                    mainHandler.post {
+                        Log.d("TAG", "binderDied")
+                        mIAIAgentAidlListeners.remove(listener)
+                    }
+                }
+                mIAIAgentAidlListeners.put(listener!!, recp)
 
 
-            // 处理注册死亡监听的逻辑
-            try {
-                listener!!.asBinder().linkToDeath(recp, 0)
-            } catch (e: RemoteException) {
-                e.printStackTrace()
+                // 处理注册死亡监听的逻辑
+                try {
+                    listener!!.asBinder().linkToDeath(recp, 0)
+                } catch (e: RemoteException) {
+                    e.printStackTrace()
+                }
             }
         }
 
         @Throws(RemoteException::class)
         override fun unregisterListener(listener: IAIAgentAidlListener?) {
-            Log.d("TAG", "unregisterListener")
-            val recp: DeathRecipient? = mIAIAgentAidlListeners.remove(listener!!)
-            listener!!.asBinder().unlinkToDeath(recp!!, 0)
+            mainHandler.post {
+                Log.d("TAG", "unregisterListener")
+                val recp: DeathRecipient? = mIAIAgentAidlListeners.remove(listener!!)
+                listener!!.asBinder().unlinkToDeath(recp!!, 0)
+            }
 
         }
 
