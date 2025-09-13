@@ -7,14 +7,14 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-import android.graphics.BitmapFactory
 import android.graphics.PixelFormat
 import android.net.Uri
-import android.os.Binder
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
+import android.os.IBinder.DeathRecipient
 import android.os.Looper
+import android.os.RemoteException
 import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
@@ -61,6 +61,8 @@ class AIAgentService : Service() {
     private lateinit var windowManager: WindowManager
     private lateinit var floatAIAgentView: AIAgentWindowView
     private lateinit var layoutAIAgentParams: WindowManager.LayoutParams
+    private val mIAIAgentAidlListeners:  MutableMap<IAIAgentAidlListener, DeathRecipient> = mutableMapOf()
+
     private val mBinder: AIAgentService.AIAgentBinder = AIAgentBinder()
     private var m_connected = false
     private var chatMemory: ChatMemory? = null
@@ -294,8 +296,8 @@ class AIAgentService : Service() {
             width = WindowManager.LayoutParams.WRAP_CONTENT
             height = WindowManager.LayoutParams.WRAP_CONTENT
             gravity = Gravity.TOP or Gravity.START
-            x = 0
-            y = 0
+            x = 880
+            y = 74
         }
         windowManager.addView(floatAIAgentView, layoutAIAgentParams)
     }
@@ -307,10 +309,45 @@ class AIAgentService : Service() {
 
     }
 
-    inner class AIAgentBinder : Binder() {
-        fun updateText(content: String, idx: Int)
-        {
+    inner class AIAgentBinder :  IAIAgentAidlInterface.Stub() {
+
+        fun updateText(content: String, idx: Int) {
             AIUpdateText(content, idx)
+        }
+
+        @Throws(RemoteException::class)
+        override fun requestAI(arg: String?): Int {
+
+            appendToChat("You: $arg")
+            Thread { processUserRequest(arg!!) }.start()
+
+            return 0
+        }
+
+        @Throws(RemoteException::class)
+        override fun registerListener(listener: IAIAgentAidlListener?) {
+            Log.d("TAG", "registerListener count1 = " + mIAIAgentAidlListeners.size)
+            val recp = DeathRecipient {
+                Log.d("TAG", "binderDied")
+                mIAIAgentAidlListeners.remove(listener)
+            }
+            mIAIAgentAidlListeners.put(listener!!, recp)
+
+
+            // 处理注册死亡监听的逻辑
+            try {
+                listener!!.asBinder().linkToDeath(recp, 0)
+            } catch (e: RemoteException) {
+                e.printStackTrace()
+            }
+        }
+
+        @Throws(RemoteException::class)
+        override fun unregisterListener(listener: IAIAgentAidlListener?) {
+            Log.d("TAG", "unregisterListener")
+            val recp: DeathRecipient? = mIAIAgentAidlListeners.remove(listener!!)
+            listener!!.asBinder().unlinkToDeath(recp!!, 0)
+
         }
 
     }
@@ -410,7 +447,6 @@ class AIAgentService : Service() {
     private fun appendToChat(message: String) {
         mainHandler.post {
             AIUpdateText("\n", 0)
-            //   chatHistory.setText(String.format("%s\n\n%s", current, message));
             for (idx in 0..<message.length) {
                 AIUpdateText(message.substring(idx, idx + 1), idx)
             }

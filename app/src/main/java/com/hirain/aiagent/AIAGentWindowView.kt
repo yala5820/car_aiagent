@@ -38,6 +38,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     private var mCount = 0;
     private var m_view: AIAgentWindowView =this
     private var mLogCnt = 0;
+    private var m_curSessionId = 0;
     init {
 
 
@@ -57,19 +58,33 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
 
         mHandler.post {
+            val params = layoutParams as WindowManager.LayoutParams
+            var curHeight = params.height
+            var curWidth = params.width
             if (mCount <= 0) {
-                m_view.visibility = View.INVISIBLE;
+               // m_view.visibility = View.INVISIBLE;
+                params.height = 1
+                params.width = 1
+
                 loadInitialHtml()
                 mCount = 0;
+
+
             } else {
                 m_view.visibility = View.VISIBLE;
+                params.height = WindowManager.LayoutParams.WRAP_CONTENT
+                params.width = WindowManager.LayoutParams.WRAP_CONTENT
 
+            }
+            if (params.height != curHeight
+                || params.width != curWidth) {
+                windowManager.updateViewLayout(m_view, params)
             }
             mCount--;
         }
 
     }
-    private fun appendToWebView(text: String, idx:Int) {
+    private fun appendToWebView(text: String, idx:Int, sessionid:Int) {
         if (mLogCnt % 100 == 0) {
             Log.d("TAG", "appendToWebView: text  = " + text + " idx = " + idx);
         }
@@ -79,24 +94,28 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             if (isFirstUpdate) {
                 Log.d("TAG", "appendToWebView: isFirstUpdate")
                 loadInitialHtml()
-                mHandler.postDelayed({ appendTextViaJs(text) }, 300)
+                mHandler.postDelayed({ appendTextViaJs(text, sessionid) }, 300)
             } else {
                 if (mLogCnt % 100 == 0 ) {
                     Log.d("TAG", "appendToWebView: else --- " + text);
                 }
                 var delay:Long = (100*idx).toLong()
-                mHandler.postDelayed({ appendTextViaJs(text) }, delay)
+                mHandler.postDelayed({ appendTextViaJs(text, sessionid) }, delay)
 
 
             }
         }
     }
 
-    private fun appendTextViaJs(text: String) {
+    private fun appendTextViaJs(text: String, sessionid:Int) {
         if (mLogCnt % 100 == 0) {
             Log.d("TAG", "appendTextViaJs: ");
         }
+
         mLogCnt ++;
+        if (sessionid != m_curSessionId && !text.equals("\n")) {
+            return;
+        }
         val escapedText = text
             .replace("\\", "\\\\")
             .replace("\"", "\\\"")
@@ -362,7 +381,11 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
         mWebView!!.loadDataWithBaseURL(null, myHtml, "text/html", "UTF-8", null)
     }
     fun updateTextInfo(content:String, idx: Int) {
-        appendToWebView(content, idx)
+        if (idx == 0) {
+            m_curSessionId ++;
+        }
+        appendToWebView(content, idx, m_curSessionId)
+
        // Log.d("TAG", "update TextInfo content = " + content)
     /*    recyclerView?.post(Runnable {
             if (content.equals("\n")) {
