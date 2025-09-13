@@ -40,7 +40,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     }
 
     private fun appendToWebView(text: String, idx:Int) {
-        Log.d("TAG", "appendToWebView: ");
+        Log.d("TAG", "appendToWebView: text  = " + text + " idx = " + idx);
         mHandler.post {
             if (isFirstUpdate) {
                 Log.d("TAG", "appendToWebView: isFirstUpdate")

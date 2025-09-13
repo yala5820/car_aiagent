@@ -213,7 +213,7 @@ public class MainActivity extends AppCompatActivity {
             ChatResponse aiResponse_with_tool = model.chat(request_with_tool);
             processAiResponse(aiResponse_with_tool);
         } else {
-            appendToChat("AI: " + aiResponse.aiMessage().text());
+            appendResponseToChat("AI: " + aiResponse.aiMessage().text());
         }
     }
     private void processUserRequest(String userMessage) {
@@ -230,8 +230,16 @@ public class MainActivity extends AppCompatActivity {
     private void appendToChat(String message) {
         mainHandler.post(() -> {
             String current = chatHistory.getText().toString();
+            mAIAgentBinder.updateText("\n" + message , 0);
+
+
+        });
+    }
+    private void appendResponseToChat(String message) {
+        mainHandler.post(() -> {
+            String current = chatHistory.getText().toString();
             mAIAgentBinder.updateText("\n", 0);
-         //   chatHistory.setText(String.format("%s\n\n%s", current, message));
+            //   chatHistory.setText(String.format("%s\n\n%s", current, message));
             for (int idx = 0; idx < message.length(); ++idx) {
                 mAIAgentBinder.updateText(message.substring(idx, idx + 1), idx);
             }

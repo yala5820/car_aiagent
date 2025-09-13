@@ -73,6 +73,7 @@ dependencies {
 //    implementation("ai.djl.android:tokenizer-native:0.33.0")
 //    implementation("dev.langchain4j:langchain4j-chroma:1.1.0-beta7")
 //    implementation("dev.langchain4j:langchain4j-mcp:1.1.0-beta7")
+    implementation(files("libs/CameraSdk.jar"))
 
     implementation(project(":http-client-ok"))
     implementation(project(":chat_memory_sqlite"))
