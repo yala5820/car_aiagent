@@ -14,6 +14,7 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.util.Log
 import android.view.LayoutInflater
+import android.view.View
 import android.view.WindowManager
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -23,6 +24,8 @@ import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.hirain.aiagent.databinding.AiagentWindowLayoutBinding
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 
 class AIAgentWindowView(context: Context) : FrameLayout(context) {
@@ -32,23 +35,55 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     private var mWebView: WebView = findViewById(R.id.responseWebView)
     private val mHandler: Handler = Handler(Looper.getMainLooper())
     private var isFirstUpdate = true
+    private var mCount = 0;
+    private var m_view: AIAgentWindowView =this
+    private var mLogCnt = 0;
     init {
 
 
         initWebView();
         updateTextInfo("AIAgent", 0)
+        val scheduler = Executors.newScheduledThreadPool(1)
+        scheduler.scheduleAtFixedRate({
+            try {
+                updateWindowVisibility()
+            } catch (e: Exception) {
+                e.printStackTrace() // 或者其他错误处理方式
+            }
+        }, 0, 1, TimeUnit.SECONDS) // 每1秒执行一次
     }
 
-    private fun appendToWebView(text: String, idx:Int) {
-        Log.d("TAG", "appendToWebView: text  = " + text + " idx = " + idx);
+    private fun updateWindowVisibility()  {
+
+
         mHandler.post {
+            if (mCount <= 0) {
+                m_view.visibility = View.INVISIBLE;
+                loadInitialHtml()
+                mCount = 0;
+            } else {
+                m_view.visibility = View.VISIBLE;
+
+            }
+            mCount--;
+        }
+
+    }
+    private fun appendToWebView(text: String, idx:Int) {
+        if (mLogCnt % 100 == 0) {
+            Log.d("TAG", "appendToWebView: text  = " + text + " idx = " + idx);
+        }
+        mHandler.post {
+            mCount = 15 //5秒后消失
+
             if (isFirstUpdate) {
                 Log.d("TAG", "appendToWebView: isFirstUpdate")
                 loadInitialHtml()
                 mHandler.postDelayed({ appendTextViaJs(text) }, 300)
             } else {
-                Log.d("TAG", "appendToWebView: else --- " + text);
-
+                if (mLogCnt % 100 == 0 ) {
+                    Log.d("TAG", "appendToWebView: else --- " + text);
+                }
                 var delay:Long = (100*idx).toLong()
                 mHandler.postDelayed({ appendTextViaJs(text) }, delay)
 
@@ -58,8 +93,10 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     }
 
     private fun appendTextViaJs(text: String) {
-       Log.d("TAG", "appendTextViaJs: ");
-
+        if (mLogCnt % 100 == 0) {
+            Log.d("TAG", "appendTextViaJs: ");
+        }
+        mLogCnt ++;
         val escapedText = text
             .replace("\\", "\\\\")
             .replace("\"", "\\\"")
@@ -325,7 +362,6 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
         mWebView!!.loadDataWithBaseURL(null, myHtml, "text/html", "UTF-8", null)
     }
     fun updateTextInfo(content:String, idx: Int) {
-
         appendToWebView(content, idx)
        // Log.d("TAG", "update TextInfo content = " + content)
     /*    recyclerView?.post(Runnable {

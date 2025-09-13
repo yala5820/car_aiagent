@@ -197,13 +197,7 @@
     <!-- Listen for keyboard attachment / detachment -->
     <uses-permission android:name="android.permission.TABLET_MODE" />
 
-    <!-- Self permission for internal broadcasts. -->
-    <permission android:name="com.android.systemui.permission.SELF"
-        android:protectionLevel="signature" />
-    <uses-permission android:name="com.android.systemui.permission.SELF" />
 
-    <permission android:name="com.android.systemui.permission.PLUGIN"
-        android:protectionLevel="signature" />
 
     <!-- Adding Quick Settings tiles -->
     <uses-permission android:name="android.permission.BIND_QUICK_SETTINGS_TILE" />

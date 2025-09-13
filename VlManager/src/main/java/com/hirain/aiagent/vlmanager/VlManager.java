@@ -50,6 +50,10 @@ public class VlManager {
                 .modelName("qwen-vl-max")
                 .build();
     }
+    private String getBase64(Context context, byte[] byteArray) {
+
+        return Base64.encodeToString(byteArray, Base64.DEFAULT);
+    }
     private String getBase64(Context context, String filePath) {
         InputStream inputStream = null;
         ByteArrayOutputStream byteOutputStream = null;
@@ -86,10 +90,27 @@ public class VlManager {
             }
         }
     }
+
+
     @Tool("用于解决车主提出的前方视野相关问题，该工具可以获取前置舱外摄像头实时图像数据，并根据图像数据与车主的文本输入，给出车主回应。")
     public String front_camera_interaction(@P(value = "经过处理后的车主文本输入，尽量简洁清晰")String text) {
+
         String img_b64 = getBase64(ctx, "documents/audi.jpg");
         SystemMessage systemmsg = SystemMessage.from(front_camera_system_msg);
+        UserMessage usrmsg = UserMessage.from(
+                TextContent.from(text),
+                ImageContent.from(img_b64, "image/jpeg")
+        );
+        ChatResponse aiResponse = vlModel.chat(systemmsg, usrmsg);
+        return aiResponse.aiMessage().text();
+    }
+    public String front_camera_interaction(String text, byte[] byteArray) {
+        Log.d("TAG", "front_camera_interaction text0 = " + text);
+
+        String img_b64 = getBase64(ctx, byteArray);
+        SystemMessage systemmsg = SystemMessage.from(front_camera_system_msg);
+        Log.d("TAG", "front_camera_interaction text = " + text);
+
         UserMessage usrmsg = UserMessage.from(
                 TextContent.from(text),
                 ImageContent.from(img_b64, "image/jpeg")

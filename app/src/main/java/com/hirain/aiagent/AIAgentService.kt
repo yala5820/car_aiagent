@@ -145,8 +145,15 @@ class AIAgentService : Service() {
                 "TAG",
                 "onCaptureGot seqid = " + seqid + " mode = " + mode + "  p = " + p.toString()
             )
-            writeFile(filepath, p.getValue());
-            val bitmap = BitmapFactory.decodeByteArray(p.getValue(), 0, p.getValue().size)
+            Log.d("TAG", "vl = " + vl)
+            if (vl != null) {
+                var airesponse = vl!!.front_camera_interaction("i", p.getValue())
+                appendToChat("AI: " + airesponse)
+
+
+            }
+       //     writeFile(filepath, p.getValue());
+       //     val bitmap = BitmapFactory.decodeByteArray(p.getValue(), 0, p.getValue().size)
         }
 
         override fun onCameraServiceDisconnected() {
@@ -258,10 +265,10 @@ class AIAgentService : Service() {
     }
 
     fun requestCapture() {
-        mainHandler.post {
-            val seqid = Camera.getInstance().requestCapture()
-            val mode = Camera.getInstance().captureMode
-        }
+
+        val seqid = Camera.getInstance().requestCapture()
+        val mode = Camera.getInstance().captureMode
+
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
