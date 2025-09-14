@@ -265,7 +265,7 @@ class AIAgentService : Service() {
 
         chatMemory!!.add(SystemMessage.systemMessage(systemPrompt))
         vl = VlManager(this)
-        Thread { processUserRequest("Hello World") }.start()
+      //  Thread { processUserRequest("Hello World") }.start()
     }
 
     fun requestCapture() {
@@ -468,7 +468,11 @@ class AIAgentService : Service() {
                 .build()
             val aiResponse_with_tool = model!!.chat(request_with_tool)
             processAiResponse(aiResponse_with_tool)
-        } else {
+        } else if (aiResponse.aiMessage().text().contains("污染")) {
+            appendToChat(aiResponse.aiMessage().text())
+            appendPositiveResponse("AI: " + aiResponse.aiMessage().text())
+        }
+        else {
             appendNagivateResponseToChat("AI: " + aiResponse.aiMessage().text())
         }
     }
@@ -490,6 +494,11 @@ class AIAgentService : Service() {
                 message
                 , 0
             )
+        }
+    }
+    private fun appendPositiveResponse(message: String) {
+        mainHandler.post {
+            AIUpdatePositiveResponse(message)
         }
     }
     private fun appendNagivateResponseToChat(message: String) {
