@@ -152,7 +152,7 @@ class AIAgentService : Service() {
             Log.d("TAG", "vl = " + vl)
             if (vl != null) {
                 var airesponse = vl!!.front_camera_interaction("i", p.getValue())
-                appendResponseToChat("AI: " + airesponse)
+                appendNagivateResponseToChat("AI: " + airesponse)
 
 
             }
@@ -335,9 +335,10 @@ class AIAgentService : Service() {
         fun updateRequest(content: String, idx: Int) {
             AIUpdateRequestText(content, idx)
         }
-        fun updateResponse(content: String, idx: Int) {
-            AIUpdateResponseText(content, idx)
+        fun updateNagivateResponse(content: String, idx: Int) {
+            AIUpdateNagivateResponseText(content, idx)
         }
+
         @Throws(RemoteException::class)
         override fun requestAI(arg: String?): Int {
 
@@ -384,9 +385,9 @@ class AIAgentService : Service() {
     {
         floatAIAgentView.updateRequestTextInfo(content, idx)
     }
-    fun AIUpdateResponseText(content: String, idx: Int)
+    fun AIUpdateNagivateResponseText(content: String, idx: Int)
     {
-        floatAIAgentView.updateResponseTextInfo(content, idx)
+        floatAIAgentView.updateNagivateResponseTextInfo(content, idx)
     }
     override fun onBind(intent: Intent?): IBinder? {
         Log.d("TAG", "onBind")
@@ -449,7 +450,7 @@ class AIAgentService : Service() {
             val tooExecutionRequests = aiMessage.toolExecutionRequests()
             for (toolrequest in tooExecutionRequests) {
                 val result = handleTools(toolrequest)
-                appendResponseToChat("Tools: " + "工具[" + toolrequest.name() + toolrequest.arguments() + "] 执行中")
+                appendNagivateResponseToChat("Tools: " + "工具[" + toolrequest.name() + toolrequest.arguments() + "] 执行中")
                 val toolExecutionResultMessage =
                     ToolExecutionResultMessage.from(toolrequest, result)
                 chatMemory!!.add(toolExecutionResultMessage)
@@ -461,7 +462,7 @@ class AIAgentService : Service() {
             val aiResponse_with_tool = model!!.chat(request_with_tool)
             processAiResponse(aiResponse_with_tool)
         } else {
-            appendResponseToChat("AI: " + aiResponse.aiMessage().text())
+            appendNagivateResponseToChat("AI: " + aiResponse.aiMessage().text())
         }
     }
 
@@ -470,7 +471,7 @@ class AIAgentService : Service() {
             chatMemory!!.add(UserMessage.userMessage(userMessage))
             chatWithVehicleStatus()
         } catch (e: java.lang.Exception) {
-            appendResponseToChat("系统: 请求失败 - " + e.message)
+            appendNagivateResponseToChat("系统: 请求失败 - " + e.message)
         }
     }
 
@@ -484,11 +485,11 @@ class AIAgentService : Service() {
             )
         }
     }
-    private fun appendResponseToChat(message: String) {
+    private fun appendNagivateResponseToChat(message: String) {
         mainHandler.post {
-            AIUpdateResponseText("\n", 0)
+            AIUpdateNagivateResponseText("\n", 0)
             for (idx in 0..<message.length) {
-                AIUpdateResponseText(message.substring(idx, idx + 1), idx)
+                AIUpdateNagivateResponseText(message.substring(idx, idx + 1), idx)
             }
         }
     }

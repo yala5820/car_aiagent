@@ -56,6 +56,43 @@
             android:layout_marginLeft="20px"
             android:layout_marginTop="20px"
             android:elevation="2dp" />
+    <LinearLayout
+        android:layout_width="1000px"
+        android:layout_height="240px"
+        android:layout_marginLeft="120px"
+        android:layout_marginTop="96px"
+        android:id="@+id/radiobtnslayout"
 
+        android:orientation="horizontal">
+        <android.widget.RadioButton
+            android:id="@+id/btnwindow"
+            android:layout_width="281px"
+            android:layout_height="177px"
+            android:layout_marginTop="31px"
+
+            android:scaleType="fitXY"
+            android:background="@drawable/radiobtnbg"
+            android:text="车窗"/>
+        <android.widget.RadioButton
+            android:id="@+id/btnoutdoor"
+            android:layout_width="281px"
+            android:layout_height="177px"
+            android:layout_marginTop="31px"
+            android:layout_marginLeft="62px"
+
+            android:scaleType="fitXY"
+            android:background="@drawable/radiobtnbg"
+            android:text="外循环"/>
+        <android.widget.RadioButton
+            android:id="@+id/btncleanair"
+            android:layout_width="281px"
+            android:layout_height="177px"
+            android:layout_marginTop="31px"
+            android:layout_marginLeft="62px"
+
+            android:scaleType="fitXY"
+            android:background="@drawable/radiobtnbg"
+            android:text="净化空气"/>
+    </LinearLayout>
     </LinearLayout>
 </FrameLayout>

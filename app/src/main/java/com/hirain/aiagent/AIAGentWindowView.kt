@@ -126,6 +126,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             .replace("\r", "\\r")
 
         // 使用JavaScript接口追加内容
+        mWebView.visibility = View.VISIBLE
         mWebView!!.evaluateJavascript(
             "appendText(\"$escapedText\");",
             null
@@ -389,7 +390,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
         }
     }
 
-    fun updateResponseTextInfo(content:String, idx: Int) {
+    fun updateNagivateResponseTextInfo(content:String, idx: Int) {
         mHandler.post {
             if (idx == 0) {
                 m_curSessionId++;
