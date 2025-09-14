@@ -33,6 +33,8 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val activityManager = context.getSystemService(Activity.ACTIVITY_SERVICE) as ActivityManager
     private var mWebView: WebView = findViewById(R.id.responseWebView)
+    private var mInputView: TextView = findViewById(R.id.inputtext)
+
     private val mHandler: Handler = Handler(Looper.getMainLooper())
     private var isFirstUpdate = true
     private var mCount = 0;
@@ -43,7 +45,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
 
         initWebView();
-        updateTextInfo("AIAgent", 0)
+        updateRequestTextInfo("AIAgent", 0)
         val scheduler = Executors.newScheduledThreadPool(1)
         scheduler.scheduleAtFixedRate({
             try {
@@ -381,7 +383,13 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
         mWebView!!.loadDataWithBaseURL(null, myHtml, "text/html", "UTF-8", null)
     }
-    fun updateTextInfo(content:String, idx: Int) {
+    fun updateRequestTextInfo(content:String, idx: Int) {
+        mHandler.post {
+            mInputView.text = content
+        }
+    }
+
+    fun updateResponseTextInfo(content:String, idx: Int) {
         mHandler.post {
             if (idx == 0) {
                 m_curSessionId++;

@@ -142,7 +142,7 @@ public class MainActivity extends AppCompatActivity {
     private void onSendClick(View view) {
         String inputText = userInput.getText().toString().trim();
         if (!inputText.isEmpty()) {
-            appendToChat("You: " + inputText);
+            appendToChat( inputText);
             userInput.setText("");
 
             new Thread(() -> processUserRequest(inputText)).start();
@@ -230,7 +230,7 @@ public class MainActivity extends AppCompatActivity {
     private void appendToChat(String message) {
         mainHandler.post(() -> {
             String current = chatHistory.getText().toString();
-            mAIAgentBinder.updateText("\n" + message , 0);
+            mAIAgentBinder.updateRequest(message , 0);
 
 
         });
@@ -238,10 +238,10 @@ public class MainActivity extends AppCompatActivity {
     private void appendResponseToChat(String message) {
         mainHandler.post(() -> {
             String current = chatHistory.getText().toString();
-            mAIAgentBinder.updateText("\n", 0);
+            mAIAgentBinder.updateResponse("\n", 0);
             //   chatHistory.setText(String.format("%s\n\n%s", current, message));
             for (int idx = 0; idx < message.length(); ++idx) {
-                mAIAgentBinder.updateText(message.substring(idx, idx + 1), idx);
+                mAIAgentBinder.updateResponse(message.substring(idx, idx + 1), idx);
             }
 
 

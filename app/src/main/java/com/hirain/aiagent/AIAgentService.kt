@@ -16,7 +16,9 @@ import android.os.IBinder.DeathRecipient
 import android.os.Looper
 import android.os.RemoteException
 import android.provider.Settings
+import android.util.DisplayMetrics
 import android.util.Log
+import android.view.Display
 import android.view.Gravity
 import android.view.WindowManager
 import com.hirain.aiagent.vehicleacmanager.VehicleAcManager
@@ -150,7 +152,7 @@ class AIAgentService : Service() {
             Log.d("TAG", "vl = " + vl)
             if (vl != null) {
                 var airesponse = vl!!.front_camera_interaction("i", p.getValue())
-                appendToChat("AI: " + airesponse)
+                appendResponseToChat("AI: " + airesponse)
 
 
             }
@@ -282,12 +284,31 @@ class AIAgentService : Service() {
     private fun showAIAgent(windowmanager: WindowManager) {
 
         floatAIAgentView = AIAgentWindowView(this)
-
         // 配置悬浮窗 LayoutParams
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else WindowManager.LayoutParams.TYPE_PHONE
+        val display: Display = windowManager.defaultDisplay
+        val displayMetrics: DisplayMetrics = DisplayMetrics()
+        display.getMetrics(displayMetrics)
 
+        val scnwidth: Int = displayMetrics.widthPixels
+        val scnheight: Int = displayMetrics.heightPixels
+        val scndensity: Float = displayMetrics.density
+
+
+        // 屏幕宽度（像素）
+        val screenWidth = Math.round(scnwidth /scndensity)
+
+        // 屏幕高度（像素）
+        val screenHeight = Math.round(scnheight / scndensity)
+
+
+        Log.d("TAG","scnwidth =" + scnwidth + " scnheight " + scnheight + " Screen Height: $screenHeight dp"  + "Screen Width: $screenWidth dp")
+        var x = 658;
+        if (screenWidth != 2560) {
+            x = 0
+        }
         layoutAIAgentParams = WindowManager.LayoutParams().apply {
             this.type = type
             format = PixelFormat.TRANSLUCENT
@@ -296,8 +317,8 @@ class AIAgentService : Service() {
             width = WindowManager.LayoutParams.WRAP_CONTENT
             height = WindowManager.LayoutParams.WRAP_CONTENT
             gravity = Gravity.TOP or Gravity.START
-            x = 880
-            y = 74
+            x = 0//658
+            y = 20
         }
         windowManager.addView(floatAIAgentView, layoutAIAgentParams)
     }
@@ -311,14 +332,16 @@ class AIAgentService : Service() {
 
     inner class AIAgentBinder :  IAIAgentAidlInterface.Stub() {
 
-        fun updateText(content: String, idx: Int) {
-            AIUpdateText(content, idx)
+        fun updateRequest(content: String, idx: Int) {
+            AIUpdateRequestText(content, idx)
         }
-
+        fun updateResponse(content: String, idx: Int) {
+            AIUpdateResponseText(content, idx)
+        }
         @Throws(RemoteException::class)
         override fun requestAI(arg: String?): Int {
 
-            appendToChat("You: $arg")
+            appendToChat("$arg")
             Thread { processUserRequest(arg!!) }.start()
 
             return 0
@@ -357,9 +380,13 @@ class AIAgentService : Service() {
         }
 
     }
-    fun AIUpdateText(content: String, idx: Int)
+    fun AIUpdateRequestText(content: String, idx: Int)
     {
-        floatAIAgentView.updateTextInfo(content, idx)
+        floatAIAgentView.updateRequestTextInfo(content, idx)
+    }
+    fun AIUpdateResponseText(content: String, idx: Int)
+    {
+        floatAIAgentView.updateResponseTextInfo(content, idx)
     }
     override fun onBind(intent: Intent?): IBinder? {
         Log.d("TAG", "onBind")
@@ -422,7 +449,7 @@ class AIAgentService : Service() {
             val tooExecutionRequests = aiMessage.toolExecutionRequests()
             for (toolrequest in tooExecutionRequests) {
                 val result = handleTools(toolrequest)
-                appendToChat("Tools: " + "工具[" + toolrequest.name() + toolrequest.arguments() + "] 执行中")
+                appendResponseToChat("Tools: " + "工具[" + toolrequest.name() + toolrequest.arguments() + "] 执行中")
                 val toolExecutionResultMessage =
                     ToolExecutionResultMessage.from(toolrequest, result)
                 chatMemory!!.add(toolExecutionResultMessage)
@@ -434,7 +461,7 @@ class AIAgentService : Service() {
             val aiResponse_with_tool = model!!.chat(request_with_tool)
             processAiResponse(aiResponse_with_tool)
         } else {
-            appendToChat("AI: " + aiResponse.aiMessage().text())
+            appendResponseToChat("AI: " + aiResponse.aiMessage().text())
         }
     }
 
@@ -443,18 +470,25 @@ class AIAgentService : Service() {
             chatMemory!!.add(UserMessage.userMessage(userMessage))
             chatWithVehicleStatus()
         } catch (e: java.lang.Exception) {
-            appendToChat("系统: 请求失败 - " + e.message)
+            appendResponseToChat("系统: 请求失败 - " + e.message)
         }
     }
 
     private fun cleanChat() {
     }
-
     private fun appendToChat(message: String) {
         mainHandler.post {
-            AIUpdateText("\n", 0)
+            AIUpdateRequestText(
+                message
+                , 0
+            )
+        }
+    }
+    private fun appendResponseToChat(message: String) {
+        mainHandler.post {
+            AIUpdateResponseText("\n", 0)
             for (idx in 0..<message.length) {
-                AIUpdateText(message.substring(idx, idx + 1), idx)
+                AIUpdateResponseText(message.substring(idx, idx + 1), idx)
             }
         }
     }
