@@ -133,7 +133,7 @@
         </LinearLayout>
         <WebView
             android:id="@+id/responseWebView"
-            android:layout_width="1131px"
+            android:layout_width="1200px"
             android:layout_height="1028px"
             android:layout_marginLeft="20px"
             android:layout_marginTop="20px"

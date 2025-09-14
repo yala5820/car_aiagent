@@ -170,7 +170,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
 
     private fun loadInitialHtml() {
-        val initialHtml = "<html><body style=\"font-family: sans-serif; font-size: 50;padding: 16px;\">" +
+        val initialHtml = "<html><body style=\"font-family: sans-serif; font-size: 20px;padding: 16px;\">" +
                 "<div id=\"content\"></div>" +
                 "<script>" +
                 "function appendText(text) {" +
