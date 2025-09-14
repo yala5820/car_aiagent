@@ -20,6 +20,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.Switch
 import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -33,6 +34,8 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val activityManager = context.getSystemService(Activity.ACTIVITY_SERVICE) as ActivityManager
     private var mWebView: WebView = findViewById(R.id.responseWebView)
+    private var mBtnGroups: View = findViewById(R.id.btnslayout)
+    private var mBtnClean: Switch = findViewById(R.id.btncleanair)
     private var mInputView: TextView = findViewById(R.id.inputtext)
 
     private val mHandler: Handler = Handler(Looper.getMainLooper())
@@ -54,6 +57,9 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 e.printStackTrace() // 或者其他错误处理方式
             }
         }, 0, 1, TimeUnit.SECONDS) // 每1秒执行一次
+        mBtnClean.setOnClickListener{
+            Log.d("TAG", "home0 onclick")
+        }
     }
 
     private fun updateWindowVisibility()  {
@@ -74,7 +80,13 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
             } else {
                 m_view.visibility = View.VISIBLE;
-                params.height = WindowManager.LayoutParams.WRAP_CONTENT
+                if (mBtnGroups.visibility == View.GONE) {
+                    params.height = 1252;//WindowManager.LayoutParams.WRAP_CONTENT
+                }
+                else {
+                    params.height = 766;//WindowManager.LayoutParams.WRAP_CONTENT
+
+                }
                 params.width = WindowManager.LayoutParams.WRAP_CONTENT
 
             }
@@ -389,12 +401,20 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             mInputView.text = content
         }
     }
-
+    fun updatePositiveResponse(content:String) {
+        mHandler.post {
+            mCount = 15 //5秒后消失
+            mBtnGroups.visibility = View.VISIBLE
+            mWebView.visibility = View.INVISIBLE
+        }
+    }
     fun updateNagivateResponseTextInfo(content:String, idx: Int) {
         mHandler.post {
             if (idx == 0) {
                 m_curSessionId++;
             }
+            mBtnGroups.visibility = View.GONE
+            mWebView.visibility = View.VISIBLE
             appendToWebView(content, idx, m_curSessionId)
 
             // Log.d("TAG", "update TextInfo content = " + content)

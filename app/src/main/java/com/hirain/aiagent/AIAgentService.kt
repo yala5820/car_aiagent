@@ -338,6 +338,9 @@ class AIAgentService : Service() {
         fun updateNagivateResponse(content: String, idx: Int) {
             AIUpdateNagivateResponseText(content, idx)
         }
+        fun updatePositiveResponse(content: String) {
+            AIUpdatePositiveResponse(content)
+        }
 
         @Throws(RemoteException::class)
         override fun requestAI(arg: String?): Int {
@@ -388,6 +391,10 @@ class AIAgentService : Service() {
     fun AIUpdateNagivateResponseText(content: String, idx: Int)
     {
         floatAIAgentView.updateNagivateResponseTextInfo(content, idx)
+    }
+    fun AIUpdatePositiveResponse(content: String)
+    {
+        floatAIAgentView.updatePositiveResponse(content)
     }
     override fun onBind(intent: Intent?): IBinder? {
         Log.d("TAG", "onBind")
