@@ -2,7 +2,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="1171px"
     android:layout_height="1252px"
-    android:background="@color/white"
+    android:background="@drawable/aiagentwindowbg"
     android:padding="1dp">
     <LinearLayout
         android:layout_width="wrap_content"
@@ -51,12 +51,10 @@
     </LinearLayout>
         <WebView
             android:id="@+id/responseWebView"
-            android:layout_width="1171px"
+            android:layout_width="1131px"
             android:layout_height="1028px"
             android:layout_marginLeft="20px"
             android:layout_marginTop="20px"
-            android:layout_weight="1"
-            android:background="#FFFFFF"
             android:elevation="2dp" />
 
     </LinearLayout>
