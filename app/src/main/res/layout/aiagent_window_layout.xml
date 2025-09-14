@@ -2,8 +2,10 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="1244px"
     android:layout_height="1252px"
-    android:background="@drawable/aiagentwindowbg"
+    android:id="@+id/myFrameLayout"
     android:padding="1dp">
+    <!-- 背景ImageView -->
+
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
@@ -39,14 +41,14 @@
                     android:layout_width="323px"
                     android:layout_height="63px"
                     android:textColor="#FF000000"
-                    android:textSize="15sp"/>
+                    android:textSize="20sp"/>
                 <TextView
                     android:id="@+id/proceduer"
                     android:layout_width="235px"
                     android:layout_height="40px"
                     android:textColor="#FF007AFF"
                     android:text="qwen3.0生成中..."
-                    android:textSize="10sp"/>
+                    android:textSize="15sp"/>
             </LinearLayout>
         </LinearLayout>
         <LinearLayout
@@ -139,4 +141,5 @@
             android:layout_marginTop="20px"
             android:elevation="2dp" />
     </LinearLayout>
+
 </FrameLayout>

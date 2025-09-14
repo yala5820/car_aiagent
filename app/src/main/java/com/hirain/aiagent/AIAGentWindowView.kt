@@ -8,10 +8,9 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.ActivityManager
 import android.content.Context
+import android.graphics.drawable.LayerDrawable
 import android.os.Handler
 import android.os.Looper
-import android.text.Layout
-import android.text.StaticLayout
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
@@ -20,10 +19,9 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import com.hirain.aiagent.databinding.AiagentWindowLayoutBinding
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -66,6 +64,8 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
 
         mHandler.post {
+            val frameLayout: LinearLayout = findViewById(R.id.aiagentlinearLayout)
+
             val params = layoutParams as WindowManager.LayoutParams
             var curHeight = params.height
             var curWidth = params.width
@@ -80,20 +80,37 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
             } else {
                 m_view.visibility = View.VISIBLE;
-                if (mBtnGroups.visibility == View.GONE) {
-                    params.height = 1252;//WindowManager.LayoutParams.WRAP_CONTENT
-                }
-                else {
-                    params.height = 766;//WindowManager.LayoutParams.WRAP_CONTENT
-
-                }
                 params.width = WindowManager.LayoutParams.WRAP_CONTENT
 
+                if (mBtnGroups.visibility == View.GONE) {
+                    params.height = 1252;//WindowManager.LayoutParams.WRAP_CONTENT
+                    val backgroundDrawable = resources.getDrawable(R.drawable.aiagentwindowbigbg, null)
+
+                    val layerDrawable = LayerDrawable(arrayOf(backgroundDrawable))
+                    layerDrawable.setLayerInset(0, 0, 0, 0, 0) // 无边距填充
+                    windowManager.updateViewLayout(m_view, params)
+                    frameLayout.background = layerDrawable
+
+
+                }
+                else {
+                    params.height = 782;//WindowManager.LayoutParams.WRAP_CONTENT
+                    val backgroundDrawable = resources.getDrawable(R.drawable.aiagentwindowsmallbg, null)
+
+                    val layerDrawable = LayerDrawable(arrayOf(backgroundDrawable))
+                    layerDrawable.setLayerInset(0, 0, 0, 0, 0) // 无边距填充
+
+                    windowManager.updateViewLayout(m_view, params)
+
+                    frameLayout.background = layerDrawable
+                }
+
             }
-            if (params.height != curHeight
-                || params.width != curWidth) {
-                windowManager.updateViewLayout(m_view, params)
-            }
+
+            windowManager.updateViewLayout(m_view, params)
+
+            // Kotlin 示例
+
             mCount--;
         }
 
@@ -138,11 +155,16 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             .replace("\r", "\\r")
 
         // 使用JavaScript接口追加内容
-        mWebView.visibility = View.VISIBLE
-        mWebView!!.evaluateJavascript(
-            "appendText(\"$escapedText\");",
-            null
-        )
+        if (mBtnGroups.visibility == View.GONE) {
+            mWebView.visibility = View.VISIBLE
+            mWebView!!.evaluateJavascript(
+                "appendText(\"$escapedText\");",
+                null
+            )
+        }
+        else {
+            mWebView.visibility = View.GONE
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -405,7 +427,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
         mHandler.post {
             mCount = 15 //5秒后消失
             mBtnGroups.visibility = View.VISIBLE
-            mWebView.visibility = View.INVISIBLE
+            mWebView.visibility = View.GONE
         }
     }
     fun updateNagivateResponseTextInfo(content:String, idx: Int) {
