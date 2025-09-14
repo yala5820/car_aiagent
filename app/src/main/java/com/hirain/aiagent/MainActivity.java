@@ -212,7 +212,13 @@ public class MainActivity extends AppCompatActivity {
                 .build();
             ChatResponse aiResponse_with_tool = model.chat(request_with_tool);
             processAiResponse(aiResponse_with_tool);
-        } else {
+        }
+        else if(aiResponse.aiMessage().text().contains("污染")) {
+            appendToChat(aiResponse.aiMessage().text());
+            appendPositiveResponse("AI: " + aiResponse.aiMessage().text());
+
+        }
+        else {
             appendNagivateResponseToChat("AI: " + aiResponse.aiMessage().text());
         }
     }
@@ -235,15 +241,22 @@ public class MainActivity extends AppCompatActivity {
 
         });
     }
+    private void appendPositiveResponse(String message) {
+        mainHandler.post(() -> {
+
+            mAIAgentBinder.updatePositiveResponse(message);
+
+
+        });
+    }
     private void appendNagivateResponseToChat(String message) {
         mainHandler.post(() -> {
-         /*   String current = chatHistory.getText().toString();
+            String current = chatHistory.getText().toString();
             mAIAgentBinder.updateNagivateResponse("\n", 0);
             //   chatHistory.setText(String.format("%s\n\n%s", current, message));
             for (int idx = 0; idx < message.length(); ++idx) {
                 mAIAgentBinder.updateNagivateResponse(message.substring(idx, idx + 1), idx);
-            }*/
-            mAIAgentBinder.updatePositiveResponse("");
+            }
 
 
         });

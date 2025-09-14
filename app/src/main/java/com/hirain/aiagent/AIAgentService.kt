@@ -305,9 +305,9 @@ class AIAgentService : Service() {
 
 
         Log.d("TAG","scnwidth =" + scnwidth + " scnheight " + scnheight + " Screen Height: $screenHeight dp"  + "Screen Width: $screenWidth dp")
-        var x = 658;
+        var posx = 658;
         if (screenWidth != 2560) {
-            x = 0
+            posx = 0
         }
         layoutAIAgentParams = WindowManager.LayoutParams().apply {
             this.type = type
@@ -317,7 +317,7 @@ class AIAgentService : Service() {
             width = WindowManager.LayoutParams.WRAP_CONTENT
             height = WindowManager.LayoutParams.WRAP_CONTENT
             gravity = Gravity.TOP or Gravity.START
-            x = 0//658
+            x = posx//658
             y = 20
         }
         windowManager.addView(floatAIAgentView, layoutAIAgentParams)
