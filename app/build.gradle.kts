@@ -29,6 +29,26 @@ android {
         }
     }
 
+    signingConfigs {
+
+        getByName("debug") {
+            storeFile = file(projectDir.toString() + "/../platform.jks")
+            storePassword = "123456789"
+            keyAlias = "123456789"
+            keyPassword = "123456789"
+        }
+
+    }
+    buildTypes {
+        getByName("release") {
+            // 使用debug签名配置，默认不需要设置，但如果你想用自定义的，可以这样：
+        //    signingConfig = signingConfigs.getByName("release")
+        }
+        getByName("debug") {
+            // 使用debug签名配置，默认不需要设置，但如果你想用自定义的，可以这样：
+             signingConfig = signingConfigs.getByName("debug")
+        }
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -75,7 +95,7 @@ dependencies {
 //    implementation("dev.langchain4j:langchain4j-mcp:1.1.0-beta7")
     implementation(files("libs/CameraSdk.jar"))
     implementation(files("libs/AIAgentSdk.jar"))
-
+    implementation(files("libs/adapter_vr.jar"))
     implementation(project(":http-client-ok"))
     implementation(project(":chat_memory_sqlite"))
 //    implementation(project(":android_document_loader"))

@@ -21,6 +21,7 @@ import android.util.Log
 import android.view.Display
 import android.view.Gravity
 import android.view.WindowManager
+import com.hirain.adapter.vr.VRServiceManager
 import com.hirain.aiagent.vehicleacmanager.VehicleAcManager
 import com.hirain.aiagent.vehicledoormanager.VehicleDoorManager
 import com.hirain.aiagent.vehiclefragmanager.VehicleFragManager
@@ -58,7 +59,6 @@ import java.util.concurrent.TimeUnit
 import java.util.stream.Collectors
 import java.util.stream.Stream
 
-
 class AIAgentService : Service() {
     private lateinit var windowManager: WindowManager
     private lateinit var floatAIAgentView: AIAgentWindowView
@@ -70,6 +70,8 @@ class AIAgentService : Service() {
     private var chatMemory: ChatMemory? = null
     private var model: ChatModel? = null
     private var vl: VlManager? = null
+    private var mManager: VRServiceManager? = null
+
     private val weatherutils = WeatherUtils(this, "c9af807ed95f93b56855a928417586f9")
     private val wheatherTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
         WeatherUtils::class.java
@@ -266,6 +268,8 @@ class AIAgentService : Service() {
         chatMemory!!.add(SystemMessage.systemMessage(systemPrompt))
         vl = VlManager(this)
       //  Thread { processUserRequest("Hello World") }.start()
+        mManager = VRServiceManager.getInstance(this)
+
     }
 
     fun requestCapture() {
@@ -317,7 +321,7 @@ class AIAgentService : Service() {
             width = WindowManager.LayoutParams.WRAP_CONTENT
             height = WindowManager.LayoutParams.WRAP_CONTENT
             gravity = Gravity.TOP or Gravity.START
-            x = posx//658
+            x = 658
             y = 20
         }
         windowManager.addView(floatAIAgentView, layoutAIAgentParams)
@@ -504,9 +508,19 @@ class AIAgentService : Service() {
     private fun appendNagivateResponseToChat(message: String) {
         mainHandler.post {
             AIUpdateNagivateResponseText("\n", 0)
+            mManager?.speak(message);
+            var line: String = ""
+            var cnt: Int = 0;
             for (idx in 0..<message.length) {
-                AIUpdateNagivateResponseText(message.substring(idx, idx + 1), idx)
+                line += message.substring(idx, idx + 1)
+                if (line.length > 10) {
+                    AIUpdateNagivateResponseText(line, cnt);
+                    cnt++;
+                    line = "";
+                }
             }
+            if (line.length > 0)
+                AIUpdateNagivateResponseText(line, cnt);
         }
     }
 
