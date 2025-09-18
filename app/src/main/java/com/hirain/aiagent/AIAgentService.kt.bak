@@ -24,9 +24,7 @@ import android.view.WindowManager
 import com.hirain.adapter.vr.VRServiceManager
 import com.hirain.aiagent.vehicleacmanager.VehicleAcManager
 import com.hirain.aiagent.vehicledoormanager.VehicleDoorManager
-import com.hirain.aiagent.vehiclefragmanager.VehicleDMSManager
 import com.hirain.aiagent.vehiclefragmanager.VehicleFragManager
-import com.hirain.aiagent.vehiclefragmanager.VehicleSpeedManager
 import com.hirain.aiagent.vehicleseatmanager.VehicleSeatManager
 import com.hirain.aiagent.vehiclewindowmanager.VehicleWindowManager
 import com.hirain.aiagent.vlmanager.VlManager
@@ -74,6 +72,37 @@ class AIAgentService : Service() {
     private var vl: VlManager? = null
     private var mManager: VRServiceManager? = null
     private var mLastRequestAITimeStamp:Long = 0
+    private val weatherutils = WeatherUtils(this, "c9af807ed95f93b56855a928417586f9")
+    private val wheatherTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
+        WeatherUtils::class.java
+    )
+    var doorManager: VehicleDoorManager = VehicleDoorManager()
+    private val doorTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
+        VehicleDoorManager::class.java
+    )
+    var vehwindowManager: VehicleWindowManager = VehicleWindowManager()
+    private val windowTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
+        VehicleWindowManager::class.java
+    )
+    var seatManager: VehicleSeatManager = VehicleSeatManager()
+    private val seatTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
+        VehicleSeatManager::class.java
+    )
+    private val acManager = VehicleAcManager()
+    private val acTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
+        VehicleAcManager::class.java
+    )
+    private val fragManager = VehicleFragManager()
+    private val fragTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
+        VehicleFragManager::class.java
+    )
+    private val vlTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
+        VlManager::class.java
+    )
+    private val mergedTools: List<ToolSpecification> = Stream
+        .of(wheatherTools, doorTools, windowTools, seatTools, acTools, fragTools, vlTools)
+        .flatMap { obj: List<ToolSpecification> -> obj.stream() }.collect(Collectors.toList())
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val systemPrompt = """角色定义：
     你是一位专业、友好且高度智能的车载AI助手，专注于提供安全、高效、愉悦的驾驶体验。
     你集成多种人工智能技术，通过不断学习迭代升级功能，在软硬件配合下实现自然流畅的人车智能交互。
@@ -106,56 +135,6 @@ class AIAgentService : Service() {
     关于订单预定等功能将在后续的版本退出，当前版本仅能提供语音或文本建议。
     我能够帮助您控制车辆功能、提供天气信息、娱乐服务和旅途建议，但无法代替您进行驾驶操作。请始终将注意力集中在道路上，安全驾驶。
 """
-    private val weatherutils = WeatherUtils(this, "c9af807ed95f93b56855a928417586f9")
-    private val wheatherTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
-        WeatherUtils::class.java
-    )
-    var doorManager: VehicleDoorManager = VehicleDoorManager()
-    private val doorTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
-        VehicleDoorManager::class.java
-    )
-    var vehwindowManager: VehicleWindowManager = VehicleWindowManager()
-    private val windowTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
-        VehicleWindowManager::class.java
-    )
-    var seatManager: VehicleSeatManager = VehicleSeatManager()
-    private val seatTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
-        VehicleSeatManager::class.java
-    )
-    private val acManager = VehicleAcManager()
-    private val acTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
-        VehicleAcManager::class.java
-    )
-    private val fragManager = VehicleFragManager()
-    private val speedManager: VehicleSpeedManager = VehicleSpeedManager()
-    private val dmsManager: VehicleDMSManager = VehicleDMSManager()
-    private val fragTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
-        VehicleFragManager::class.java
-    )
-    private val vlTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
-        VlManager::class.java
-    )
-    private val speedTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
-        VehicleSpeedManager::class.java
-    )
-    private val dmsTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
-        VehicleDMSManager::class.java
-    )
-    private val mergedTools: List<ToolSpecification> = Stream
-        .of(
-            wheatherTools,
-            doorTools,
-            windowTools,
-            seatTools,
-            acTools,
-            fragTools,
-            vlTools,
-            speedTools,
-            dmsTools
-        )
-        .flatMap { obj: List<ToolSpecification> -> obj.stream() }.collect(Collectors.toList())
-    private val mainHandler = Handler(Looper.getMainLooper())
-
     companion object {
        // val service = AIAgentService() // Now it is an instance of Service
 
@@ -174,14 +153,10 @@ class AIAgentService : Service() {
             )
             Log.d("TAG", "vl = " + vl)
             if (vl != null) {
-                var airesponse = vl!!.front_camera_interaction("你必须从<scene>1.大雪天气 2.儿童睡着 3.浓烟 4.施工绕行</scene>之间定义的场景列表中选择当前的场景，禁止虚构其它场景。\n如果你判断当前不属于其中任意一种场景，直接使用不是作为回复。\n你必须严格按照<normal-reply>不是</normal-reply>之间的Json对象格式示例进行回复。\n任何情况下你的回复都必须是一个Json对象，Json对象内容严格按照上述约束。\n", p.getValue())
-              //  appendNagivateResponseToChat("AI: ",  airesponse)
-                if (airesponse.toString().contains("不是")) {
-                    Log.d("TAG", "非场景")
-                }
-                else {
-                    processUserRequest(airesponse.toString());
-                }
+                var airesponse = vl!!.front_camera_interaction("i", p.getValue())
+                appendNagivateResponseToChat("AI: ",  airesponse)
+
+
             }
        //     writeFile(filepath, p.getValue());
        //     val bitmap = BitmapFactory.decodeByteArray(p.getValue(), 0, p.getValue().size)
@@ -455,8 +430,6 @@ class AIAgentService : Service() {
             val seatjson = JSONObject(seatManager.seatStatus)
             val acjson = JSONObject(acManager.acStatus)
             val fragjson = JSONObject(fragManager.fragStatus)
-            val speedjson = JSONObject(speedManager.speedStatus)
-            val dmsjson: JSONObject = JSONObject(dmsManager.dmsStatus)
             json.put("车门", doorjson)
             json.put("车窗", windowjson)
             json.put("座椅、方向盘", seatjson)

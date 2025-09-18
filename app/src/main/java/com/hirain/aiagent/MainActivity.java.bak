@@ -100,7 +100,7 @@ public class MainActivity extends AppCompatActivity {
     private final List<ToolSpecification> acTools = ToolSpecifications.toolSpecificationsFrom(VehicleAcManager.class);
     private final VehicleFragManager fragManager = new VehicleFragManager();
     private final VehicleSpeedManager speedManager = new VehicleSpeedManager();
-    private final VehicleDMSManager dmsManager = new  VehicleDMSManager();
+    private final VehicleDMSManager dmsManager = new VehicleDMSManager();
     private final List<ToolSpecification> fragTools = ToolSpecifications.toolSpecificationsFrom(VehicleFragManager.class);
     private final List<ToolSpecification> vlTools = ToolSpecifications.toolSpecificationsFrom(VlManager.class);
     private final List<ToolSpecification> speedTools = ToolSpecifications.toolSpecificationsFrom(VehicleSpeedManager.class);
@@ -172,7 +172,7 @@ public class MainActivity extends AppCompatActivity {
             JSONObject acjson = new JSONObject(acManager.getAcStatus());
             JSONObject fragjson = new JSONObject(fragManager.getFragStatus());
             JSONObject speedjson = new JSONObject(speedManager.getSpeedStatus());
-            JSONObject dmsjson = new JSONObject(dmsManager.getDmsStatus());
+            JSONObject dmsjson = new JSONObject(dmsManager.getDMSStatus());
             json.put("车门", doorjson);
             json.put("车窗", windowjson);
             json.put("座椅、方向盘", seatjson);
@@ -200,12 +200,7 @@ public class MainActivity extends AppCompatActivity {
             return fragManager.handleToolRequest(request);
         } else if (vl.hasTool(request.name())) {
             return vl.handleToolRequest(request);
-        } else if (speedManager.hasTool(request.name())) {
-            return speedManager.handleToolRequest(request);
-        } else if (dmsManager.hasTool(request.name())) {
-            return dmsManager.handleToolRequest(request);
         }
-
         return "无效的工具调用。";
     }
     private void processAiResponse(ChatResponse aiResponse) {

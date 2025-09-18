@@ -16,6 +16,11 @@ public class VehicleAcManager {
     private static final String KEY_CIRCULATION_MODE = "空调循环模式";
     private static final String KEY_DRIVE_AUTO_SWEEP = "主驾自动扫风开启";
     private static final String KEY_ASSIST_AUTO_SWEEP = "副驾自动扫风开启";
+    private static final String KEY_DRIVE_LEFT_AIR_OUTLET = "主驾左侧出风口开关";
+    private static final String KEY_DRIVE_RIGHT_AIR_OUTLET = "主驾右侧出风口开关";
+    private static final String KEY_ASSIST_AIR_OUTLET_MODE = "副驾电动出风口模式";
+    private static final String KEY_ASSIST_LEFT_AIR_OUTLET = "副驾左侧出风口开关";
+    private static final String KEY_ASSIST_RIGHT_AIR_OUTLET = "副驾右侧出风口开关";
     private boolean ac_status;
     private int ac_drive_temp;
     private int ac_assist_temp;
@@ -26,6 +31,11 @@ public class VehicleAcManager {
     private String ac_cyc_mode;
     private boolean ac_drive_sweep_auto;
     private boolean ac_assist_sweep_auto;
+    private boolean ac_drive_left_air_outlet;
+    private boolean ac_drive_right_air_outlet;
+    private String ac_assist_air_outlet_mode;
+    private boolean ac_assist_left_air_outlet;
+    private boolean ac_assist_right_air_outlet;
 
     public VehicleAcManager() {
         this.ac_status = false;
@@ -38,6 +48,11 @@ public class VehicleAcManager {
         this.ac_cyc_mode = "自动";
         this.ac_drive_sweep_auto = false;
         this.ac_assist_sweep_auto = false;
+        this.ac_drive_left_air_outlet = false;
+        this.ac_drive_right_air_outlet = false;
+        this.ac_assist_air_outlet_mode = "关闭";
+        this.ac_assist_left_air_outlet = false;
+        this.ac_assist_right_air_outlet = false;
     }
 
     public String getAcStatus() {
@@ -53,6 +68,11 @@ public class VehicleAcManager {
             json.put(KEY_CIRCULATION_MODE, ac_cyc_mode);
             json.put(KEY_DRIVE_AUTO_SWEEP, ac_drive_sweep_auto);
             json.put(KEY_ASSIST_AUTO_SWEEP, ac_assist_sweep_auto);
+            json.put(KEY_DRIVE_LEFT_AIR_OUTLET, ac_drive_left_air_outlet);
+            json.put(KEY_DRIVE_RIGHT_AIR_OUTLET, ac_drive_right_air_outlet);
+            json.put(KEY_ASSIST_AIR_OUTLET_MODE, ac_assist_air_outlet_mode);
+            json.put(KEY_ASSIST_LEFT_AIR_OUTLET, ac_assist_left_air_outlet);
+            json.put(KEY_ASSIST_RIGHT_AIR_OUTLET, ac_assist_right_air_outlet);
         } catch (JSONException e) {
             return "获取空调系统状态失败。";
         }
@@ -113,12 +133,51 @@ public class VehicleAcManager {
         String tmp = auto ? "开启": "关闭";
         return "副驾自动扫风功能" + tmp + "成功";
     }
+
+    @Tool("主驾左侧出风口功能开启/关闭。")
+    public String set_ac_drive_left_air_outlet(@P(value = "开启：true, 关闭：false") boolean auto) {
+        this.ac_drive_left_air_outlet = auto;
+        String tmp = auto ? "开启": "关闭";
+        return "主驾左侧出风口功能" + tmp + "成功";
+    }
+
+    @Tool("主驾右侧出风口开关功能开启/关闭。")
+    public String set_ac_drive_right_air_outlet(@P(value = "开启：true, 关闭：false") boolean auto) {
+        this.ac_drive_right_air_outlet = auto;
+        String tmp = auto ? "开启": "关闭";
+        return "副驾自动扫风功能" + tmp + "成功";
+    }
+
+    @Tool("副驾电动出风口模式。")
+    public String set_ac_assist_air_outlet_mode(@P(value = "模式，必须为：'AirManual OFF', 'Air Vertical', 'Air Horizontal', 'Air Point', 'Mirror Wind', 'One way', 'AirnoVent', 'AirToVent', 'AirAuto', 'AirOFF' 中的一个。") String mode) {
+        this.ac_assist_air_outlet_mode = mode;
+        return "副驾电动出风口模式：" + mode;
+    }
+
+    @Tool("副驾左侧出风口功能开启/关闭。")
+    public String set_ac_assist_left_air_outlet(@P(value = "开启：true, 关闭：false") boolean auto) {
+        this.ac_assist_left_air_outlet = auto;
+        String tmp = auto ? "开启": "关闭";
+        return "副驾左侧出风口功能" + tmp + "成功";
+    }
+
+    @Tool("副驾右侧出风口功能开启/关闭。")
+    public String set_ac_assist_right_air_outlet(@P(value = "开启：true, 关闭：false") boolean auto) {
+        this.ac_assist_right_air_outlet = auto;
+        String tmp = auto ? "开启": "关闭";
+        return "副驾右侧出风口功能" + tmp + "成功";
+    }
+
+
     public boolean hasTool(String toolname) {
         return toolname.equals("set_ac_status") || toolname.equals("set_ac_drive_temp")
             || toolname.equals("set_ac_assist_temp") || toolname.equals("set_fan_intensity")
             || toolname.equals("set_ac_eco_mode") || toolname.equals("set_ac_anion_status")
             || toolname.equals("set_ac_clean_mode") || toolname.equals("set_ac_cyc_mode")
-            || toolname.equals("set_ac_drive_sweep_auto") || toolname.equals("set_ac_assist_sweep_auto");
+            || toolname.equals("set_ac_drive_sweep_auto") || toolname.equals("set_ac_assist_sweep_auto")
+            || toolname.equals("set_ac_drive_left_air_outlet") || toolname.equals("set_ac_drive_right_air_outlet")
+            || toolname.equals("set_ac_assist_air_outlet_mode") || toolname.equals("set_ac_assist_left_air_outlet")
+            || toolname.equals("set_ac_assist_right_air_outlet");
     }
     public String handleToolRequest(ToolExecutionRequest request) {
         try {
@@ -143,6 +202,16 @@ public class VehicleAcManager {
                 return set_ac_drive_sweep_auto(json.getBoolean("arg0"));
             } else if (request.name().equals("set_ac_assist_sweep_auto")) {
                 return set_ac_assist_sweep_auto(json.getBoolean("arg0"));
+            } else if (request.name().equals("set_ac_drive_left_air_outlet")) {
+                return set_ac_drive_left_air_outlet(json.getBoolean("arg0"));
+            } else if (request.name().equals("set_ac_drive_right_air_outlet")) {
+                return set_ac_drive_right_air_outlet(json.getBoolean("arg0"));
+            } else if (request.name().equals("set_ac_assist_air_outlet_mode")) {
+                return set_ac_assist_air_outlet_mode(json.getString("arg0"));
+            } else if (request.name().equals("set_ac_assist_left_air_outlet")) {
+                return set_ac_assist_left_air_outlet(json.getBoolean("arg0"));
+            } else if (request.name().equals("set_ac_assist_right_air_outlet")) {
+                return set_ac_assist_right_air_outlet(json.getBoolean("arg0"));
             } else {
                 return "无效的工具请求。";
             }

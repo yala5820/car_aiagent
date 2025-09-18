@@ -17,6 +17,7 @@ public class VehicleWindowManager {
     private static final String KEY_WINDOW_R_HEAT = "后风挡加热开启";
     private static final String KEY_MIRROR_L_HEAT = "左后视镜加热开启";
     private static final String KEY_MIRROR_R_HEAT = "右后视镜加热开启";
+    private static final String KEY_NO_WINDOW_OPENING_PASSENGERS = "乘员禁止开窗功能";
     private int window_fl_open;
     private int window_fr_open;
     private int window_rl_open;
@@ -27,6 +28,7 @@ public class VehicleWindowManager {
     private boolean window_r_heat;
     private boolean mirror_l_heat;
     private boolean mirror_r_heat;
+    private boolean no_window_opening_passengers;
     public VehicleWindowManager() {
         this.window_fl_open = 0;
         this.window_fr_open = 0;
@@ -38,6 +40,7 @@ public class VehicleWindowManager {
         this.window_r_heat = false;
         this.mirror_l_heat = false;
         this.mirror_r_heat = false;
+        this.no_window_opening_passengers = false;
     }
     public String getWindowStatus() {
         JSONObject json = new JSONObject();
@@ -52,6 +55,7 @@ public class VehicleWindowManager {
             json.put(KEY_WINDOW_R_HEAT, window_r_heat);
             json.put(KEY_MIRROR_L_HEAT, mirror_l_heat);
             json.put(KEY_MIRROR_R_HEAT, mirror_r_heat);
+            json.put(KEY_NO_WINDOW_OPENING_PASSENGERS, no_window_opening_passengers);
         } catch (JSONException e) {
             return "获取车窗、天窗、遮阳帘开度状态失败。";
         }
@@ -111,12 +115,19 @@ public class VehicleWindowManager {
         String tmp = heat ? "开启": "关闭";
         return "右后视镜加热" + tmp + "成功";
     }
+    @Tool("乘员禁止开窗功能开启/关闭。")
+    public String set_no_window_opening_passengers(@P(value = "开启：true, 关闭：false") boolean open) {
+        this.no_window_opening_passengers = open;
+        String tmp = open ? "开启": "关闭";
+        return "乘员禁止开窗功能" + tmp + "成功";
+    }
     public boolean hasTool(String toolname) {
         return toolname.equals("setFlWindowStatus") || toolname.equals("setFrWindowStatus")
             || toolname.equals("setRlWindowStatus") || toolname.equals("setRrWindowStatus")
             || toolname.equals("setTopWindowStatus") || toolname.equals("setSunShadowStatus")
             || toolname.equals("set_window_f_defrosting") || toolname.equals("set_window_r_heat")
-            || toolname.equals("set_mirror_l_heat") || toolname.equals("set_mirror_r_heat");
+            || toolname.equals("set_mirror_l_heat") || toolname.equals("set_mirror_r_heat")
+            || toolname.equals("no_window_opening_passengers") ;
     }
     public String handleToolRequest(ToolExecutionRequest request) {
         try {
@@ -141,6 +152,8 @@ public class VehicleWindowManager {
                 return set_mirror_l_heat(json.getBoolean("arg0"));
             } else if (request.name().equals("set_mirror_r_heat")) {
                 return set_mirror_r_heat(json.getBoolean("arg0"));
+            } else if (request.name().equals("set_no_window_opening_passengers")) {
+                return set_no_window_opening_passengers(json.getBoolean("arg0"));
             } else {
                 return "无效的工具请求。";
             }
