@@ -35,6 +35,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     private var mBtnGroups: View = findViewById(R.id.btnslayout)
     private var mBtnClean: Switch = findViewById(R.id.btncleanair)
     private var mInputView: TextView = findViewById(R.id.inputtext)
+    private var mProcuderView: TextView = findViewById(R.id.proceduer)
 
     private val mHandler: Handler = Handler(Looper.getMainLooper())
     private var isFirstUpdate = true
@@ -46,7 +47,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
 
         initWebView();
-        updateRequestTextInfo("AIAgent", 0)
+     //   updateRequestTextInfo("AIAgent", 0)
         val scheduler = Executors.newScheduledThreadPool(1)
         scheduler.scheduleAtFixedRate({
             try {
@@ -423,10 +424,22 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             mInputView.text = content
         }
     }
+    fun updateRequestTextProcuder(visible:Boolean) {
+        mHandler.post {
+            mCount = 15
+            if (visible) {
+                mProcuderView.visibility = View.VISIBLE
+            }
+            else {
+                mProcuderView.visibility = View.GONE
+
+            }
+        }
+    }
     fun updatePositiveResponse(content:String) {
         mHandler.post {
             mCount = 15 //5秒后消失
-            mBtnGroups.visibility = View.VISIBLE
+            mBtnGroups.visibility = View.GONE
             mWebView.visibility = View.GONE
         }
     }

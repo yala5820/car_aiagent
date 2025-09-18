@@ -71,7 +71,7 @@ class AIAgentService : Service() {
     private var model: ChatModel? = null
     private var vl: VlManager? = null
     private var mManager: VRServiceManager? = null
-
+    private var mLastRequestAITimeStamp:Long = 0
     private val weatherutils = WeatherUtils(this, "c9af807ed95f93b56855a928417586f9")
     private val wheatherTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
         WeatherUtils::class.java
@@ -154,7 +154,7 @@ class AIAgentService : Service() {
             Log.d("TAG", "vl = " + vl)
             if (vl != null) {
                 var airesponse = vl!!.front_camera_interaction("i", p.getValue())
-                appendNagivateResponseToChat("AI: " + airesponse)
+                appendNagivateResponseToChat("AI: ",  airesponse)
 
 
             }
@@ -309,9 +309,9 @@ class AIAgentService : Service() {
 
 
         Log.d("TAG","scnwidth =" + scnwidth + " scnheight " + scnheight + " Screen Height: $screenHeight dp"  + "Screen Width: $screenWidth dp")
-        var posx = 658;
-        if (screenWidth != 2560) {
-            posx = 0
+        var posx = 0;
+        if (scnwidth == 2560) {
+            posx = 658
         }
         layoutAIAgentParams = WindowManager.LayoutParams().apply {
             this.type = type
@@ -321,7 +321,7 @@ class AIAgentService : Service() {
             width = WindowManager.LayoutParams.WRAP_CONTENT
             height = WindowManager.LayoutParams.WRAP_CONTENT
             gravity = Gravity.TOP or Gravity.START
-            x = 658
+            x = posx
             y = 20
         }
         windowManager.addView(floatAIAgentView, layoutAIAgentParams)
@@ -350,7 +350,9 @@ class AIAgentService : Service() {
         override fun requestAI(arg: String?): Int {
 
             appendToChat("$arg")
-            Thread { processUserRequest(arg!!) }.start()
+            mainHandler.postDelayed({
+                Thread { processUserRequest(arg!!) }.start()
+            }, 1000);
 
             return 0
         }
@@ -387,6 +389,10 @@ class AIAgentService : Service() {
 
         }
 
+    }
+    fun AIUpdateRequestProcuder(visible:Boolean)
+    {
+        floatAIAgentView.updateRequestTextProcuder(visible)
     }
     fun AIUpdateRequestText(content: String, idx: Int)
     {
@@ -461,7 +467,7 @@ class AIAgentService : Service() {
             val tooExecutionRequests = aiMessage.toolExecutionRequests()
             for (toolrequest in tooExecutionRequests) {
                 val result = handleTools(toolrequest)
-                appendNagivateResponseToChat("Tools: " + "工具[" + toolrequest.name() + toolrequest.arguments() + "] 执行中")
+                appendNagivateResponseToChat("Tools: " + "工具", "[" + toolrequest.name() + toolrequest.arguments() + "] 执行中")
                 val toolExecutionResultMessage =
                     ToolExecutionResultMessage.from(toolrequest, result)
                 chatMemory!!.add(toolExecutionResultMessage)
@@ -472,12 +478,9 @@ class AIAgentService : Service() {
                 .build()
             val aiResponse_with_tool = model!!.chat(request_with_tool)
             processAiResponse(aiResponse_with_tool)
-        } else if (aiResponse.aiMessage().text().contains("污染")) {
-            appendToChat(aiResponse.aiMessage().text())
-            appendPositiveResponse("AI: " + aiResponse.aiMessage().text())
         }
         else {
-            appendNagivateResponseToChat("AI: " + aiResponse.aiMessage().text())
+            appendNagivateResponseToChat("AI: ", aiResponse.aiMessage().text())
         }
     }
 
@@ -486,33 +489,65 @@ class AIAgentService : Service() {
             chatMemory!!.add(UserMessage.userMessage(userMessage))
             chatWithVehicleStatus()
         } catch (e: java.lang.Exception) {
-            appendNagivateResponseToChat("系统: 请求失败 - " + e.message)
+            appendNagivateResponseToChat("", "系统: 请求失败 - " + e.message)
         }
     }
 
     private fun cleanChat() {
     }
     private fun appendToChat(message: String) {
+        val timeMillis = System.currentTimeMillis()
+        var delta = timeMillis - mLastRequestAITimeStamp
+        Log.d("TAG", "appentToChat delta = " + delta)
+        mLastRequestAITimeStamp = timeMillis
         mainHandler.post {
-            AIUpdateRequestText(
-                message
-                , 0
+            AIUpdateRequestProcuder(
+                false
             )
+        }
+        if (delta < 10000) {
+            mainHandler.post {
+                AIUpdateRequestText(
+                    message, 0
+                )
+            }
+
+        }
+        else {
+            mainHandler.post {
+                AIUpdateRequestText(
+                    "聆听中...", 0
+                )
+            }
+
+            mainHandler.postDelayed({
+                AIUpdateRequestText(
+                    message, 0
+                )
+            }, 1000)
+            mainHandler.postDelayed({
+                AIUpdateRequestProcuder(
+                    true
+                )
+            }, 1000)
         }
     }
     private fun appendPositiveResponse(message: String) {
         mainHandler.post {
+            mManager?.speak(message);
+
             AIUpdatePositiveResponse(message)
         }
     }
-    private fun appendNagivateResponseToChat(message: String) {
+    private fun appendNagivateResponseToChat(prefix:String, message: String) {
         mainHandler.post {
             AIUpdateNagivateResponseText("\n", 0)
             mManager?.speak(message);
             var line: String = ""
             var cnt: Int = 0;
-            for (idx in 0..<message.length) {
-                line += message.substring(idx, idx + 1)
+            var completeMsg = prefix + message
+            for (idx in 0..<completeMsg.length) {
+                line += completeMsg.substring(idx, idx + 1)
                 if (line.length > 10) {
                     AIUpdateNagivateResponseText(line, cnt);
                     cnt++;

@@ -92,19 +92,47 @@ public class VlManager {
     }
 
 
-    @Tool("用于解决车主提出的前方视野相关问题，该工具可以获取前置舱外摄像头实时图像数据，并根据图像数据与车主的文本输入，给出车主回应。")
-    public String front_camera_interaction(@P(value = "经过处理后的车主文本输入，尽量简洁清晰")String text) {
+    public String front_camera_interaction(String text) {
 
-        String img_b64 = getBase64(ctx, "documents/audi.jpg");
-        SystemMessage systemmsg = SystemMessage.from(front_camera_system_msg);
-        UserMessage usrmsg = UserMessage.from(
-                TextContent.from(text),
-                ImageContent.from(img_b64, "image/jpeg")
-        );
-        ChatResponse aiResponse = vlModel.chat(systemmsg, usrmsg);
-        return aiResponse.aiMessage().text();
+        InputStream inputStream = null;
+        ByteArrayOutputStream byteOutputStream = null;
+        try {
+            inputStream = ctx.getAssets().open("documents/audi.jpg");
+            byteOutputStream = new ByteArrayOutputStream();
+            byte[] buffer = new byte[500 * 1024];
+            int len;
+            while ((len = inputStream.read(buffer)) != -1) {
+                byteOutputStream.write(buffer, 0, len);
+            }
+
+            byte[] bytes = byteOutputStream.toByteArray();
+
+            return front_camera_interaction(text, bytes);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+            return "";
+        } finally {
+            if (inputStream != null) {
+                try {
+                    inputStream.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+            if (byteOutputStream != null) {
+                try {
+                    byteOutputStream.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+
+
     }
-    public String front_camera_interaction(String text, byte[] byteArray) {
+    @Tool("用于解决车主提出的前方视野相关问题，该工具可以获取前置舱外摄像头实时图像数据，并根据图像数据与车主的文本输入，给出车主回应。")
+    public String front_camera_interaction(@P(value = "经过处理后的车主文本输入，尽量简洁清晰")String text, byte[] byteArray) {
         Log.d("TAG", "front_camera_interaction text0 = " + text);
 
         String img_b64 = getBase64(ctx, byteArray);

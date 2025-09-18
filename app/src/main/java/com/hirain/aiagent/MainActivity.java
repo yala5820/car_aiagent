@@ -213,13 +213,9 @@ public class MainActivity extends AppCompatActivity {
             ChatResponse aiResponse_with_tool = model.chat(request_with_tool);
             processAiResponse(aiResponse_with_tool);
         }
-        else if(aiResponse.aiMessage().text().contains("污染")) {
-            appendToChat(aiResponse.aiMessage().text());
-            appendPositiveResponse("AI: " + aiResponse.aiMessage().text());
 
-        }
         else {
-            appendNagivateResponseToChat("AI: " + aiResponse.aiMessage().text());
+            appendNagivateResponseToChat("AI: ", aiResponse.aiMessage().text());
         }
     }
     private void processUserRequest(String userMessage) {
@@ -249,7 +245,7 @@ public class MainActivity extends AppCompatActivity {
 
         });
     }
-    private void appendNagivateResponseToChat(String message) {
+    private void appendNagivateResponseToChat(String prefix, String message) {
         mainHandler.post(() -> {
             String current = chatHistory.getText().toString();
             mAIAgentBinder.updateNagivateResponse("\n", 0);
