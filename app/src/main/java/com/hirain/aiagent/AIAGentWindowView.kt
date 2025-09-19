@@ -41,7 +41,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     private var isFirstUpdate = true
     private var mCount = 0;
     private var m_view: AIAgentWindowView =this
-    private var mLogCnt = 0;
+    private var mLogCnt = 100;
     private var m_curSessionId = 0;
     init {
 
@@ -120,7 +120,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
         mHandler.post {
             if (mLogCnt % 100 == 0) {
-                Log.d("TAG", "appendToWebView: text  = " + text + " idx = " + idx);
+             //   Log.d("TAG", "appendToWebView: text  = " + text + " idx = " + idx);
             }
             mCount = 15 //5秒后消失
 
@@ -130,7 +130,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 mHandler.postDelayed({ appendTextViaJs(text, sessionid) }, 300)
             } else {
                 if (mLogCnt % 100 == 0 ) {
-                    Log.d("TAG", "appendToWebView: else --- " + text);
+                 //   Log.d("TAG", "appendToWebView: else --- " + text);
                 }
                 var delay:Long = (100*idx).toLong()
                 mHandler.postDelayed({ appendTextViaJs(text, sessionid) }, delay)
@@ -142,10 +142,10 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
     private fun appendTextViaJs(text: String, sessionid:Int) {
         if (mLogCnt % 100 == 0) {
-            Log.d("TAG", "appendTextViaJs: ");
+         //   Log.d("TAG", "appendTextViaJs: " + text);
         }
 
-        mLogCnt ++;
+        //mLogCnt ++;
         if (sessionid != m_curSessionId && !text.equals("\n")) {
             return;
         }

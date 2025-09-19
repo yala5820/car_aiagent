@@ -38,7 +38,7 @@ public class VehicleDoorManager {
         return json.toString();
     }
     @Tool("控制车门闭锁/解锁")
-    public String setDoorLock(@P(value = "控制车门闭锁：true, 控制车门开锁：false") boolean lock) {
+    public String set_door_lock(@P(value = "控制车门闭锁：true, 控制车门开锁：false") boolean lock) {
         if (!lock) {
             this.door_locked = false;
             return "车门解锁成功";
@@ -50,14 +50,14 @@ public class VehicleDoorManager {
         return "车门闭锁成功";
     }
     public boolean hasTool(String toolname) {
-        return toolname.equals("setDoorLock");
+        return toolname.equals("set_door_lock");
     }
     public String handleToolRequest(ToolExecutionRequest request) {
         try {
-            if (request.name().equals("setDoorLock")) {
+            if (request.name().equals("set_door_lock")) {
                 JSONObject json = new JSONObject(request.arguments());
                 if (json.has("arg0")) {
-                    return setDoorLock(json.getBoolean("arg0"));
+                    return set_door_lock(json.getBoolean("arg0"));
                 } else {
                     return "无效的工具参数。";
                 }

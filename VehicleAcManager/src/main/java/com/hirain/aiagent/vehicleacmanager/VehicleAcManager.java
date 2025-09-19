@@ -1,4 +1,6 @@
 package com.hirain.aiagent.vehicleacmanager;
+import android.util.Log;
+
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
@@ -95,7 +97,7 @@ public class VehicleAcManager {
         return "副驾温度调节成功";
     }
     @Tool("调节空调风量挡位。")
-    public String set_fan_intensity(@P(value = "整数，范围：1-7,风量递增") int intensity) {
+    public String set_ac_fan_intensity(@P(value = "整数，范围：1-7,风量递增") int intensity) {
         this.ac_fan_intensity = intensity;
         return "风量挡位调节成功";
     }
@@ -171,7 +173,7 @@ public class VehicleAcManager {
 
     public boolean hasTool(String toolname) {
         return toolname.equals("set_ac_status") || toolname.equals("set_ac_drive_temp")
-            || toolname.equals("set_ac_assist_temp") || toolname.equals("set_fan_intensity")
+            || toolname.equals("set_ac_assist_temp") || toolname.equals("set_ac_fan_intensity")
             || toolname.equals("set_ac_eco_mode") || toolname.equals("set_ac_anion_status")
             || toolname.equals("set_ac_clean_mode") || toolname.equals("set_ac_cyc_mode")
             || toolname.equals("set_ac_drive_sweep_auto") || toolname.equals("set_ac_assist_sweep_auto")
@@ -188,8 +190,8 @@ public class VehicleAcManager {
                 return set_ac_drive_temp(json.getInt("arg0"));
             } else if (request.name().equals("set_ac_assist_temp")) {
                 return set_ac_assist_temp(json.getInt("arg0"));
-            } else if (request.name().equals("set_fan_intensity")) {
-                return set_fan_intensity(json.getInt("arg0"));
+            } else if (request.name().equals("set_ac_fan_intensity")) {
+                return set_ac_fan_intensity(json.getInt("arg0"));
             } else if (request.name().equals("set_ac_eco_mode")) {
                 return set_ac_eco_mode(json.getBoolean("arg0"));
             } else if (request.name().equals("set_ac_anion_status")) {

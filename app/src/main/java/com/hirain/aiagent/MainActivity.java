@@ -211,10 +211,15 @@ public class MainActivity extends AppCompatActivity {
     private void processAiResponse(ChatResponse aiResponse) {
         AiMessage aiMessage = aiResponse.aiMessage();
         chatMemory.add(aiMessage);
+        Log.d(TAG, "xxxxxxxx processAiResponse before check hasToolExecutionRequests");
         if (aiMessage.hasToolExecutionRequests()) {
+
             List<ToolExecutionRequest> tooExecutionRequests = aiMessage.toolExecutionRequests();
+            Log.d(TAG, "yyyyyy processAiResponse  check hasToolExecutionRequests size = " + tooExecutionRequests.size());
+
             for (ToolExecutionRequest toolrequest : tooExecutionRequests) {
                 String result = handleTools(toolrequest);
+                Log.d(TAG, "toolrequest name = " + toolrequest.name() + " result = " + result);
                 appendToChat("Tools: " + "工具["  + toolrequest.name() + toolrequest.arguments() + "] 执行中");
                 ToolExecutionResultMessage toolExecutionResultMessage = ToolExecutionResultMessage.from(toolrequest, result);
                 chatMemory.add(toolExecutionResultMessage);
@@ -260,13 +265,22 @@ public class MainActivity extends AppCompatActivity {
     }
     private void appendNagivateResponseToChat(String prefix, String message) {
         mainHandler.post(() -> {
-            String current = chatHistory.getText().toString();
-            mAIAgentBinder.updateNagivateResponse("\n", 0);
-            //   chatHistory.setText(String.format("%s\n\n%s", current, message));
-            for (int idx = 0; idx < message.length(); ++idx) {
-                mAIAgentBinder.updateNagivateResponse(message.substring(idx, idx + 1), idx);
-            }
 
+            mAIAgentBinder.updateNagivateResponse("\n", 0);
+            String line = "";
+            int cnt = 0;
+            String completeMsg = prefix + message;
+            for (int idx = 0;  idx <completeMsg.length(); idx ++) {
+                line += completeMsg.substring(idx, idx + 1);
+                if (line.length() > 10) {
+                    mAIAgentBinder.updateNagivateResponse(line, cnt);
+                    cnt++;
+                    line = "";
+                }
+            }
+            if (line.length() > 0) {
+                mAIAgentBinder.updateNagivateResponse(line, cnt);
+            }
 
         });
     }

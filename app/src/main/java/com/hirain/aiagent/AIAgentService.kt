@@ -180,7 +180,8 @@ class AIAgentService : Service() {
                     Log.d("TAG", "非场景")
                 }
                 else {
-                    processUserRequest(airesponse.toString());
+                   // Log.d("TAG","airesponse.toString() = " + airesponse.toString());
+                    processUserRequest(airesponse.toString() + ", 请执行工具");
                 }
             }
        //     writeFile(filepath, p.getValue());
