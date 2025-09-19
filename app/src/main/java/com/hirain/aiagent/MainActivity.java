@@ -220,7 +220,7 @@ public class MainActivity extends AppCompatActivity {
             for (ToolExecutionRequest toolrequest : tooExecutionRequests) {
                 String result = handleTools(toolrequest);
                 Log.d(TAG, "toolrequest name = " + toolrequest.name() + " result = " + result);
-                appendToChat("Tools: " + "工具["  + toolrequest.name() + toolrequest.arguments() + "] 执行中");
+                // appendToChat("Tools: " + "工具["  + toolrequest.name() + toolrequest.arguments() + "] 执行中");
                 ToolExecutionResultMessage toolExecutionResultMessage = ToolExecutionResultMessage.from(toolrequest, result);
                 chatMemory.add(toolExecutionResultMessage);
             }
