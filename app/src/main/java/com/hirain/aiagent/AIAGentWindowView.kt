@@ -14,7 +14,9 @@ import android.os.Looper
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.ValueCallback
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -184,6 +186,19 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 super.onPageFinished(view, url)
                 Log.d("TAG", "onPageFinished: ")
                 isFirstUpdate = false;
+                super.onPageFinished(view, url)
+
+                // 使用JavaScript获取文档高度
+                mWebView.evaluateJavascript(
+                    "(function(){return document.body.scrollHeight;})();",
+                    ValueCallback<String> { value -> // 这里得到的value是字符串形式的数字，例如"1000"，注意可能是浮点数，需要转换
+                        val height = value.toFloat().toInt() // 转换为整数高度
+                        // 然后调整WebView的高度为height
+                        val params: ViewGroup.LayoutParams = mWebView.getLayoutParams()
+                        Log.d("TAG", " webview height = " + height)
+               //         params.height = height
+              //          mWebView.setLayoutParams(params)
+                    })
             }
         }
 
