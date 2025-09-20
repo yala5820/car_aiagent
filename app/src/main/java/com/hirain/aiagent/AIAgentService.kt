@@ -181,7 +181,7 @@ class AIAgentService : Service() {
                 }
                 else {
                    // Log.d("TAG","airesponse.toString() = " + airesponse.toString());
-                    processUserRequest(airesponse.toString() + ", 请执行车辆工具并简要列出执行结果");
+                    processUserRequest(airesponse.toString() + ", 请执行车辆工具,并以检测到某某，且不要带场景这两个字作为开头，简要总结执行内容");
                 }
             }
        //     writeFile(filepath, p.getValue());
