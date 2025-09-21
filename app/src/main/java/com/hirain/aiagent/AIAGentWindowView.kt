@@ -455,14 +455,16 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             }
         }
     }
-    fun updatePositiveResponse(content:String) {
+    fun updateNagativeResponse(content:String) {
         mHandler.post {
             mCount = 15 //5秒后消失
             mBtnGroups.visibility = View.GONE
             mWebView.visibility = View.GONE
+            appendToWebView(content, 0, m_curSessionId)
+
         }
     }
-    fun updateNagivateResponseTextInfo(content:String, idx: Int) {
+    fun updatePositiveResponseTextInfo(content:String, idx: Int) {
         mHandler.post {
             if (idx == 0) {
                 m_curSessionId++;

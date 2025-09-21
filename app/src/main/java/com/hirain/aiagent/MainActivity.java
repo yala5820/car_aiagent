@@ -233,7 +233,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         else {
-            appendNagivateResponseToChat("AI: ", aiResponse.aiMessage().text());
+            appendPositiveResponseToChat("AI: ", aiResponse.aiMessage().text());
         }
     }
     private void processUserRequest(String userMessage) {
@@ -255,31 +255,31 @@ public class MainActivity extends AppCompatActivity {
 
         });
     }
-    private void appendPositiveResponse(String message) {
+    private void appendNagativeResponse(String message) {
         mainHandler.post(() -> {
 
-            mAIAgentBinder.updatePositiveResponse(message);
+            mAIAgentBinder.updateNagativeResponse(message);
 
 
         });
     }
-    private void appendNagivateResponseToChat(String prefix, String message) {
+    private void appendPositiveResponseToChat(String prefix, String message) {
         mainHandler.post(() -> {
 
-            mAIAgentBinder.updateNagivateResponse("\n", 0);
+            mAIAgentBinder.updatePositiveResponse("\n", 0);
             String line = "";
             int cnt = 0;
             String completeMsg = prefix + message;
             for (int idx = 0;  idx <completeMsg.length(); idx ++) {
                 line += completeMsg.substring(idx, idx + 1);
                 if (line.length() > 10) {
-                    mAIAgentBinder.updateNagivateResponse(line, cnt);
+                    mAIAgentBinder.updatePositiveResponse(line, cnt);
                     cnt++;
                     line = "";
                 }
             }
             if (line.length() > 0) {
-                mAIAgentBinder.updateNagivateResponse(line, cnt);
+                mAIAgentBinder.updatePositiveResponse(line, cnt);
             }
 
         });

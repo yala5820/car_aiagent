@@ -66,7 +66,7 @@ class AIAgentService : Service() {
     private lateinit var floatAIAgentView: AIAgentWindowView
     private lateinit var layoutAIAgentParams: WindowManager.LayoutParams
     private val mIAIAgentAidlListeners:  MutableMap<IAIAgentAidlListener, DeathRecipient> = mutableMapOf()
-
+    private var mLastPostivePrompt: String = ""
     private val mBinder: AIAgentService.AIAgentBinder = AIAgentBinder()
     private var m_connected = false
     private var chatMemory: ChatMemory? = null
@@ -175,13 +175,12 @@ class AIAgentService : Service() {
             Log.d("TAG", "vl = " + vl)
             if (vl != null) {
                 var airesponse = vl!!.front_camera_interaction("你必须从<scene>1.大雪天气 2.儿童睡着 3.浓烟 4.施工绕行</scene>之间定义的场景列表中选择当前的场景，禁止虚构其它场景。\n如果你判断当前不属于其中任意一种场景，直接使用不是作为回复。\n你必须严格按照<normal-reply>不是</normal-reply>之间的Json对象格式示例进行回复。\n任何情况下你的回复都必须是一个Json对象，Json对象内容严格按照上述约束。\n", p.getValue())
-              //  appendNagivateResponseToChat("AI: ",  airesponse)
                 if (airesponse.toString().contains("不是")) {
                     Log.d("TAG", "非场景")
                 }
                 else {
                    // Log.d("TAG","airesponse.toString() = " + airesponse.toString());
-                    processUserRequest(airesponse.toString() + ", 请执行车辆工具,并以检测到某某，且不要带场景这两个字作为开头，简要总结执行内容");
+                    processPositiveRequest(airesponse.toString() + ", 请执行车辆工具,并以检测到某某，且不要带场景这两个字作为开头，简要总结执行内容");
                 }
             }
        //     writeFile(filepath, p.getValue());
@@ -365,11 +364,11 @@ class AIAgentService : Service() {
         fun updateRequest(content: String, idx: Int) {
             AIUpdateRequestText(content, idx)
         }
-        fun updateNagivateResponse(content: String, idx: Int) {
-            AIUpdateNagivateResponseText(content, idx)
+        fun updatePositiveResponse(content: String, idx: Int) {
+            AIUpdatePositiveResponseText(content, idx)
         }
-        fun updatePositiveResponse(content: String) {
-            AIUpdatePositiveResponse(content)
+        fun updateNagativeResponse(content: String) {
+            AIUpdateNagativeResponse(content)
         }
 
         @Throws(RemoteException::class)
@@ -377,7 +376,7 @@ class AIAgentService : Service() {
 
             appendToChat("$arg")
             mainHandler.postDelayed({
-                Thread { processUserRequest(arg!!) }.start()
+                Thread { processNagativeRequest(arg!!) }.start()
             }, 1000);
 
             return 0
@@ -424,19 +423,19 @@ class AIAgentService : Service() {
     {
         floatAIAgentView.updateRequestTextInfo(content, idx)
     }
-    fun AIUpdateNagivateResponseText(content: String, idx: Int)
+    fun AIUpdatePositiveResponseText(content: String, idx: Int)
     {
-        floatAIAgentView.updateNagivateResponseTextInfo(content, idx)
+        floatAIAgentView.updatePositiveResponseTextInfo(content, idx)
     }
-    fun AIUpdatePositiveResponse(content: String)
+    fun AIUpdateNagativeResponse(content: String)
     {
-        floatAIAgentView.updatePositiveResponse(content)
+        floatAIAgentView.updateNagativeResponse(content)
     }
     override fun onBind(intent: Intent?): IBinder? {
         Log.d("TAG", "onBind")
         return mBinder
     }
-    private fun chatWithVehicleStatus() {
+    private fun positiveChatWithVehicleStatus() {
         val tmp: MutableList<ChatMessage> = ArrayList()
         tmp.add(UserMessage.userMessage("车辆状态", getVehicleStatus()))
         tmp.addAll(chatMemory!!.messages())
@@ -445,7 +444,19 @@ class AIAgentService : Service() {
             .toolSpecifications(mergedTools)
             .build()
         val aiResponse = model!!.chat(request)
-        processAiResponse(aiResponse)
+        processPositiveAiResponse(aiResponse)
+    }
+
+    private fun nagativeChatWithVehicleStatus() {
+        val tmp: MutableList<ChatMessage> = ArrayList()
+        tmp.add(UserMessage.userMessage("车辆状态", getVehicleStatus()))
+        tmp.addAll(chatMemory!!.messages())
+        val request = ChatRequest.builder()
+            .messages(tmp)
+            .toolSpecifications(mergedTools)
+            .build()
+        val aiResponse = model!!.chat(request)
+        processNagativeAiResponse(aiResponse)
     }
 
     private fun getVehicleStatus(): String {
@@ -494,7 +505,7 @@ class AIAgentService : Service() {
         return "无效的工具调用。"
     }
 
-    private fun processAiResponse(aiResponse: ChatResponse) {
+    private fun processPositiveAiResponse(aiResponse: ChatResponse) {
         val aiMessage = aiResponse.aiMessage()
         chatMemory!!.add(aiMessage)
         if (aiMessage.hasToolExecutionRequests()) {
@@ -510,19 +521,48 @@ class AIAgentService : Service() {
                 .toolSpecifications(mergedTools)
                 .build()
             val aiResponse_with_tool = model!!.chat(request_with_tool)
-            processAiResponse(aiResponse_with_tool)
+            processPositiveAiResponse(aiResponse_with_tool)
         }
         else {
-            appendNagivateResponseToChat("AI: ", aiResponse.aiMessage().text())
+            appendPositiveResponseToChat("AI: ", aiResponse.aiMessage().text())
         }
     }
-
-    private fun processUserRequest(userMessage: String) {
+    private fun processNagativeAiResponse(aiResponse: ChatResponse) {
+        val aiMessage = aiResponse.aiMessage()
+        chatMemory!!.add(aiMessage)
+        if (aiMessage.hasToolExecutionRequests()) {
+            val tooExecutionRequests = aiMessage.toolExecutionRequests()
+            for (toolrequest in tooExecutionRequests) {
+                val result = handleTools(toolrequest)
+                val toolExecutionResultMessage =
+                    ToolExecutionResultMessage.from(toolrequest, result)
+                chatMemory!!.add(toolExecutionResultMessage)
+            }
+            val request_with_tool = ChatRequest.builder()
+                .messages(chatMemory!!.messages())
+                .toolSpecifications(mergedTools)
+                .build()
+            val aiResponse_with_tool = model!!.chat(request_with_tool)
+            processNagativeAiResponse(aiResponse_with_tool)
+        }
+        else {
+            appendNagativeResponse("AI: " + aiResponse.aiMessage().text())
+        }
+    }
+    private fun processNagativeRequest(userMessage: String) {
         try {
             chatMemory!!.add(UserMessage.userMessage(userMessage))
-            chatWithVehicleStatus()
+            nagativeChatWithVehicleStatus()
         } catch (e: java.lang.Exception) {
-            appendNagivateResponseToChat("", "系统: 请求失败 - " + e.message)
+            appendNagativeResponse("系统: 请求失败 - " + e.message)
+        }
+    }
+    private fun processPositiveRequest(userMessage: String) {
+        try {
+            chatMemory!!.add(UserMessage.userMessage(userMessage))
+            positiveChatWithVehicleStatus()
+        } catch (e: java.lang.Exception) {
+            appendPositiveResponseToChat("", "系统: 请求失败 - " + e.message)
         }
     }
 
@@ -565,30 +605,36 @@ class AIAgentService : Service() {
             }, 1000)
         }
     }
-    private fun appendPositiveResponse(message: String) {
+    private fun appendNagativeResponse(message: String) {
         mainHandler.post {
             mManager?.speak(message);
 
-            AIUpdatePositiveResponse(message)
+            AIUpdateNagativeResponse(message)
         }
     }
-    private fun appendNagivateResponseToChat(prefix:String, message: String) {
+    private fun appendPositiveResponseToChat(prefix:String, message: String) {
         mainHandler.post {
-            AIUpdateNagivateResponseText("\n", 0)
-            mManager?.speak(message);
-            var line: String = ""
-            var cnt: Int = 0;
-            var completeMsg = prefix + message
-            for (idx in 0..<completeMsg.length) {
-                line += completeMsg.substring(idx, idx + 1)
-                if (line.length > 10) {
-                    AIUpdateNagivateResponseText(line, cnt);
-                    cnt++;
-                    line = "";
-                }
+            if (mLastPostivePrompt == message) {
+                Log.d("TAG", "same message！！！！！！！！！！！！！！！！！！！！！")
             }
-            if (line.length > 0)
-                AIUpdateNagivateResponseText(line, cnt);
+            else {
+                mLastPostivePrompt = message
+                AIUpdatePositiveResponseText("\n", 0)
+                mManager?.speak(message);
+                var line: String = ""
+                var cnt: Int = 0;
+                var completeMsg = prefix + message
+                for (idx in 0..<completeMsg.length) {
+                    line += completeMsg.substring(idx, idx + 1)
+                    if (line.length > 10) {
+                        AIUpdatePositiveResponseText(line, cnt);
+                        cnt++;
+                        line = "";
+                    }
+                }
+                if (line.length > 0)
+                    AIUpdatePositiveResponseText(line, cnt);
+            }
         }
     }
 
