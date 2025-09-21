@@ -501,7 +501,6 @@ class AIAgentService : Service() {
             val tooExecutionRequests = aiMessage.toolExecutionRequests()
             for (toolrequest in tooExecutionRequests) {
                 val result = handleTools(toolrequest)
-              //  appendNagivateResponseToChat("Tools: " + "工具", "[" + toolrequest.name() + toolrequest.arguments() + "] 执行中")
                 val toolExecutionResultMessage =
                     ToolExecutionResultMessage.from(toolrequest, result)
                 chatMemory!!.add(toolExecutionResultMessage)
