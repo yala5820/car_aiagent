@@ -145,6 +145,7 @@ public class MainActivity extends AppCompatActivity {
     }
     private void onSendClick(View view) {
         String inputText = userInput.getText().toString().trim();
+        Log.d(TAG, "onSendClick inputText = " + inputText);
         if (!inputText.isEmpty()) {
             appendToChat( inputText);
             userInput.setText("");
@@ -161,6 +162,7 @@ public class MainActivity extends AppCompatActivity {
                 .toolSpecifications(mergedTools)
                 .build();
         ChatResponse aiResponse = model.chat(request);
+
         processAiResponse(aiResponse);
     }
     private String getVehicleStatus() {
@@ -237,10 +239,12 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     private void processUserRequest(String userMessage) {
+        Log.d(TAG, "Activity processUserRequest userMessage =" + userMessage);
         try {
             chatMemory.add(UserMessage.userMessage(userMessage));
             chatWithVehicleStatus();
         } catch (Exception e) {
+            Log.d(TAG, "e.getMessage() =" + e.getMessage());
             appendToChat("系统: 请求失败 - " + e.getMessage());
         }
     }

@@ -192,15 +192,17 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 mWebView.evaluateJavascript(
                     "(function(){return document.body.scrollHeight;})();",
                     ValueCallback<String> { value -> // 这里得到的value是字符串形式的数字，例如"1000"，注意可能是浮点数，需要转换
-                        var heightstr = value.toFloat();
-                        if (heightstr != null) {
-                            val height = heightstr.toInt() // 转换为整数高度
-                            // 然后调整WebView的高度为height
-                            val params: ViewGroup.LayoutParams = mWebView.getLayoutParams()
-                            Log.d("TAG", " webview height = " + height)
-                          //  params.height = height
-                         //   mWebView.setLayoutParams(params)
-                        }
+                   /*     if (value != null) {
+                            var heightstr = value.toFloat();
+                            if (heightstr != null) {
+                                val height = heightstr.toInt() // 转换为整数高度
+                                // 然后调整WebView的高度为height
+                                val params: ViewGroup.LayoutParams = mWebView.getLayoutParams()
+                                Log.d("TAG", " webview height = " + height)
+                                // params.height = height
+                                // mWebView.setLayoutParams(params)
+                            }
+                        }*/
 
                     })
             }

@@ -11,6 +11,7 @@ import android.graphics.PixelFormat
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
 import android.os.IBinder.DeathRecipient
 import android.os.Looper
@@ -58,6 +59,7 @@ import java.time.Duration
 import java.util.TimeZone
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import java.util.stream.Collectors
 import java.util.stream.Stream
 
@@ -72,6 +74,9 @@ class AIAgentService : Service() {
     private var chatMemory: ChatMemory? = null
     private var model: ChatModel? = null
     private var vl: VlManager? = null
+    private var mWorkHandlerThread: HandlerThread? = null
+    private var mWorkHandler: Handler? = null
+
     private var mManager: VRServiceManager? = null
     private var mLastRequestAITimeStamp:Long = 0
     private val systemPrompt = """角色定义：
@@ -161,30 +166,46 @@ class AIAgentService : Service() {
 
 
     }
+
+    private fun createWorkThreadHandle() {
+        if (mWorkHandlerThread == null ) {
+            mWorkHandlerThread = HandlerThread("work_thread")
+            (mWorkHandlerThread as HandlerThread).start()
+            mWorkHandler = Handler(
+                (mWorkHandlerThread as HandlerThread).looper,
+                null
+            )
+        }
+    }
+    private fun ProcessCaptureGot(seqid: Int, mode: Int, p: CameraData) {
+
+        val filepath: String =
+            applicationContext!!.getExternalFilesDir(null).toString() + "/" + seqid + ".jpg"
+        Log.d("TAG", "filepath = $filepath")
+        Log.i(
+            "TAG",
+            "onCaptureGot seqid = " + seqid + " mode = " + mode + "  p = " + p.toString()
+        )
+        Log.d("TAG", "vl = " + vl)
+
+        if (vl != null) {
+            var airesponse = vl!!.front_camera_interactionPositive("你必须从<scene>1.大雪天气 2.儿童睡着 3.浓烟 4.施工绕行</scene>之间定义的场景列表中选择当前的场景，禁止虚构其它场景。\n如果你判断当前不属于其中任意一种场景，直接使用不是作为回复。\n你必须严格按照<normal-reply>不是</normal-reply>之间的Json对象格式示例进行回复。\n任何情况下你的回复都必须是一个Json对象，Json对象内容严格按照上述约束。\n", p.getValue())
+            if (airesponse.toString().contains("不是")) {
+                Log.d("TAG", "非场景")
+            }
+            else {
+                // Log.d("TAG","airesponse.toString() = " + airesponse.toString());
+                processPositiveRequest(airesponse.toString() + ", 请执行车辆工具,并以检测到某某，且不要带场景这两个字作为开头，简要总结执行内容");
+            }
+        }
+    }
     inner class CameraListener : ICameraServiceListener {
 
 
         override fun onCaptureGot(seqid: Int, mode: Int, p: CameraData) {
-            val filepath: String =
-                applicationContext!!.getExternalFilesDir(null).toString() + "/" + seqid + ".jpg"
-            Log.d("TAG", "filepath = $filepath")
-            Log.i(
-                "TAG",
-                "onCaptureGot seqid = " + seqid + " mode = " + mode + "  p = " + p.toString()
-            )
-            Log.d("TAG", "vl = " + vl)
-            if (vl != null) {
-                var airesponse = vl!!.front_camera_interaction("你必须从<scene>1.大雪天气 2.儿童睡着 3.浓烟 4.施工绕行</scene>之间定义的场景列表中选择当前的场景，禁止虚构其它场景。\n如果你判断当前不属于其中任意一种场景，直接使用不是作为回复。\n你必须严格按照<normal-reply>不是</normal-reply>之间的Json对象格式示例进行回复。\n任何情况下你的回复都必须是一个Json对象，Json对象内容严格按照上述约束。\n", p.getValue())
-                if (airesponse.toString().contains("不是")) {
-                    Log.d("TAG", "非场景")
-                }
-                else {
-                   // Log.d("TAG","airesponse.toString() = " + airesponse.toString());
-                    processPositiveRequest(airesponse.toString() + ", 请执行车辆工具,并以检测到某某，且不要带场景这两个字作为开头，简要总结执行内容");
-                }
+            mWorkHandler!!.post {
+                ProcessCaptureGot(seqid, mode, p)
             }
-       //     writeFile(filepath, p.getValue());
-       //     val bitmap = BitmapFactory.decodeByteArray(p.getValue(), 0, p.getValue().size)
         }
 
         override fun onCameraServiceDisconnected() {
@@ -242,7 +263,7 @@ class AIAgentService : Service() {
 
         Log.d("TAG", "FloatWindowService oncreate")
 
-
+        createWorkThreadHandle()
         val channel =
             NotificationChannel("my_channel_01", "Channel One", NotificationManager.IMPORTANCE_HIGH)
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
@@ -376,7 +397,9 @@ class AIAgentService : Service() {
 
             appendToChat("$arg")
             mainHandler.postDelayed({
-                Thread { processNagativeRequest(arg!!) }.start()
+                mWorkHandler!!.post {
+                    processNagativeRequest(arg!!)
+                }
             }, 1000);
 
             return 0
@@ -551,6 +574,7 @@ class AIAgentService : Service() {
     }
     private fun processNagativeRequest(userMessage: String) {
         try {
+            Log.d("TAG", "processNagativeRequest userMessage =" + userMessage);
             chatMemory!!.add(UserMessage.userMessage(userMessage))
             nagativeChatWithVehicleStatus()
         } catch (e: java.lang.Exception) {

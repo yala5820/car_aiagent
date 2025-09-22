@@ -1,5 +1,7 @@
 package com.hirain.aiagent.vlmanager;
 
+import static androidx.fragment.app.FragmentManager.TAG;
+
 import android.content.Context;
 import android.util.Base64;
 import android.util.Log;
@@ -28,6 +30,7 @@ import langchain4j.http_client_ok.*;
 public class VlManager {
     private Context ctx;
     private ChatModel vlModel;
+    private byte[] mFrontImage = null;
     private final String front_camera_system_msg =
         "你是一个运行在智能座舱中的多模态视觉问答助手，名为'窗景随问'。"
         + "你的任务是根据车辆前置/舱内摄像头实时拍摄的画面（图像模态）和驾驶员的自然语言提问（文本模态），"
@@ -92,8 +95,14 @@ public class VlManager {
         }
     }
 
+    @Tool("用于解决车主提出的前方视野相关问题，该工具可以获取前置舱外摄像头实时图像数据，并根据图像数据与车主的文本输入，给出车主回应。")
+    public String front_camera_interaction(@P(value = "经过处理后的车主文本输入，尽量简洁清晰")String text) {
 
-    public String front_camera_interaction(String text) {
+        Log.d(TAG, "front_camera_interaction xxxxxxxxxyyyywwwwwwwwwwwwwwwwwwwwwwwwww");
+        if (mFrontImage != null) {
+            return front_camera_interactionPositive(text, mFrontImage);
+        }
+        Log.d(TAG, "front_camera_interaction use audi image");
 
         InputStream inputStream = null;
         ByteArrayOutputStream byteOutputStream = null;
@@ -108,7 +117,7 @@ public class VlManager {
 
             byte[] bytes = byteOutputStream.toByteArray();
 
-            return front_camera_interaction(text, bytes);
+            return front_camera_interactionPositive(text, bytes);
 
         } catch (IOException e) {
             e.printStackTrace();
@@ -132,13 +141,13 @@ public class VlManager {
 
 
     }
-    @Tool("用于解决车主提出的前方视野相关问题，该工具可以获取前置舱外摄像头实时图像数据，并根据图像数据与车主的文本输入，给出车主回应。")
-    public String front_camera_interaction(@P(value = "经过处理后的车主文本输入，尽量简洁清晰")String text, byte[] byteArray) {
-        Log.d("TAG", "front_camera_interaction text0 = " + text);
 
+    public String front_camera_interactionPositive(@P(value = "经过处理后的车主文本输入，尽量简洁清晰")String text, byte[] byteArray) {
+        Log.d("TAG", "front_camera_interactionPositive tool  imagesize = " +  byteArray.length);
+        mFrontImage = byteArray.clone();
         String img_b64 = getBase64(ctx, byteArray);
         SystemMessage systemmsg = SystemMessage.from(front_camera_system_msg);
-        Log.d("TAG", "front_camera_interaction text = " + text);
+   //     Log.d("TAG", "front_camera_interaction text = " + text);
 
         UserMessage usrmsg = UserMessage.from(
                 TextContent.from(text),
