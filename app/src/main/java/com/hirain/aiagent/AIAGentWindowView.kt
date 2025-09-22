@@ -68,7 +68,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
         mHandler.post {
             val frameLayout: LinearLayout = findViewById(R.id.aiagentlinearLayout)
-
+            Log.d("TAG", "updateWindowVisibility mCount= " + mCount)
             val params = layoutParams as WindowManager.LayoutParams
             var curHeight = params.height
             var curWidth = params.width
@@ -107,14 +107,14 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
                     frameLayout.background = layerDrawable
                 }
-
+                mCount --
             }
 
             windowManager.updateViewLayout(m_view, params)
 
             // Kotlin 示例
 
-            mCount--;
+
         }
 
     }
@@ -124,18 +124,18 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             if (mLogCnt % 100 == 0) {
              //   Log.d("TAG", "appendToWebView: text  = " + text + " idx = " + idx);
             }
-            mCount = 8 //5秒后消失
+            mCount = 5 //5秒后消失
 
             if (isFirstUpdate) {
                 Log.d("TAG", "appendToWebView: isFirstUpdate")
                 loadInitialHtml()
-                mHandler.postDelayed({ appendTextViaJs(text, sessionid) }, 300)
+                mHandler.post{ appendTextViaJs(text, sessionid) }
             } else {
                 if (mLogCnt % 100 == 0 ) {
                  //   Log.d("TAG", "appendToWebView: else --- " + text);
                 }
                 var delay:Long = (100*idx).toLong()
-                mHandler.postDelayed({ appendTextViaJs(text, sessionid) }, delay)
+                mHandler.post{ appendTextViaJs(text, sessionid) }
 
 
             }
@@ -447,7 +447,6 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     }
     fun updateRequestTextProcuder(visible:Boolean) {
         mHandler.post {
-            mCount = 8
             if (visible) {
                 mProcuderView.visibility = View.VISIBLE
             }
@@ -459,7 +458,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     }
     fun updateNagativeResponse(content:String) {
         mHandler.post {
-            mCount = 15 //5秒后消失
+   
             mBtnGroups.visibility = View.GONE
             mWebView.visibility = View.GONE
             appendToWebView(content, 0, m_curSessionId)

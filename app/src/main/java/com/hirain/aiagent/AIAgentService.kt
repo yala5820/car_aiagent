@@ -194,6 +194,7 @@ class AIAgentService : Service() {
                 Log.d("TAG", "非场景")
             }
             else {
+                cleanChat()
                 // Log.d("TAG","airesponse.toString() = " + airesponse.toString());
                 processPositiveRequest(airesponse.toString() + ", 请执行车辆工具,并以检测到某某为最开头，详细列出执行的内容，但不要列出工具名称,且不要带场景这两个字作为开头，检测到某某只需要出现一次");
             }
@@ -569,7 +570,7 @@ class AIAgentService : Service() {
             processNagativeAiResponse(aiResponse_with_tool)
         }
         else {
-            appendNagativeResponse("AI: " + aiResponse.aiMessage().text())
+            appendNagativeResponse("AI: ", aiResponse.aiMessage().text())
         }
     }
     private fun processNagativeRequest(userMessage: String) {
@@ -578,7 +579,7 @@ class AIAgentService : Service() {
             chatMemory!!.add(UserMessage.userMessage(userMessage))
             nagativeChatWithVehicleStatus()
         } catch (e: java.lang.Exception) {
-            appendNagativeResponse("系统: 请求失败 - " + e.message)
+            appendNagativeResponse("系统: 请求失败 - ", e.message + "")
         }
     }
     private fun processPositiveRequest(userMessage: String) {
@@ -591,6 +592,15 @@ class AIAgentService : Service() {
     }
 
     private fun cleanChat() {
+        mainHandler.post {
+            AIUpdateRequestProcuder(
+                false
+            )
+            AIUpdateRequestText(
+                "", 0
+            )
+        }
+
     }
     private fun appendToChat(message: String) {
         val timeMillis = System.currentTimeMillis()
@@ -629,11 +639,11 @@ class AIAgentService : Service() {
             }, 1000)
         }
     }
-    private fun appendNagativeResponse(message: String) {
+    private fun appendNagativeResponse(prefix:String, message: String) {
         mainHandler.post {
             mManager?.speak(message);
 
-            AIUpdateNagativeResponse(message)
+            AIUpdateNagativeResponse(prefix + message)
         }
     }
     private fun appendPositiveResponseToChat(prefix:String, message: String) {
