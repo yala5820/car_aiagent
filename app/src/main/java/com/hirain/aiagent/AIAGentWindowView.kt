@@ -124,7 +124,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             if (mLogCnt % 100 == 0) {
              //   Log.d("TAG", "appendToWebView: text  = " + text + " idx = " + idx);
             }
-            mCount = 15 //5秒后消失
+            mCount = 8 //5秒后消失
 
             if (isFirstUpdate) {
                 Log.d("TAG", "appendToWebView: isFirstUpdate")
@@ -214,7 +214,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
 
     private fun loadInitialHtml() {
-        val initialHtml = "<html><body style=\"font-family: sans-serif; font-size: 20px;padding: 16px;\">" +
+        val initialHtml = "<html><body style=\"font-family: sans-serif; font-size: 35px;padding: 16px;\">" +
                 "<div id=\"content\"></div>" +
                 "<script>" +
                 "function appendText(text) {" +
@@ -447,7 +447,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     }
     fun updateRequestTextProcuder(visible:Boolean) {
         mHandler.post {
-            mCount = 15
+            mCount = 8
             if (visible) {
                 mProcuderView.visibility = View.VISIBLE
             }

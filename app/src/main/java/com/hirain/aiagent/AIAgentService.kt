@@ -195,7 +195,7 @@ class AIAgentService : Service() {
             }
             else {
                 // Log.d("TAG","airesponse.toString() = " + airesponse.toString());
-                processPositiveRequest(airesponse.toString() + ", 请执行车辆工具,并以检测到某某，且不要带场景这两个字作为开头，简要总结执行内容");
+                processPositiveRequest(airesponse.toString() + ", 请执行车辆工具,并以检测到某某为最开头，详细列出执行的内容，但不要列出工具名称,且不要带场景这两个字作为开头，检测到某某只需要出现一次");
             }
         }
     }

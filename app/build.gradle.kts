@@ -49,7 +49,9 @@ android {
              signingConfig = signingConfigs.getByName("debug")
         }
     }
-
+buildFeatures{
+    aidl = true
+}
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -63,6 +65,7 @@ android {
 }
 
 dependencies {
+    implementation ("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
     implementation("org.slf4j:slf4j-api:2.0.9")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
