@@ -34,8 +34,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val activityManager = context.getSystemService(Activity.ACTIVITY_SERVICE) as ActivityManager
     private var mWebView: WebView = findViewById(R.id.responseWebView)
-    private var mBtnGroups: View = findViewById(R.id.btnslayout)
-    private var mBtnClean: Switch = findViewById(R.id.btncleanair)
+
     private var mInputView: TextView = findViewById(R.id.inputtext)
     private var mProcuderView: TextView = findViewById(R.id.proceduer)
 
@@ -58,9 +57,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 e.printStackTrace() // 或者其他错误处理方式
             }
         }, 0, 1, TimeUnit.SECONDS) // 每1秒执行一次
-        mBtnClean.setOnClickListener{
-            Log.d("TAG", "home0 onclick")
-        }
+
     }
 
     private fun updateWindowVisibility()  {
@@ -85,28 +82,16 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 m_view.visibility = View.VISIBLE;
                 params.width = WindowManager.LayoutParams.WRAP_CONTENT
 
-                if (mBtnGroups.visibility == View.GONE) {
-                    params.height = 1252;//WindowManager.LayoutParams.WRAP_CONTENT
-                    val backgroundDrawable = resources.getDrawable(R.drawable.aiagentwindowbigbg, null)
+                params.height = 1252;//WindowManager.LayoutParams.WRAP_CONTENT
+                val backgroundDrawable = resources.getDrawable(R.drawable.aiagentwindowbigbg, null)
 
-                    val layerDrawable = LayerDrawable(arrayOf(backgroundDrawable))
-                    layerDrawable.setLayerInset(0, 0, 0, 0, 0) // 无边距填充
-                    windowManager.updateViewLayout(m_view, params)
-                    frameLayout.background = layerDrawable
+                val layerDrawable = LayerDrawable(arrayOf(backgroundDrawable))
+                layerDrawable.setLayerInset(0, 0, 0, 0, 0) // 无边距填充
+                windowManager.updateViewLayout(m_view, params)
+                frameLayout.background = layerDrawable
 
 
-                }
-                else {
-                    params.height = 782;//WindowManager.LayoutParams.WRAP_CONTENT
-                    val backgroundDrawable = resources.getDrawable(R.drawable.aiagentwindowsmallbg, null)
 
-                    val layerDrawable = LayerDrawable(arrayOf(backgroundDrawable))
-                    layerDrawable.setLayerInset(0, 0, 0, 0, 0) // 无边距填充
-
-                    windowManager.updateViewLayout(m_view, params)
-
-                    frameLayout.background = layerDrawable
-                }
                 mCount --
             }
 
@@ -158,16 +143,12 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             .replace("\r", "\\r")
 
         // 使用JavaScript接口追加内容
-        if (mBtnGroups.visibility == View.GONE) {
             mWebView.visibility = View.VISIBLE
             mWebView!!.evaluateJavascript(
                 "appendText(\"$escapedText\");",
                 null
             )
-        }
-        else {
-            mWebView.visibility = View.GONE
-        }
+
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -468,7 +449,6 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     fun updateNagativeResponse(content:String) {
         mHandler.post {
 
-            mBtnGroups.visibility = View.GONE
             mWebView.visibility = View.GONE
             appendToWebView(content, 0, m_curSessionId)
 
@@ -479,7 +459,6 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             if (idx == 0) {
                 m_curSessionId++;
             }
-            mBtnGroups.visibility = View.GONE
             mWebView.visibility = View.VISIBLE
             appendToWebView(content, idx, m_curSessionId)
 

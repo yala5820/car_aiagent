@@ -673,7 +673,10 @@ class AIAgentService : Service() {
     private fun appendNagativeResponse(prefix:String, message: String) {
         mainHandler.post {
             Log.d("TAG", "appendNagativeResponse message =" + message)
-            AIUpdateNagativeResponse(prefix + message)
+          //  AIUpdateNagativeResponse("\n")
+
+            AIUpdateNagativeResponse(prefix + message + "\n")
+
             mManager?.speak(message);
 
         }
@@ -692,7 +695,6 @@ class AIAgentService : Service() {
             }
             else {
                 mLastPostivePrompt = startMessage
-                AIUpdatePositiveResponseText("\n", 0)
                 mManager?.speak(message);
                 var line: String = ""
                 var cnt: Int = 0;
@@ -706,7 +708,8 @@ class AIAgentService : Service() {
                     }
                 }
                 if (line.length > 0)
-                    AIUpdatePositiveResponseText(line, cnt);
+                    AIUpdatePositiveResponseText(line + "\n", cnt );
+
             }
         }
     }
