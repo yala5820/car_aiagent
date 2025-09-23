@@ -124,7 +124,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             if (mLogCnt % 100 == 0) {
              //   Log.d("TAG", "appendToWebView: text  = " + text + " idx = " + idx);
             }
-            mCount = 5 //5秒后消失
+            mCount = 30 //5秒后消失
 
             if (isFirstUpdate) {
                 Log.d("TAG", "appendToWebView: isFirstUpdate")
@@ -440,8 +440,17 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
         mWebView!!.loadDataWithBaseURL(null, myHtml, "text/html", "UTF-8", null)
     }
+    fun hideFloatingWindow(var1:Int) {
+        mHandler.post {
+            mCount = 0;
+
+        }
+    }
     fun updateRequestTextInfo(content:String, idx: Int) {
         mHandler.post {
+            if (content.length > 0) {
+                mCount = 30;
+            }
             mInputView.text = content
         }
     }
@@ -458,7 +467,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     }
     fun updateNagativeResponse(content:String) {
         mHandler.post {
-   
+
             mBtnGroups.visibility = View.GONE
             mWebView.visibility = View.GONE
             appendToWebView(content, 0, m_curSessionId)

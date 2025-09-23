@@ -22,6 +22,7 @@ import android.util.Log
 import android.view.Display
 import android.view.Gravity
 import android.view.WindowManager
+import com.hirain.adapter.vr.VRListener
 import com.hirain.adapter.vr.VRServiceManager
 import com.hirain.aiagent.vehicleacmanager.VehicleAcManager
 import com.hirain.aiagent.vehicledoormanager.VehicleDoorManager
@@ -59,7 +60,6 @@ import java.time.Duration
 import java.util.TimeZone
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 import java.util.stream.Collectors
 import java.util.stream.Stream
 
@@ -196,12 +196,26 @@ class AIAgentService : Service() {
             else {
                 cleanChat()
                 // Log.d("TAG","airesponse.toString() = " + airesponse.toString());
-                processPositiveRequest(airesponse.toString() + ", 请执行车辆工具,并以检测到某某为最开头，详细列出执行的内容，但不要列出工具名称,且不要带场景这两个字作为开头，检测到某某只需要出现一次");
+                processPositiveRequest(airesponse.toString() + ", 请执行车辆工具,并以检测到某某为最开头，尽量详细列出执行的内容，但不要列出工具名称,且不要带场景这两个字作为开头，检测到某某只需要出现一次，总字数在100字以内");
+            }
+        }
+    }
+    inner class AIVRListener : VRListener {
+
+        override fun onAsrResult(var1: String?) {
+
+        }
+
+        override fun onTTsState(var1: Int) {
+           Log.d("TAG", "onTTsState var1 = " + var1)
+            if (var1 == 2 ) {
+                mainHandler.post {
+                    hideAIAgent(var1)
+                }
             }
         }
     }
     inner class CameraListener : ICameraServiceListener {
-
 
         override fun onCaptureGot(seqid: Int, mode: Int, p: CameraData) {
             mWorkHandler!!.post {
@@ -252,6 +266,8 @@ class AIAgentService : Service() {
         }
         return 0
     }
+    private val m_vrlistener: AIVRListener = AIVRListener()
+
     private val m_listener: ICameraServiceListener = CameraListener()
     override fun onCreate() {
         super.onCreate()
@@ -316,6 +332,7 @@ class AIAgentService : Service() {
         vl = VlManager(this)
       //  Thread { processUserRequest("Hello World") }.start()
         mManager = VRServiceManager.getInstance(this)
+        mManager?.initCallback(m_vrlistener)
 
     }
 
@@ -330,6 +347,9 @@ class AIAgentService : Service() {
         // 注册广播接收器
 
         return START_STICKY
+    }
+    private fun hideAIAgent(var1:Int) {
+        floatAIAgentView.hideFloatingWindow(var1)
     }
 
     private fun showAIAgent(windowmanager: WindowManager) {
@@ -395,13 +415,28 @@ class AIAgentService : Service() {
 
         @Throws(RemoteException::class)
         override fun requestAI(arg: String?): Int {
+            if (arg.equals("@#%^StartListen")) {
+                mainHandler.post {
+                    AIUpdateRequestProcuder(
+                        false
+                    )
+                    AIUpdateRequestText(
+                        "聆听中...", 0
+                    )
 
-            appendToChat("$arg")
-            mainHandler.postDelayed({
-                mWorkHandler!!.post {
-                    processNagativeRequest(arg!!)
                 }
-            }, 1000);
+
+            }
+            else {
+                appendToChat("$arg")
+                mainHandler.post{
+                    mWorkHandler!!.post {
+                        processNagativeRequest(arg!!)
+                    }
+                }
+            }
+
+
 
             return 0
         }
@@ -443,6 +478,7 @@ class AIAgentService : Service() {
     {
         floatAIAgentView.updateRequestTextProcuder(visible)
     }
+
     fun AIUpdateRequestText(content: String, idx: Int)
     {
         floatAIAgentView.updateRequestTextInfo(content, idx)
@@ -472,6 +508,8 @@ class AIAgentService : Service() {
     }
 
     private fun nagativeChatWithVehicleStatus() {
+        Log.d("TAG", "nagativeChatWithVehicleStatus begin" );
+
         val tmp: MutableList<ChatMessage> = ArrayList()
         tmp.add(UserMessage.userMessage("车辆状态", getVehicleStatus()))
         tmp.addAll(chatMemory!!.messages())
@@ -481,6 +519,8 @@ class AIAgentService : Service() {
             .build()
         val aiResponse = model!!.chat(request)
         processNagativeAiResponse(aiResponse)
+        Log.d("TAG", "nagativeChatWithVehicleStatus end" );
+
     }
 
     private fun getVehicleStatus(): String {
@@ -552,8 +592,11 @@ class AIAgentService : Service() {
         }
     }
     private fun processNagativeAiResponse(aiResponse: ChatResponse) {
+        Log.d("TAG", "processNagativeAiResponse begin" );
+
         val aiMessage = aiResponse.aiMessage()
         chatMemory!!.add(aiMessage)
+
         if (aiMessage.hasToolExecutionRequests()) {
             val tooExecutionRequests = aiMessage.toolExecutionRequests()
             for (toolrequest in tooExecutionRequests) {
@@ -572,12 +615,16 @@ class AIAgentService : Service() {
         else {
             appendNagativeResponse("AI: ", aiResponse.aiMessage().text())
         }
+        Log.d("TAG", "processNagativeAiResponse end" );
+
     }
     private fun processNagativeRequest(userMessage: String) {
         try {
-            Log.d("TAG", "processNagativeRequest userMessage =" + userMessage);
+            Log.d("TAG", "processNagativeRequest begin userMessage =" + userMessage);
             chatMemory!!.add(UserMessage.userMessage(userMessage))
             nagativeChatWithVehicleStatus()
+            Log.d("TAG", "processNagativeRequest end" );
+
         } catch (e: java.lang.Exception) {
             appendNagativeResponse("系统: 请求失败 - ", e.message + "")
         }
@@ -607,52 +654,44 @@ class AIAgentService : Service() {
         var delta = timeMillis - mLastRequestAITimeStamp
         Log.d("TAG", "appentToChat delta = " + delta)
         mLastRequestAITimeStamp = timeMillis
-        mainHandler.post {
-            AIUpdateRequestProcuder(
-                false
+
+        mainHandler.post {//显示说话内容
+            AIUpdateRequestText(
+                message, 0
             )
         }
-        if (delta < 10000) {
-            mainHandler.post {
-                AIUpdateRequestText(
-                    message, 0
-                )
-            }
+        mainHandler.postDelayed({
+            AIUpdateRequestProcuder(
+                true
+            )
+        }, 1000)
 
-        }
-        else {
-            mainHandler.post {
-                AIUpdateRequestText(
-                    "聆听中...", 0
-                )
-            }
 
-            mainHandler.postDelayed({
-                AIUpdateRequestText(
-                    message, 0
-                )
-            }, 1000)
-            mainHandler.postDelayed({
-                AIUpdateRequestProcuder(
-                    true
-                )
-            }, 1000)
-        }
+
+
     }
     private fun appendNagativeResponse(prefix:String, message: String) {
         mainHandler.post {
+            Log.d("TAG", "appendNagativeResponse message =" + message)
+            AIUpdateNagativeResponse(prefix + message)
             mManager?.speak(message);
 
-            AIUpdateNagativeResponse(prefix + message)
         }
     }
     private fun appendPositiveResponseToChat(prefix:String, message: String) {
         mainHandler.post {
-            if (mLastPostivePrompt == message) {
+            var endPos = 7;
+            if (message.length < 7) {
+                endPos = message.length
+            }
+            var startMessage = message.substring(0,endPos)
+
+
+            if (mLastPostivePrompt == startMessage) {
                 Log.d("TAG", "same message！！！！！！！！！！！！！！！！！！！！！")
             }
             else {
-                mLastPostivePrompt = message
+                mLastPostivePrompt = startMessage
                 AIUpdatePositiveResponseText("\n", 0)
                 mManager?.speak(message);
                 var line: String = ""

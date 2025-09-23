@@ -10,6 +10,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
@@ -94,12 +96,43 @@ public class VlManager {
             }
         }
     }
+    public long writeFile(String path, byte[] data) {
+        File file = new File(path);
 
+        FileOutputStream out = null;
+        try {
+            File fileParent = file.getParentFile();
+            if (!fileParent.exists()) {
+                boolean isMkdirs = fileParent.mkdirs();
+                boolean isNewFile = file.createNewFile();
+                if (isMkdirs & isNewFile) {
+                    Log.d(TAG,"create new file success");
+                }
+            }
+
+            out = new FileOutputStream(file);
+            out.write(data);
+            out.close();
+            return data.length;
+        } catch (IOException ex) {
+            Log.d(TAG, "Failed to write data " + ex);
+        } finally {
+            try {
+                if (out != null) {
+                    out.close();
+                }
+            } catch (IOException ex) {
+                Log.d(TAG, "Failed to close file after write " + ex);
+            }
+        }
+        return 0;
+    }
     @Tool("用于解决车主提出的前方视野相关问题，该工具可以获取前置舱外摄像头实时图像数据，并根据图像数据与车主的文本输入，给出车主回应。")
     public String front_camera_interaction(@P(value = "经过处理后的车主文本输入，尽量简洁清晰")String text) {
 
         Log.d(TAG, "front_camera_interaction xxxxxxxxxyyyywwwwwwwwwwwwwwwwwwwwwwwwww");
         if (mFrontImage != null) {
+            //writeFile("/sdcard/Android/data/com.hirain.aiagent/files/xxx.jpg", mFrontImage);
             return front_camera_interactionPositive(text, mFrontImage);
         }
         Log.d(TAG, "front_camera_interaction use audi image");
@@ -143,7 +176,6 @@ public class VlManager {
     }
 
     public String front_camera_interactionPositive(@P(value = "经过处理后的车主文本输入，尽量简洁清晰")String text, byte[] byteArray) {
-        Log.d("TAG", "front_camera_interactionPositive tool  imagesize = " +  byteArray.length);
         mFrontImage = byteArray.clone();
         String img_b64 = getBase64(ctx, byteArray);
         SystemMessage systemmsg = SystemMessage.from(front_camera_system_msg);
@@ -153,7 +185,11 @@ public class VlManager {
                 TextContent.from(text),
                 ImageContent.from(img_b64, "image/jpeg")
         );
+        Log.d("TAG", "front_camera_interactionPositive tool ccccccccccccc imagesize1 = " +  byteArray.length);
+
         ChatResponse aiResponse = vlModel.chat(systemmsg, usrmsg);
+        Log.d("TAG", "front_camera_interactionPositive end ccccccccccccccccccc");
+
         return aiResponse.aiMessage().text();
     }
     public boolean hasTool(String toolname) {

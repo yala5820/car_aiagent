@@ -18,7 +18,7 @@
             android:layout_height="wrap_content"
 
             android:id="@+id/tipslayout"
-            android:layout_marginLeft="422px"
+            android:layout_marginLeft="500px"
             android:orientation="horizontal">
             <ImageView
                 android:id="@+id/roboticon"
