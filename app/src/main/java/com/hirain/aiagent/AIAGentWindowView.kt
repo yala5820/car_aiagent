@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -43,6 +44,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     private var mCount = 0;
     private var m_view: AIAgentWindowView =this
     private var mLogCnt = 100;
+    private var mWebViewHeight = 0
     private var m_curSessionId = 0;
     init {
 
@@ -57,7 +59,24 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 e.printStackTrace() // 或者其他错误处理方式
             }
         }, 0, 1, TimeUnit.SECONDS) // 每1秒执行一次
+        // 触摸拖拽
+        binding.root.setOnTouchListener { v, event ->
+            val params = layoutParams as WindowManager.LayoutParams
+            Log.d("TAG", "ontouch xxxxxxxxxxxxxx")
+            mHandler.post {
+                mCount = 0
+            }
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
 
+                    true
+                }
+                else -> true
+            }
+        }
     }
 
     private fun updateWindowVisibility()  {
@@ -81,14 +100,17 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             } else {
                 m_view.visibility = View.VISIBLE;
                 params.width = WindowManager.LayoutParams.WRAP_CONTENT
-
-                params.height = 1252;//WindowManager.LayoutParams.WRAP_CONTENT
+                var maxHeight = mWebViewHeight + 200
+                if (maxHeight > 1272) {
+                    maxHeight = 1272
+                }
+                params.height = maxHeight;//WindowManager.LayoutParams.WRAP_CONTENT
                 val backgroundDrawable = resources.getDrawable(R.drawable.aiagentwindowbigbg, null)
 
-                val layerDrawable = LayerDrawable(arrayOf(backgroundDrawable))
-                layerDrawable.setLayerInset(0, 0, 0, 0, 0) // 无边距填充
+               // val layerDrawable = LayerDrawable(arrayOf(backgroundDrawable))
+               // layerDrawable.setLayerInset(0, 0, 0, 0, 0) // 无边距填充
                 windowManager.updateViewLayout(m_view, params)
-                frameLayout.background = layerDrawable
+             //   frameLayout.background = layerDrawable
 
 
 
@@ -173,17 +195,19 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 mWebView.evaluateJavascript(
                     "(function(){return document.body.scrollHeight;})();",
                     ValueCallback<String> { value -> // 这里得到的value是字符串形式的数字，例如"1000"，注意可能是浮点数，需要转换
-                   /*     if (value != null) {
-                            var heightstr = value.toFloat();
+                        if (value != null) {
+                            var heightstr = value?.toFloat();
                             if (heightstr != null) {
-                                val height = heightstr.toInt() // 转换为整数高度
+                                val height = heightstr!!.toInt() // 转换为整数高度
                                 // 然后调整WebView的高度为height
                                 val params: ViewGroup.LayoutParams = mWebView.getLayoutParams()
                                 Log.d("TAG", " webview height = " + height)
-                                // params.height = height
-                                // mWebView.setLayoutParams(params)
+                             //    params.height = height
+                             //    mWebView.setLayoutParams(params)
+                                mWebViewHeight = height
+
                             }
-                        }*/
+                        }
 
                     })
             }
