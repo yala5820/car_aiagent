@@ -42,9 +42,9 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     private val mHandler: Handler = Handler(Looper.getMainLooper())
     private var isFirstUpdate = true
     private var mCount = 0;
+    private var mLogCnt = 0;
+    private var mLastHegight = 0;
     private var m_view: AIAgentWindowView =this
-    private var mLogCnt = 100;
-    private var mWebViewHeight = 0
     private var m_curSessionId = 0;
     init {
 
@@ -58,24 +58,14 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             } catch (e: Exception) {
                 e.printStackTrace() // 或者其他错误处理方式
             }
-        }, 0, 1, TimeUnit.SECONDS) // 每1秒执行一次
+        }, 0, 100, TimeUnit.MILLISECONDS) // 每1秒执行一次
         // 触摸拖拽
-        binding.root.setOnTouchListener { v, event ->
-            val params = layoutParams as WindowManager.LayoutParams
-            Log.d("TAG", "ontouch xxxxxxxxxxxxxx")
+        binding.root.setOnClickListener {
+            Log.d("TAG", "onClick xxxxxxxxxxxxxx")
             mHandler.post {
                 mCount = 0
             }
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
 
-                    true
-                }
-                else -> true
-            }
         }
     }
 
@@ -84,6 +74,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
         mHandler.post {
             val frameLayout: LinearLayout = findViewById(R.id.aiagentlinearLayout)
+            if (mLogCnt % 100 == 0)
             Log.d("TAG", "updateWindowVisibility mCount= " + mCount)
             val params = layoutParams as WindowManager.LayoutParams
             var curHeight = params.height
@@ -92,7 +83,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                // m_view.visibility = View.INVISIBLE;
                 params.height = 1
                 params.width = 1
-
+                mLastHegight = 0
                 loadInitialHtml()
                 mCount = 0;
 
@@ -100,10 +91,25 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             } else {
                 m_view.visibility = View.VISIBLE;
                 params.width = WindowManager.LayoutParams.WRAP_CONTENT
-                var maxHeight = mWebViewHeight + 200
+                var maxHeight = mWebView.measuredHeight
+                if (maxHeight < mWebView.contentHeight) {
+                    maxHeight = mWebView.contentHeight
+                }
+                if (maxHeight < mWebView.height) {
+                    maxHeight = mWebView.height
+                }
+                maxHeight  += 150
                 if (maxHeight > 1272) {
                     maxHeight = 1272
                 }
+                if (maxHeight > 150 && maxHeight < 250 && mLastHegight > maxHeight) {
+                    maxHeight = mLastHegight// 防抖
+                    Log.d("TAG", "avoid shake!!!!!!!!!!!! maxHeight = " + maxHeight)
+                }
+                mLastHegight = maxHeight
+
+                if (mLogCnt % 100 == 0)
+                Log.d("TAG", " webview height = " + mWebView.measuredHeight + "conentheight = " + mWebView.contentHeight + " height = " + mWebView.height + " maxHeight = " + maxHeight)
                 params.height = maxHeight;//WindowManager.LayoutParams.WRAP_CONTENT
                 val backgroundDrawable = resources.getDrawable(R.drawable.aiagentwindowbigbg, null)
 
@@ -121,26 +127,22 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
             // Kotlin 示例
 
-
+            mLogCnt ++;
         }
 
     }
     private fun appendToWebView(text: String, idx:Int, sessionid:Int) {
 
         mHandler.post {
-            if (mLogCnt % 100 == 0) {
-             //   Log.d("TAG", "appendToWebView: text  = " + text + " idx = " + idx);
-            }
-            mCount = 30 //5秒后消失
+
+            mCount = 900 //5秒后消失
 
             if (isFirstUpdate) {
                 Log.d("TAG", "appendToWebView: isFirstUpdate")
                 loadInitialHtml()
                 mHandler.post{ appendTextViaJs(text, sessionid) }
             } else {
-                if (mLogCnt % 100 == 0 ) {
-                 //   Log.d("TAG", "appendToWebView: else --- " + text);
-                }
+
                 var delay:Long = (100*idx).toLong()
                 mHandler.post{ appendTextViaJs(text, sessionid) }
 
@@ -150,11 +152,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     }
 
     private fun appendTextViaJs(text: String, sessionid:Int) {
-        if (mLogCnt % 100 == 0) {
-         //   Log.d("TAG", "appendTextViaJs: " + text);
-        }
 
-        //mLogCnt ++;
         if (sessionid != m_curSessionId && !text.equals("\n")) {
             return;
         }
@@ -187,12 +185,12 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
         mWebView!!.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
-                Log.d("TAG", "onPageFinished: ")
+              //  Log.d("TAG", "onPageFinished: ")
                 isFirstUpdate = false;
                 super.onPageFinished(view, url)
 
                 // 使用JavaScript获取文档高度
-                mWebView.evaluateJavascript(
+              /*  mWebView.evaluateJavascript(
                     "(function(){return document.body.scrollHeight;})();",
                     ValueCallback<String> { value -> // 这里得到的value是字符串形式的数字，例如"1000"，注意可能是浮点数，需要转换
                         if (value != null) {
@@ -209,7 +207,10 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                             }
                         }
 
-                    })
+                    })*/
+              //  Log.d("TAG", " page finish webview height = " + mWebView.measuredHeight + "conentheight = " + mWebView.contentHeight + " height = " + mWebView.height)
+
+    //            mWebViewHeight = mWebView.measuredHeight
             }
         }
 
@@ -454,7 +455,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     fun updateRequestTextInfo(content:String, idx: Int) {
         mHandler.post {
             if (content.length > 0) {
-                mCount = 30;
+                mCount = 900;
             }
             mInputView.text = content
         }

@@ -64,6 +64,8 @@
             android:layout_height="wrap_content"
             android:layout_marginLeft="20px"
             android:layout_marginTop="5px"
+            android:layout_marginBottom="15px"
+
             android:elevation="2dp" />
     </LinearLayout>
 
