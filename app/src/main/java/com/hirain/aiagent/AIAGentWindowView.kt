@@ -102,9 +102,9 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 if (maxHeight > 1272) {
                     maxHeight = 1272
                 }
-                if (maxHeight > 150 && maxHeight < 250 && mLastHegight > maxHeight) {
+                if ( mLastHegight > maxHeight && (mLastHegight - maxHeight < 100)) {
                     maxHeight = mLastHegight// 防抖
-                    Log.d("TAG", "avoid shake!!!!!!!!!!!! maxHeight = " + maxHeight)
+                  //  Log.d("TAG", "avoid shake!!!!!!!!!!!! maxHeight = " + maxHeight)
                 }
                 mLastHegight = maxHeight
 
@@ -140,10 +140,11 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             if (isFirstUpdate) {
                 Log.d("TAG", "appendToWebView: isFirstUpdate")
                 loadInitialHtml()
-                mHandler.post{ appendTextViaJs(text, sessionid) }
+                mHandler.postDelayed({
+                    appendTextViaJs(text, sessionid)
+                }, 50)
             } else {
 
-                var delay:Long = (100*idx).toLong()
                 mHandler.post{ appendTextViaJs(text, sessionid) }
 
 
@@ -154,7 +155,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     private fun appendTextViaJs(text: String, sessionid:Int) {
 
         if (sessionid != m_curSessionId && !text.equals("\n")) {
-            return;
+         //   return;
         }
         val escapedText = text
             .replace("\\", "\\\\")
@@ -214,7 +215,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             }
         }
 
-        loadInitialHtml();
+    //    loadInitialHtml();
      //   showHtml()
     }
 
@@ -449,6 +450,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     fun hideFloatingWindow(var1:Int) {
         mHandler.post {
             mCount = 0;
+
 
         }
     }

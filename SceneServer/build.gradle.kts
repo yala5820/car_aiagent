@@ -47,5 +47,4 @@ dependencies {
     implementation(project(":VehicleFragManager"))
     implementation(project(":SceneMatch"))
     // ...其他依赖
-    implementation(project(":SceneServer"))
 }

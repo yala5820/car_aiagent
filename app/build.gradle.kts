@@ -109,4 +109,7 @@ dependencies {
     implementation(project(":VehicleAcManager"))
     implementation(project(":VehicleFragManager"))
     implementation(project(":VlManager"))
+    implementation(project(":SceneMatch"))
+    implementation(project(":SceneServer"))
+
 }

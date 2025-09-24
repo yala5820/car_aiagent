@@ -5,6 +5,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
 import android.graphics.PixelFormat
@@ -17,6 +18,7 @@ import android.os.IBinder.DeathRecipient
 import android.os.Looper
 import android.os.RemoteException
 import android.provider.Settings
+import android.util.Base64
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
@@ -68,7 +70,7 @@ class AIAgentService : Service() {
     private lateinit var floatAIAgentView: AIAgentWindowView
     private lateinit var layoutAIAgentParams: WindowManager.LayoutParams
     private val mIAIAgentAidlListeners:  MutableMap<IAIAgentAidlListener, DeathRecipient> = mutableMapOf()
-    private var mLastPostivePrompt: String = ""
+    private var mLastScence:String = ""
     private val mBinder: AIAgentService.AIAgentBinder = AIAgentBinder()
     private var m_connected = false
     private var chatMemory: ChatMemory? = null
@@ -146,6 +148,8 @@ class AIAgentService : Service() {
     private val dmsTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
         VehicleDMSManager::class.java
     )
+    private val scene_matcher: SceneMatch = com.hirain.aiagent.SceneMatch()
+    private var scene_server: SceneServer? = null
     private val mergedTools: List<ToolSpecification> = Stream
         .of(
             wheatherTools,
@@ -178,7 +182,7 @@ class AIAgentService : Service() {
         }
     }
     private fun ProcessCaptureGot(seqid: Int, mode: Int, p: CameraData) {
-
+/*
         val filepath: String =
             applicationContext!!.getExternalFilesDir(null).toString() + "/" + seqid + ".jpg"
         Log.d("TAG", "filepath = $filepath")
@@ -198,6 +202,28 @@ class AIAgentService : Service() {
                 // Log.d("TAG","airesponse.toString() = " + airesponse.toString());
                 processPositiveRequest(airesponse.toString() + ", 请执行车辆工具,并以检测到某某为最开头，尽量详细列出执行的内容，但不要列出工具名称,且不要带场景这两个字作为开头，检测到某某只需要出现一次，总字数在100字以内");
             }
+        }
+
+ */
+        Log.d("TAG", "ProcessCaptureGot seqid = " + seqid)
+
+        var scene = SceneMatch.Scene("其他", "无效场景")
+        scene =
+                scene_matcher.vl_scene_match(getBase64(applicationContext, p.getValue()), "image/jpeg")
+        Log.d("TAG", "ProcessCaptureGot scene.name = " + scene.name + " mLastScence =" + mLastScence)
+
+        if (scene.name.equals("其他") ||scene.name.equals("") ) {
+          //  mLastScence = scene.name
+        }
+        else if (scene.name.equals(mLastScence)) {
+            mLastScence = scene.name
+        }
+        else {
+            val res: String = scene_server!!.scene_server(scene)
+            cleanChat()
+            mLastScence = scene.name
+
+            processPositiveRequest(res);
         }
     }
     inner class AIVRListener : VRListener {
@@ -312,7 +338,7 @@ class AIAgentService : Service() {
             } catch (e: Exception) {
                 e.printStackTrace() // 或者其他错误处理方式
             }
-        }, 5, 5, TimeUnit.SECONDS) // 每1秒执行一次
+        }, 5, 10, TimeUnit.SECONDS) // 每1秒执行一次
         val okHttpClientBuilder = OkHttpClient.builder()
             .connectTimeout(Duration.ofSeconds(30))
             .readTimeout(Duration.ofSeconds(120))
@@ -333,6 +359,7 @@ class AIAgentService : Service() {
       //  Thread { processUserRequest("Hello World") }.start()
         mManager = VRServiceManager.getInstance(this)
         mManager?.initCallback(m_vrlistener)
+        scene_server = com.hirain.aiagent.SceneServer(this)
 
     }
 
@@ -340,6 +367,7 @@ class AIAgentService : Service() {
 
         val seqid = Camera.getInstance().requestCapture()
         val mode = Camera.getInstance().captureMode
+        Log.d("TAG", "requestCapture seqid = " + seqid)
 
     }
 
@@ -673,7 +701,6 @@ class AIAgentService : Service() {
     private fun appendNagativeResponse(prefix:String, message: String) {
         mainHandler.post {
             Log.d("TAG", "appendNagativeResponse message =" + message)
-          //  AIUpdateNagativeResponse("\n")
 
             AIUpdateNagativeResponse(prefix + message + "\n")
 
@@ -683,37 +710,18 @@ class AIAgentService : Service() {
     }
     private fun appendPositiveResponseToChat(prefix:String, message: String) {
         mainHandler.post {
-            var endPos = 7;
-            if (message.length < 7) {
-                endPos = message.length
-            }
-            var startMessage = message.substring(0,endPos)
+
+            hideAIAgent(0)
+
+            mManager?.speak(message);
+
+            AIUpdatePositiveResponseText(prefix + mLastScence + " " + message + "\n", 0 );
 
 
-            if (mLastPostivePrompt == startMessage) {
-                Log.d("TAG", "same message！！！！！！！！！！！！！！！！！！！！！")
-            }
-            else {
-                mLastPostivePrompt = startMessage
-                mManager?.speak(message);
-                var line: String = ""
-                var cnt: Int = 0;
-                var completeMsg = prefix + message
-                for (idx in 0..<completeMsg.length) {
-                    line += completeMsg.substring(idx, idx + 1)
-                    if (line.length > 10) {
-                        AIUpdatePositiveResponseText(line, cnt);
-                        cnt++;
-                        line = "";
-                    }
-                }
-                if (line.length > 0)
-                    AIUpdatePositiveResponseText(line + "\n", cnt );
-
-            }
         }
     }
-
-
+    private fun getBase64(context: Context, byteArray: ByteArray): String {
+        return Base64.encodeToString(byteArray, Base64.DEFAULT)
+    }
 }
  

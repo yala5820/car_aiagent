@@ -13,6 +13,7 @@ public class VehicleDMSManager {
     private String dms_drvie_fatigue;
     private String dms_drive_distractionlevel;
     private String dms_drive_emotion;
+    private boolean formalfunc = false;
     public VehicleDMSManager() {
         this.dms_drvie_fatigue = "清醒";
         this.dms_drive_distractionlevel = "清醒";
@@ -32,17 +33,17 @@ public class VehicleDMSManager {
     }
     @Tool("驾驶员疲劳等级。")
     public String set_dms_drvie_fatigue(@P(value = "等级，必须为：'清醒', '轻度', '中度', '重度'中的一个。")  String type) {
-        this.dms_drvie_fatigue = type;
+        if (formalfunc) this.dms_drvie_fatigue = type;
         return "驾驶员疲劳等级成功设置为：" + type;
     }
     @Tool("驾驶员分心等级。")
     public String set_dms_drive_distractionlevel(@P(value = "等级，必须为：'专注', '轻度分心', '中度分心', '重度分心'中的一个。")  String type) {
-        this.dms_drive_distractionlevel = type;
+        if (formalfunc) this.dms_drive_distractionlevel = type;
         return "驾驶员分心等级成功设置为：" + type;
     }
     @Tool("驾驶员情绪。")
     public String set_dms_drive_emotion(@P(value = "情绪，必须为：'中性', '高兴', '惊讶', '悲伤', '愤怒', '厌恶', '恐惧'中的一个。")  String type) {
-        this.dms_drive_emotion = type;
+        if (formalfunc) this.dms_drive_emotion = type;
         return "驾驶员情绪成功设置为：" + type;
     }
     public boolean hasTool(String toolname) {

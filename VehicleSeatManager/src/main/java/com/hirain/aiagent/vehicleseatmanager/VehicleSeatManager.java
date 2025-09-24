@@ -17,7 +17,7 @@ public class VehicleSeatManager {
     private static final String KEY_SEAT_DRIVE_MASSAGE_MODE = "主驾座椅按摩模式";
     private static final String KEY_SEAT_DRIVE_MASSAGE_INTENSITY = "主驾座椅按摩强度";
     private static final String KEY_STEERING_HEAT = "方向盘加热开启";
-
+    private boolean formalfunc = false;
     private boolean seat_fl_heat;
     private boolean seat_fr_heat;
     private boolean seat_rl_heat;
@@ -63,62 +63,62 @@ public class VehicleSeatManager {
     }
     @Tool("控制左前座椅加热开启/关闭。")
     public String set_seat_fl_heat(@P(value = "开启：true, 关闭：false") boolean heat) {
-        this.seat_fl_heat = heat;
+        if (formalfunc) this.seat_fl_heat = heat;
         String tmp = heat ? "开启": "关闭";
         return "左前座椅加热" + tmp + "成功";
     }
     @Tool("控制右前座椅加热开启/关闭。")
     public String set_seat_fr_heat(@P(value = "开启：true, 关闭：false") boolean heat) {
-        this.seat_fr_heat = heat;
+        if (formalfunc) this.seat_fr_heat = heat;
         String tmp = heat ? "开启": "关闭";
         return "右前座椅加热" + tmp + "成功";
     }
     @Tool("控制左后座椅加热开启/关闭。")
     public String set_seat_rl_heat(@P(value = "开启：true, 关闭：false") boolean heat) {
-        this.seat_rl_heat = heat;
+        if (formalfunc) this.seat_rl_heat = heat;
         String tmp = heat ? "开启": "关闭";
         return "左后座椅加热" + tmp + "成功";
     }
     @Tool("控制右后座椅加热开启/关闭。")
     public String set_seat_rr_heat(@P(value = "开启：true, 关闭：false") boolean heat) {
-        this.seat_rr_heat = heat;
+        if (formalfunc) this.seat_rr_heat = heat;
         String tmp = heat ? "开启": "关闭";
         return "右后座椅加热" + tmp + "成功";
     }
 
     @Tool("控制左前座椅通风百分比。")
     public String set_seat_fl_air(@P(value = "通风百分比") int air) {
-        this.seat_fl_air = air;
+        if (formalfunc) this.seat_fl_air = air;
         return "左前座椅通风控制成功";
     }
     @Tool("控制右前座椅通风百分比。")
     public String set_seat_fr_air(@P(value = "通风百分比") int air) {
-        this.seat_fr_air = air;
+        if (formalfunc) this.seat_fr_air = air;
         return "右前座椅通风控制成功";
     }
     @Tool("控制左后座椅通风百分比。")
     public String set_seat_rl_air(@P(value = "通风百分比") int air) {
-        this.seat_rl_air = air;
+        if (formalfunc) this.seat_rl_air = air;
         return "左后座椅通风控制成功";
     }
     @Tool("控制右后座椅通风百分比。")
     public String set_seat_rr_air(@P(value = "通风百分比") int air) {
-        this.seat_rr_air = air;
+        if (formalfunc) this.seat_rr_air = air;
         return "右后座椅通风控制成功";
     }
     @Tool("控制主驾座椅按摩模式。")
     public String set_seat_massage_mode(@P(value = "按摩模式，必须为：‘波浪’、‘脉冲’、‘揉捏’、‘震动’、‘腰部聚焦’中的一个。") String mode) {
-        this.seat_massage_mode = mode;
+        if (formalfunc)  this.seat_massage_mode = mode;
         return "主驾座椅按摩模式成功设置为：" + mode;
     }
     @Tool("控制主驾座椅按摩强度。")
     public String set_seat_massage_intensity(@P(value = "按摩强度，必须为：‘关闭’、‘弱’、‘中等’、‘强力’中的一个。") String intensity) {
-        this.seat_massage_intensity = intensity;
+        if (formalfunc) this.seat_massage_intensity = intensity;
         return "主驾座椅按摩强度成功设置为：" + intensity;
     }
     @Tool("控制方向盘加热开启/关闭。")
     public String set_steering_heat(@P(value = "开启：true, 关闭：false") boolean heat) {
-        this.steering_heat = heat;
+        if (formalfunc) this.steering_heat = heat;
         String tmp = heat ? "开启": "关闭";
         return "方向盘加热" + tmp + "成功";
     }

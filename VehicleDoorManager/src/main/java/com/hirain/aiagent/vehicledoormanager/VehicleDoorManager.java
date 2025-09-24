@@ -17,6 +17,7 @@ public class VehicleDoorManager {
     private final boolean door_rl_open;
     private final boolean door_rr_open;
     private boolean door_locked;
+    private boolean formalfunc = false;
     public VehicleDoorManager() {
         this.door_fl_open = false;
         this.door_fr_open = false;
@@ -40,13 +41,13 @@ public class VehicleDoorManager {
     @Tool("控制车门闭锁/解锁")
     public String set_door_lock(@P(value = "控制车门闭锁：true, 控制车门开锁：false") boolean lock) {
         if (!lock) {
-            this.door_locked = false;
+            if (formalfunc) this.door_locked = false;
             return "车门解锁成功";
         }
         if (door_fl_open || door_fr_open || door_rl_open || door_rr_open) {
             return "车门未关闭，车门闭锁失败";
         }
-        this.door_locked = true;
+        if (formalfunc) this.door_locked = true;
         return "车门闭锁成功";
     }
     public boolean hasTool(String toolname) {

@@ -5,7 +5,9 @@ import android.util.Log;
 
 import com.hirain.aiagent.vehicleacmanager.VehicleAcManager;
 import com.hirain.aiagent.vehicledoormanager.VehicleDoorManager;
+import com.hirain.aiagent.vehiclefragmanager.VehicleDMSManager;
 import com.hirain.aiagent.vehiclefragmanager.VehicleFragManager;
+import com.hirain.aiagent.vehiclefragmanager.VehicleSpeedManager;
 import com.hirain.aiagent.vehicleseatmanager.VehicleSeatManager;
 import com.hirain.aiagent.vehiclewindowmanager.VehicleWindowManager;
 import com.hirain.aiagent.scenematch.*;
@@ -68,9 +70,15 @@ public class SceneServer {
     private final VehicleAcManager acManager = new VehicleAcManager();
     private final List<ToolSpecification> acTools = ToolSpecifications.toolSpecificationsFrom(VehicleAcManager.class);
     private final VehicleFragManager fragManager = new VehicleFragManager();
+    private final VehicleSpeedManager speedManager = new VehicleSpeedManager();
+    private final VehicleDMSManager dmsManager = new VehicleDMSManager();
+    private final List<ToolSpecification> speedTools = ToolSpecifications.toolSpecificationsFrom(VehicleSpeedManager.class);
+    private final List<ToolSpecification> dmsTools = ToolSpecifications.toolSpecificationsFrom(VehicleDMSManager.class);
+
     private final List<ToolSpecification> fragTools = ToolSpecifications.toolSpecificationsFrom(VehicleFragManager.class);
+
     private final List<ToolSpecification> mergedTools = Stream
-            .of(windowTools, seatTools, acTools, fragTools)
+            .of(windowTools, seatTools, acTools, fragTools, speedTools, dmsTools)
             .flatMap(List::stream).collect(Collectors.toList());
 
     public SceneServer(Context context) {
@@ -122,11 +130,15 @@ public class SceneServer {
             JSONObject seatjson = new JSONObject(seatManager.getSeatStatus());
             JSONObject acjson = new JSONObject(acManager.getAcStatus());
             JSONObject fragjson = new JSONObject(fragManager.getFragStatus());
+            JSONObject speedjson = new JSONObject(speedManager.getSpeedStatus());
+            JSONObject dmsjson = new JSONObject(dmsManager.getDmsStatus());
             json.put("车门", doorjson);
             json.put("车窗", windowjson);
             json.put("座椅、方向盘", seatjson);
             json.put("空调", acjson);
             json.put("香氛", fragjson);
+            json.put("车速", speedjson);
+            json.put("DMS", dmsjson);
             return json.toString();
         } catch (JSONException e){
             return "无效的车辆状态";
@@ -141,7 +153,12 @@ public class SceneServer {
             return acManager.handleToolRequest(request);
         } else if (fragManager.hasTool(request.name())) {
             return fragManager.handleToolRequest(request);
+        } else if (speedManager.hasTool(request.name())) {
+            return speedManager.handleToolRequest(request);
+        } else if (dmsManager.hasTool(request.name())) {
+            return dmsManager.handleToolRequest(request);
         }
+
         return "无效的工具调用。";
     }
     private String processFunctionCall(ChatResponse aiResponse) {
