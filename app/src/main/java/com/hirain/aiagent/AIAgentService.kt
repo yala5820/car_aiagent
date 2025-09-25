@@ -737,11 +737,10 @@ class AIAgentService : Service() {
     }
     private fun appendPositiveResponseToChat(prefix:String, message: String) {
         stopTTS()
-        Log.d("TAG", "appendPositiveResponseToChat 2222222222222222222 message = " + message)
-
         mainHandler.post {
             hideAIAgent(0)
             mManager?.speak(message);
+            Log.d("TAG", "appendPositiveResponseToChat 2222222222222222222 message = " + message)
 
             AIUpdatePositiveResponseText(prefix + mLastScence + " " + message + "\n", 0 );
 

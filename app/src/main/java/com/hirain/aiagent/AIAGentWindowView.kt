@@ -73,67 +73,86 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
 
         mHandler.post {
-            val frameLayout: LinearLayout = findViewById(R.id.aiagentlinearLayout)
-            if (mLogCnt % 100 == 0)
-            Log.d("TAG", "updateWindowVisibility mCount= " + mCount)
-            val params = layoutParams as WindowManager.LayoutParams
-            var curHeight = params.height
-            var curWidth = params.width
-            if (mCount <= 0) {
-               // m_view.visibility = View.INVISIBLE;
-                Log.d("TAG", "loadInitialHtml xxxxxxxxxxxxxx" )
 
-                params.height = 1
-                params.width = 1
-                mLastHegight = 0
-                loadInitialHtml()
-                //Thread.sleep(1)
+            if (mCount <= 0) {
+                updateWindowVisibility(false)
                 mCount = 0;
 
 
             } else {
-                m_view.visibility = View.VISIBLE;
-                params.width = WindowManager.LayoutParams.WRAP_CONTENT
-                var maxHeight = mWebView.measuredHeight
-                if (maxHeight < mWebView.contentHeight) {
-                    maxHeight = mWebView.contentHeight
-                }
-                if (maxHeight < mWebView.height) {
-                    maxHeight = mWebView.height
-                }
-                maxHeight  += 150
-                if (maxHeight > 1272) {
-                    maxHeight = 1272
-                }
-                if ( mLastHegight > maxHeight && (mLastHegight - maxHeight < 100)) {
-                    maxHeight = mLastHegight// 防抖
-                  //  Log.d("TAG", "avoid shake!!!!!!!!!!!! maxHeight = " + maxHeight)
-                }
-                mLastHegight = maxHeight
-
-                if (mLogCnt % 100 == 0)
-                Log.d("TAG", " webview height = " + mWebView.measuredHeight + "conentheight = " + mWebView.contentHeight + " height = " + mWebView.height + " maxHeight = " + maxHeight)
-                params.height = maxHeight;//WindowManager.LayoutParams.WRAP_CONTENT
-                val backgroundDrawable = resources.getDrawable(R.drawable.aiagentwindowbigbg, null)
-
-               // val layerDrawable = LayerDrawable(arrayOf(backgroundDrawable))
-               // layerDrawable.setLayerInset(0, 0, 0, 0, 0) // 无边距填充
-                windowManager.updateViewLayout(m_view, params)
-             //   frameLayout.background = layerDrawable
-
+                updateWindowVisibility(true)
 
 
                 mCount --
             }
 
-            windowManager.updateViewLayout(m_view, params)
 
-            // Kotlin 示例
-
-            mLogCnt ++;
         }
 
     }
+
+    private fun updateWindowVisibility(visible:Boolean)  {
+
+
+        val frameLayout: LinearLayout = findViewById(R.id.aiagentlinearLayout)
+        if (mLogCnt % 100 == 0)
+            Log.d("TAG", "updateWindowVisibility mCount= " + mCount)
+        val params = layoutParams as WindowManager.LayoutParams
+        var curHeight = params.height
+        var curWidth = params.width
+        if (!visible) {
+            // m_view.visibility = View.INVISIBLE;
+            Log.d("TAG", "loadInitialHtml xxxxxxxxxxxxxx" )
+
+            params.height = 1
+            params.width = 1
+            mLastHegight = 0
+            loadInitialHtml()
+            //Thread.sleep(1)
+
+
+        } else {
+            m_view.visibility = View.VISIBLE;
+            params.width = WindowManager.LayoutParams.WRAP_CONTENT
+            var maxHeight = mWebView.measuredHeight
+            if (maxHeight < mWebView.contentHeight) {
+                maxHeight = mWebView.contentHeight
+            }
+            if (maxHeight < mWebView.height) {
+                maxHeight = mWebView.height
+            }
+            maxHeight  += 150
+            if (maxHeight > 1272) {
+                maxHeight = 1272
+            }
+            if ( mLastHegight > maxHeight && (mLastHegight - maxHeight < 100)) {
+                maxHeight = mLastHegight// 防抖
+                //  Log.d("TAG", "avoid shake!!!!!!!!!!!! maxHeight = " + maxHeight)
+            }
+            mLastHegight = maxHeight
+
+            if (mLogCnt % 100 == 0)
+                Log.d("TAG", " webview height = " + mWebView.measuredHeight + "conentheight = " + mWebView.contentHeight + " height = " + mWebView.height + " maxHeight = " + maxHeight)
+            params.height = maxHeight;//WindowManager.LayoutParams.WRAP_CONTENT
+            val backgroundDrawable = resources.getDrawable(R.drawable.aiagentwindowbigbg, null)
+
+            // val layerDrawable = LayerDrawable(arrayOf(backgroundDrawable))
+            // layerDrawable.setLayerInset(0, 0, 0, 0, 0) // 无边距填充
+            windowManager.updateViewLayout(m_view, params)
+            //   frameLayout.background = layerDrawable
+
+
+        }
+
+        windowManager.updateViewLayout(m_view, params)
+
+        // Kotlin 示例
+
+        mLogCnt ++;
+
+
+    }
+
     private fun appendToWebView(text: String, idx:Int, sessionid:Int) {
 
         mHandler.post {
@@ -148,7 +167,8 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 }, 50)
             } else {
 
-                mHandler.post{ appendTextViaJs(text, sessionid) }
+                mHandler.postDelayed({appendTextViaJs(text, sessionid)
+                }, 100)
 
 
             }
@@ -165,6 +185,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             .replace("\"", "\\\"")
             .replace("\n", "\\n")
             .replace("\r", "\\r")
+        Log.d("TAG", "appendTextViaJs aaaaaaaaaaaaaaaaaaaaa text message = " + text)
 
         // 使用JavaScript接口追加内容
             mWebView.visibility = View.VISIBLE
@@ -452,9 +473,16 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     }
     fun hideFloatingWindow(var1:Int) {
         //确保该函数在hanlder里面调用
-        mCount = 0;
+        if (var1 == 0) {
+            Log.d("TAG", "updateWindowVisibility false!!!!!!!!!!!!!!!!!")
+            updateWindowVisibility(false)
+          //  mCount = 0
 
-
+        //    Thread.sleep(500)
+        }
+        else {
+            mCount = 0
+        }
 
     }
     fun updateRequestTextInfo(content:String, idx: Int) {
