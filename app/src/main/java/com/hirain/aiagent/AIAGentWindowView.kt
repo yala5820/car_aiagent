@@ -102,7 +102,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
         var curWidth = params.width
         if (!visible) {
             // m_view.visibility = View.INVISIBLE;
-            Log.d("TAG", "loadInitialHtml xxxxxxxxxxxxxx" )
+         //   Log.d("TAG", "loadInitialHtml xxxxxxxxxxxxxx" )
 
             params.height = 1
             params.width = 1

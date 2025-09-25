@@ -82,6 +82,7 @@ class AIAgentService : Service() {
     private var mManager: VRServiceManager? = null
     private var mLastRequestAITimeStamp:Long = 0
     private var mCaptureCnt = 0;
+    private var mPositiveReqExecuting = false;
     private val systemPrompt = """角色定义：
     你是一位专业、友好且高度智能的车载AI助手，专注于提供安全、高效、愉悦的驾驶体验。
     你集成多种人工智能技术，通过不断学习迭代升级功能，在软硬件配合下实现自然流畅的人车智能交互。
@@ -213,6 +214,7 @@ class AIAgentService : Service() {
         if (vl!= null ) {
             vl!!.front_camera_save("", p.getValue())
         }
+        mPositiveReqExecuting = true
         if (mCaptureCnt % 3 == 0) {
 
             var scene = SceneMatch.Scene("其他", "无效场景")
@@ -240,6 +242,7 @@ class AIAgentService : Service() {
         }
         mCaptureCnt ++;
         Log.d("TAG", "ProcessCaptureGot end !!!!!!!!!!!!!!!! seqid = " + seqid )
+        mPositiveReqExecuting = false
 
     }
     inner class AIVRListener : VRListener {
@@ -260,8 +263,13 @@ class AIAgentService : Service() {
     inner class CameraListener : ICameraServiceListener {
 
         override fun onCaptureGot(seqid: Int, mode: Int, p: CameraData) {
-            mWorkHandler!!.post {
-                ProcessCaptureGot(seqid, mode, p)
+            if (mPositiveReqExecuting) {
+                Log.d("TAG", "onCaptureGot mPositiveReqExecuting !!!!!!!!!!!!!!!!!!")
+            }
+            else {
+                mWorkHandler!!.post {
+                    ProcessCaptureGot(seqid, mode, p)
+                }
             }
         }
 
