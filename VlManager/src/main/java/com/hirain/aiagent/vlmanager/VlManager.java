@@ -175,22 +175,29 @@ public class VlManager {
 
     }
 
-    public String front_camera_interactionPositive(@P(value = "经过处理后的车主文本输入，尽量简洁清晰")String text, byte[] byteArray) {
+    public void front_camera_save(@P(value = "经过处理后的车主文本输入，尽量简洁清晰")String text, byte[] byteArray) {
+        Log.d("TAG", "front_camera_save end aaaa");
+
         mFrontImage = byteArray.clone();
+    }
+    public String front_camera_interactionPositive(@P(value = "经过处理后的车主文本输入，尽量简洁清晰")String text, byte[] byteArray) {
+
+        Log.d("TAG", "front_camera_interactionPositive end ccccccccccccccccccc");
+
         String img_b64 = getBase64(ctx, byteArray);
         SystemMessage systemmsg = SystemMessage.from(front_camera_system_msg);
-   //     Log.d("TAG", "front_camera_interaction text = " + text);
+           //     Log.d("TAG", "front_camera_interaction text = " + text);
 
-        UserMessage usrmsg = UserMessage.from(
+                UserMessage usrmsg = UserMessage.from(
                 TextContent.from(text),
                 ImageContent.from(img_b64, "image/jpeg")
         );
         Log.d("TAG", "front_camera_interactionPositive tool ccccccccccccc imagesize1 = " +  byteArray.length);
-
         ChatResponse aiResponse = vlModel.chat(systemmsg, usrmsg);
         Log.d("TAG", "front_camera_interactionPositive end ccccccccccccccccccc");
 
         return aiResponse.aiMessage().text();
+
     }
     public boolean hasTool(String toolname) {
         return toolname.equals("front_camera_interaction");

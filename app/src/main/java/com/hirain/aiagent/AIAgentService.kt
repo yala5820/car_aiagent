@@ -81,6 +81,7 @@ class AIAgentService : Service() {
 
     private var mManager: VRServiceManager? = null
     private var mLastRequestAITimeStamp:Long = 0
+    private var mCaptureCnt = 0;
     private val systemPrompt = """角色定义：
     你是一位专业、友好且高度智能的车载AI助手，专注于提供安全、高效、愉悦的驾驶体验。
     你集成多种人工智能技术，通过不断学习迭代升级功能，在软硬件配合下实现自然流畅的人车智能交互。
@@ -100,7 +101,10 @@ class AIAgentService : Service() {
             旅游景点：结合对话上下文，提供个性化推荐。
             游玩建议：结合对话上下文，提供个性化推荐。
     智能座舱专属功能
-        前向窗景互动：结合前向窗景识别工具的能力，在用户提及时提供相关信息。
+        前向窗景互动：
+            任务：结合前向窗景识别工具的能力，在用户提及时提供相关信息。
+            必须遵守强实时性：用户有前向窗景识别意图时，必须重新调用工具获取并识别前向视野。
+                           窗景互动不能依赖对话上下文，必须重新调用工具识别实时前向视野。
         精准控车
             支持自然语言理解的车辆控制，例如：把空调温度调节为22℃ --> 设置空调温度为22℃
             复杂指令拆解：例如：打开车窗通风并播放轻松音乐 --> 分步执行
@@ -205,26 +209,38 @@ class AIAgentService : Service() {
         }
 
  */
-        Log.d("TAG", "ProcessCaptureGot seqid = " + seqid)
-
-        var scene = SceneMatch.Scene("其他", "无效场景")
-        scene =
-                scene_matcher.vl_scene_match(getBase64(applicationContext, p.getValue()), "image/jpeg")
-        Log.d("TAG", "ProcessCaptureGot scene.name = " + scene.name + " mLastScence =" + mLastScence)
-
-        if (scene.name.equals("其他") ||scene.name.equals("") ) {
-          //  mLastScence = scene.name
+        Log.d("TAG", "ProcessCaptureGot start !!!!!!!!!!!!!! seqid = " + seqid + " mCaptureCnt = " + mCaptureCnt)
+        if (vl!= null ) {
+            vl!!.front_camera_save("", p.getValue())
         }
-        else if (scene.name.equals(mLastScence)) {
-            mLastScence = scene.name
-        }
-        else {
-            val res: String = scene_server!!.scene_server(scene)
-            cleanChat()
-            mLastScence = scene.name
+        if (mCaptureCnt % 3 == 0) {
 
-            processPositiveRequest(res);
+            var scene = SceneMatch.Scene("其他", "无效场景")
+            scene =
+                scene_matcher.vl_scene_match(
+                    getBase64(applicationContext, p.getValue()),
+                    "image/jpeg"
+                )
+            Log.d(
+                "TAG",
+                "ProcessCaptureGot scene.name = " + scene.name + " mLastScence =" + mLastScence
+            )
+
+            if (scene.name.equals("其他") || scene.name.equals("")) {
+                //  mLastScence = scene.name
+            } else if (scene.name.equals(mLastScence)) {
+                mLastScence = scene.name
+            } else {
+                val res: String = scene_server!!.scene_server(scene)
+                cleanChat()
+                mLastScence = scene.name
+
+                processPositiveRequest(res);
+            }
         }
+        mCaptureCnt ++;
+        Log.d("TAG", "ProcessCaptureGot end !!!!!!!!!!!!!!!! seqid = " + seqid )
+
     }
     inner class AIVRListener : VRListener {
 
@@ -338,7 +354,7 @@ class AIAgentService : Service() {
             } catch (e: Exception) {
                 e.printStackTrace() // 或者其他错误处理方式
             }
-        }, 5, 10, TimeUnit.SECONDS) // 每1秒执行一次
+        }, 5, 3, TimeUnit.SECONDS) // 每1秒执行一次
         val okHttpClientBuilder = OkHttpClient.builder()
             .connectTimeout(Duration.ofSeconds(30))
             .readTimeout(Duration.ofSeconds(120))
@@ -428,6 +444,12 @@ class AIAgentService : Service() {
         // 解注册广播接收器
 
     }
+    fun stopTTS() {
+        mManager!!.stop()
+        Thread.sleep(50)
+
+
+    }
 
     inner class AIAgentBinder :  IAIAgentAidlInterface.Stub() {
 
@@ -444,6 +466,7 @@ class AIAgentService : Service() {
         @Throws(RemoteException::class)
         override fun requestAI(arg: String?): Int {
             if (arg.equals("@#%^StartListen")) {
+                stopTTS()
                 mainHandler.post {
                     AIUpdateRequestProcuder(
                         false
@@ -457,11 +480,10 @@ class AIAgentService : Service() {
             }
             else {
                 appendToChat("$arg")
-                mainHandler.post{
-                    mWorkHandler!!.post {
-                        processNagativeRequest(arg!!)
-                    }
+                mWorkHandler!!.post {
+                    processNagativeRequest(arg!!)
                 }
+
             }
 
 
@@ -658,12 +680,16 @@ class AIAgentService : Service() {
         }
     }
     private fun processPositiveRequest(userMessage: String) {
+        Log.d("TAG", "processPositiveRequest 1111111111111111111111111 begin " )
+
         try {
             chatMemory!!.add(UserMessage.userMessage(userMessage))
             positiveChatWithVehicleStatus()
         } catch (e: java.lang.Exception) {
             appendPositiveResponseToChat("", "系统: 请求失败 - " + e.message)
         }
+        Log.d("TAG", "processPositiveRequest 1111111111111111111111111111 end " )
+
     }
 
     private fun cleanChat() {
@@ -699,6 +725,7 @@ class AIAgentService : Service() {
 
     }
     private fun appendNagativeResponse(prefix:String, message: String) {
+        stopTTS()
         mainHandler.post {
             Log.d("TAG", "appendNagativeResponse message =" + message)
 
@@ -709,10 +736,11 @@ class AIAgentService : Service() {
         }
     }
     private fun appendPositiveResponseToChat(prefix:String, message: String) {
+        stopTTS()
+        Log.d("TAG", "appendPositiveResponseToChat 2222222222222222222 message = " + message)
+
         mainHandler.post {
-
             hideAIAgent(0)
-
             mManager?.speak(message);
 
             AIUpdatePositiveResponseText(prefix + mLastScence + " " + message + "\n", 0 );

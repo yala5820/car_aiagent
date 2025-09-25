@@ -81,10 +81,13 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             var curWidth = params.width
             if (mCount <= 0) {
                // m_view.visibility = View.INVISIBLE;
+                Log.d("TAG", "loadInitialHtml xxxxxxxxxxxxxx" )
+
                 params.height = 1
                 params.width = 1
                 mLastHegight = 0
                 loadInitialHtml()
+                //Thread.sleep(1)
                 mCount = 0;
 
 
@@ -448,11 +451,11 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
         mWebView!!.loadDataWithBaseURL(null, myHtml, "text/html", "UTF-8", null)
     }
     fun hideFloatingWindow(var1:Int) {
-        mHandler.post {
-            mCount = 0;
+        //确保该函数在hanlder里面调用
+        mCount = 0;
 
 
-        }
+
     }
     fun updateRequestTextInfo(content:String, idx: Int) {
         mHandler.post {
