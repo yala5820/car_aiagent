@@ -468,6 +468,7 @@ class AIAgentService : Service() {
             if (arg.equals("@#%^StartListen")) {
                 stopTTS()
                 mainHandler.post {
+                    hideAIAgent(0)
                     AIUpdateRequestProcuder(
                         false
                     )
@@ -728,6 +729,7 @@ class AIAgentService : Service() {
         stopTTS()
         mainHandler.post {
             Log.d("TAG", "appendNagativeResponse message =" + message)
+            hideAIAgent(0)
 
             AIUpdateNagativeResponse(prefix + message + "\n")
 
