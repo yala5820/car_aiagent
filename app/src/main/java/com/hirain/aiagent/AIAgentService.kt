@@ -236,8 +236,8 @@ class AIAgentService : Service() {
                 val res: String = scene_server!!.scene_server(scene)
                 cleanChat()
                 mLastScence = scene.name
-
-                processPositiveRequest(res);
+                appendPositiveResponseToChat("AI:",res)
+              //  processPositiveRequest(res);
             }
         }
         mCaptureCnt ++;
