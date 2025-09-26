@@ -169,7 +169,7 @@ class AIAgentService : Service() {
         )
         .flatMap { obj: List<ToolSpecification> -> obj.stream() }.collect(Collectors.toList())
     private val mainHandler = Handler(Looper.getMainLooper())
-
+    private var mChating = false
     companion object {
        // val service = AIAgentService() // Now it is an instance of Service
 
@@ -214,35 +214,37 @@ class AIAgentService : Service() {
         if (vl!= null ) {
             vl!!.front_camera_save("", p.getValue())
         }
-        mPositiveReqExecuting = true
-        if (mCaptureCnt % 3 == 0) {
+        if (!mChating) {
+            mPositiveReqExecuting = true
+            if (mCaptureCnt % 3 == 0) {
 
-            var scene = SceneMatch.Scene("其他", "无效场景")
-            scene =
-                scene_matcher.vl_scene_match(
-                    getBase64(applicationContext, p.getValue()),
-                    "image/jpeg"
+                var scene = SceneMatch.Scene("其他", "无效场景")
+                scene =
+                    scene_matcher.vl_scene_match(
+                        getBase64(applicationContext, p.getValue()),
+                        "image/jpeg"
+                    )
+                Log.d(
+                    "TAG",
+                    "ProcessCaptureGot scene.name = " + scene.name + " mLastScence =" + mLastScence
                 )
-            Log.d(
-                "TAG",
-                "ProcessCaptureGot scene.name = " + scene.name + " mLastScence =" + mLastScence
-            )
 
-            if (scene.name.equals("其他") || scene.name.equals("")) {
-                //  mLastScence = scene.name
-            } else if (scene.name.equals(mLastScence)) {
-                mLastScence = scene.name
-            } else {
-                val res: String = scene_server!!.scene_server(scene)
-                cleanChat()
-                mLastScence = scene.name
-                appendPositiveResponseToChat("AI:",res)
-              //  processPositiveRequest(res);
+                if (scene.name.equals("其他") || scene.name.equals("")) {
+                    //  mLastScence = scene.name
+                } else if (scene.name.equals(mLastScence)) {
+                    mLastScence = scene.name
+                } else {
+                    val res: String = scene_server!!.scene_server(scene)
+               //     cleanChat()
+                    mLastScence = scene.name
+                    appendPositiveResponseToChat("AI:", res)
+                    //  processPositiveRequest(res);
+                }
             }
+            Log.d("TAG", "ProcessCaptureGot end !!!!!!!!!!!!!!!! seqid = " + seqid)
+            mPositiveReqExecuting = false
         }
-        mCaptureCnt ++;
-        Log.d("TAG", "ProcessCaptureGot end !!!!!!!!!!!!!!!! seqid = " + seqid )
-        mPositiveReqExecuting = false
+        mCaptureCnt++;
 
     }
     inner class AIVRListener : VRListener {
@@ -474,6 +476,7 @@ class AIAgentService : Service() {
         @Throws(RemoteException::class)
         override fun requestAI(arg: String?): Int {
             if (arg.equals("@#%^StartListen")) {
+                mChating = true;
                 stopTTS()
                 mainHandler.post {
                     hideAIAgent(0)
@@ -486,6 +489,17 @@ class AIAgentService : Service() {
 
                 }
 
+            }
+            else if (arg.equals("@#%^StopListen")) {
+                mChating = false
+                Log.d("TAG","requestAI stopListen!!!!!!!!!!!!!!!!!")
+
+            }
+            else if (arg.equals("@#%^ClearChatMemory")) {
+                Log.d("TAG","requestAI CleanChat!!!!!!!!!!!!!!!!!")
+                mainHandler.post {
+                    chatMemory!!.clear()
+                }
             }
             else {
                 appendToChat("$arg")
@@ -702,14 +716,14 @@ class AIAgentService : Service() {
     }
 
     private fun cleanChat() {
-        mainHandler.post {
-            AIUpdateRequestProcuder(
-                false
-            )
-            AIUpdateRequestText(
-                "", 0
-            )
-        }
+
+        AIUpdateRequestProcuder(
+            false
+        )
+        AIUpdateRequestText(
+            "", 0
+        )
+
 
     }
     private fun appendToChat(message: String) {
@@ -734,6 +748,7 @@ class AIAgentService : Service() {
 
     }
     private fun appendNagativeResponse(prefix:String, message: String) {
+        mChating = false
         stopTTS()
         mainHandler.post {
             Log.d("TAG", "appendNagativeResponse message =" + message)
@@ -748,6 +763,8 @@ class AIAgentService : Service() {
     private fun appendPositiveResponseToChat(prefix:String, message: String) {
         stopTTS()
         mainHandler.post {
+            cleanChat()
+
             hideAIAgent(0)
             mManager?.speak(message);
             Log.d("TAG", "appendPositiveResponseToChat 2222222222222222222 message = " + message)

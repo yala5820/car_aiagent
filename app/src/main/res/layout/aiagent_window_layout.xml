@@ -40,8 +40,10 @@
                 android:orientation="vertical">
                 <TextView
                     android:id="@+id/inputtext"
-                    android:layout_width="600px"
+                    android:layout_width="500px"
                     android:layout_height="40px"
+                    android:maxLines="1"
+                    android:ellipsize="end"
                     android:textColor="#FF000000"
                     android:textSize="20sp"/>
 
