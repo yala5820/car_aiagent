@@ -34,6 +34,8 @@ include(":VehicleACController")
 include(":VehicleAcManager")
 include(":VehicleAcManager")
 include(":VehicleFragManager")
+include(":VehicleChassisManager")
+
 include(":VlManager")
 include(":SceneMatch")
 include(":SceneServer")

@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "com.hirain.aiagent.sceneserver"
+    namespace = "com.hirain.aiagent.vehiclechassismanager"
     compileSdk = 35
 
     defaultConfig {
@@ -36,17 +36,5 @@ dependencies {
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
 
-    implementation("dev.langchain4j:langchain4j-open-ai:1.1.0")
     implementation("dev.langchain4j:langchain4j:1.1.0")
-    implementation(project(":http-client-ok"))
-    implementation(project(":chat_memory_sqlite"))
-    implementation(project(":VehicleDoorManager"))
-    implementation(project(":VehicleWindowManager"))
-    implementation(project(":VehicleSeatManager"))
-    implementation(project(":VehicleAcManager"))
-    implementation(project(":VehicleFragManager"))
-    implementation(project(":VehicleChassisManager"))
-
-    implementation(project(":SceneMatch"))
-    // ...其他依赖
 }

@@ -1,4 +1,4 @@
-package com.hirain.aiagent.scenematch;
+package com.hirain.aiagent;
 
 import static dev.langchain4j.model.chat.request.ResponseFormatType.JSON;
 
@@ -29,7 +29,7 @@ public class SceneMatch {
                     .name("Scene")
                     .rootElement(JsonObjectSchema.builder()
                             .addStringProperty("name", "场景名称，必须为以下精确值之一：'舱外浓烟'、'雨雪天气'、'工程施工'、'乘客休息'、'驾驶员疲劳'、'其他'。")
-                            .addStringProperty("description", "结合识别到的场景，对图片中内容进行详细描述、并提供与当前场景匹配的座舱相关舒适调节建议与安全驾驶相关建议。")
+                            .addStringProperty("description", "结合识别到的场景，对图片内容的详细描述。")
                             .required("name", "description")
                             .build())
                     .build())
@@ -42,7 +42,7 @@ public class SceneMatch {
                 .httpClientBuilder(okHttpClientBuilder)
                 .apiKey("sk-11129fb7941f49dbb083039a93a160bc")
                 .baseUrl("https://dashscope.aliyuncs.com/compatible-mode/v1")
-                .modelName("qwen3-vl-plus")
+                .modelName("qwen-vl-plus")
                 .build();
     }
     public static class Scene {
@@ -73,14 +73,14 @@ public class SceneMatch {
     }
     public Scene vl_scene_match(String img_b64, String mimeType) {
         String systemPrompt =
-        "你是一个智能座舱场景识别专家，任务：根据摄像头图片生成严格符合JSON Schema的场景描述。\n\n" +
-                "## 输出规则\n" +
-                "1. 必须输出纯JSON对象，无任何额外文本\n" +
-                "2. 必须包含且仅包含两个字段：\n" +
-                "   - name: 场景名称（必须为精确值：'舱外浓烟'/'雨雪天气'/'工程施工'/'乘客休息'/'驾驶员疲劳'/'其他'）\n" +
-                "   - description: 结合识别到的场景，对图片中内容进行详细描述、并提供与当前场景匹配的座舱相关舒适调节建议与安全驾驶相关建议。\n" +
-                "## 当前任务\n" +
-                "请严格按规则输出JSON";
+                "你是一个智能座舱场景识别专家，任务：根据摄像头图片生成严格符合JSON Schema的场景描述。\n\n" +
+                        "## 输出规则\n" +
+                        "1. 必须输出纯JSON对象，无任何额外文本\n" +
+                        "2. 必须包含且仅包含两个字段：\n" +
+                        "   - name: 场景名称（必须为精确值：'舱外浓烟'/'雨雪天气'/'工程施工'/'乘客休息'/'驾驶员疲劳'/'其他'）\n" +
+                        "   - description: 结合识别到的场景，对图片中内容进行详细描述、并提供座舱相关舒适调节建议与安全驾驶相关建议。\n" +
+                        "## 当前任务\n" +
+                        "请严格按规则输出JSON";
         SystemMessage system = SystemMessage.from(systemPrompt);
         UserMessage usrmsg = UserMessage.from(
                 TextContent.from("请根据以下图片识别场景："),

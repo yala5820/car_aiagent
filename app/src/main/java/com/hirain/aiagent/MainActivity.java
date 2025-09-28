@@ -131,7 +131,7 @@ public class MainActivity extends AppCompatActivity {
                 .build();
         chatMemory = MessageWindowChatMemory.builder()
                 .maxMessages(50)
-                .chatMemoryStore(new PersistentChatMemorySqlite(getApplicationContext()))
+                .chatMemoryStore(new PersistentChatMemorySqlite(getApplicationContext(),"ActivityMemory"))
                 .build();
 
         chatMemory.add(SystemMessage.systemMessage(systemPrompt));

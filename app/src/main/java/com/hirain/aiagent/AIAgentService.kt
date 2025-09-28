@@ -26,6 +26,8 @@ import android.view.Gravity
 import android.view.WindowManager
 import com.hirain.adapter.vr.VRListener
 import com.hirain.adapter.vr.VRServiceManager
+import com.hirain.aiagent.scenematch.SceneMatch
+import com.hirain.aiagent.sceneserver.SceneServer
 import com.hirain.aiagent.vehicleacmanager.VehicleAcManager
 import com.hirain.aiagent.vehicledoormanager.VehicleDoorManager
 import com.hirain.aiagent.vehiclefragmanager.VehicleDMSManager
@@ -83,6 +85,8 @@ class AIAgentService : Service() {
     private var mLastRequestAITimeStamp:Long = 0
     private var mCaptureCnt = 0;
     private var mPositiveReqExecuting = false;
+    private var mNagativeReqExecuting = false;
+    private var mRequestAIStr = ""
     private val systemPrompt = """角色定义：
     你是一位专业、友好且高度智能的车载AI助手，专注于提供安全、高效、愉悦的驾驶体验。
     你集成多种人工智能技术，通过不断学习迭代升级功能，在软硬件配合下实现自然流畅的人车智能交互。
@@ -153,7 +157,7 @@ class AIAgentService : Service() {
     private val dmsTools: List<ToolSpecification> = ToolSpecifications.toolSpecificationsFrom(
         VehicleDMSManager::class.java
     )
-    private val scene_matcher: SceneMatch = com.hirain.aiagent.SceneMatch()
+    private val scene_matcher: SceneMatch = com.hirain.aiagent.scenematch.SceneMatch()
     private var scene_server: SceneServer? = null
     private val mergedTools: List<ToolSpecification> = Stream
         .of(
@@ -249,13 +253,16 @@ class AIAgentService : Service() {
     }
     inner class AIVRListener : VRListener {
 
-        override fun onAsrResult(var1: String?) {
+        override fun onAsrResult(var1: String?, var2: Int) {
+
+        }
+        override fun onAsrState(var1: Int) {
 
         }
 
         override fun onTTsState(var1: Int) {
            Log.d("TAG", "onTTsState var1 = " + var1)
-            if (var1 == 2 ) {
+            if (var1 == 2 || var1 == 3) {
                 mainHandler.post {
                     hideAIAgent(var1)
                 }
@@ -377,7 +384,7 @@ class AIAgentService : Service() {
             .build()
         chatMemory = MessageWindowChatMemory.builder()
             .maxMessages(50)
-            .chatMemoryStore(PersistentChatMemorySqlite(applicationContext))
+            .chatMemoryStore(PersistentChatMemorySqlite(applicationContext, "AIAgentMemory"))
             .build()
 
         chatMemory!!.add(SystemMessage.systemMessage(systemPrompt))
@@ -385,7 +392,7 @@ class AIAgentService : Service() {
       //  Thread { processUserRequest("Hello World") }.start()
         mManager = VRServiceManager.getInstance(this)
         mManager?.initCallback(m_vrlistener)
-        scene_server = com.hirain.aiagent.SceneServer(this)
+        scene_server = com.hirain.aiagent.sceneserver.SceneServer(this)
 
     }
 
@@ -456,7 +463,7 @@ class AIAgentService : Service() {
     }
     fun stopTTS() {
         mManager!!.stop()
-        Thread.sleep(50)
+        Thread.sleep(1000)
 
 
     }
@@ -475,7 +482,9 @@ class AIAgentService : Service() {
 
         @Throws(RemoteException::class)
         override fun requestAI(arg: String?): Int {
+            Log.d("TAG","requestAI arg = " + arg)
             if (arg.equals("@#%^StartListen")) {
+                mRequestAIStr = ""
                 mChating = true;
                 stopTTS()
                 mainHandler.post {
@@ -492,8 +501,19 @@ class AIAgentService : Service() {
             }
             else if (arg.equals("@#%^StopListen")) {
                 mChating = false
-                Log.d("TAG","requestAI stopListen!!!!!!!!!!!!!!!!!")
-
+                var messgae = mRequestAIStr
+                Log.d("TAG","requestAI stopListen!!!!!!!!!!!!!!!!! mRequestAIStr = " + mRequestAIStr + " mNagativeReqExecuting = " + mNagativeReqExecuting)
+                if (mNagativeReqExecuting == false && mRequestAIStr != "") {
+                    mWorkHandler!!.post {
+                        processNagativeRequest(messgae)
+                    }
+                }
+                else {
+                    mainHandler.post {
+                        hideAIAgent(1)
+                    }
+                }
+                mRequestAIStr = ""
             }
             else if (arg.equals("@#%^ClearChatMemory")) {
                 Log.d("TAG","requestAI CleanChat!!!!!!!!!!!!!!!!!")
@@ -501,15 +521,14 @@ class AIAgentService : Service() {
                     chatMemory!!.clear()
                 }
             }
-            else {
-                appendToChat("$arg")
-                mWorkHandler!!.post {
-                    processNagativeRequest(arg!!)
-                }
+
+
+
+            else  {
+                mRequestAIStr = arg!!
+                appendToChat(arg)
 
             }
-
-
 
             return 0
         }
@@ -692,6 +711,8 @@ class AIAgentService : Service() {
 
     }
     private fun processNagativeRequest(userMessage: String) {
+        mNagativeReqExecuting = true
+
         try {
             Log.d("TAG", "processNagativeRequest begin userMessage =" + userMessage);
             chatMemory!!.add(UserMessage.userMessage(userMessage))
@@ -701,6 +722,8 @@ class AIAgentService : Service() {
         } catch (e: java.lang.Exception) {
             appendNagativeResponse("系统: 请求失败 - ", e.message + "")
         }
+        mNagativeReqExecuting = false
+
     }
     private fun processPositiveRequest(userMessage: String) {
         Log.d("TAG", "processPositiveRequest 1111111111111111111111111 begin " )

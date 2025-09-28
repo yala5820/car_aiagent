@@ -17,8 +17,9 @@ import static dev.langchain4j.data.message.ChatMessageSerializer.messagesToJson;
 public class PersistentChatMemorySqlite implements ChatMemoryStore {
     private final ChatMemoryDbHelper dbHelper;
 
-    public PersistentChatMemorySqlite(Context context) {
-        dbHelper = new ChatMemoryDbHelper(context);
+    public PersistentChatMemorySqlite(Context context, String memoryName) {
+        String fileName = memoryName + ".db";
+        dbHelper = new ChatMemoryDbHelper(context, fileName);
     }
 
     @Override
@@ -68,10 +69,9 @@ public class PersistentChatMemorySqlite implements ChatMemoryStore {
 
     private static class ChatMemoryDbHelper extends SQLiteOpenHelper {
         private static final int DATABASE_VERSION = 1;
-        private static final String DATABASE_NAME = "ChatMemory.db";
 
-        public ChatMemoryDbHelper(Context context) {
-            super(context, DATABASE_NAME, null, DATABASE_VERSION);
+        public ChatMemoryDbHelper(Context context, String fileName) {
+            super(context, fileName, null, DATABASE_VERSION);
         }
 
         @Override
