@@ -163,13 +163,13 @@ public class SceneServer {
     private String handleSceneSpecified (SceneMatch.Scene scene) {
         if (scene.name.equals("驾驶员疲劳")) {
 //            TODO：ctrl voice, safety belt, drive-support.
-            return "已勒紧安全带，开启驾驶辅助。";
+            return "方向盘震动已开启，并开启驾驶辅助。";
         } else if (scene.name.equals("舱外浓烟")) {
 //            TODO: ctrl light.
             return "已打开双闪提醒后车。";
         } else if (scene.name.equals("雨雪天气")) {
 //            TODO: ctrl light.
-            return "已打开雾灯、示廓灯。";
+            return "已打开雾灯、示廓灯，已切换到雪地模式。";
         } else if (scene.name.equals("乘客休息")) {
 //            TODO: ctrl voice.
             return "已降低座舱系统音量。";
