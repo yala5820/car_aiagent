@@ -86,7 +86,7 @@ class AIAgentService : Service() {
     private var mPositiveReqExecuting = false;
     private var mNagativeReqExecuting = false;
     private var mRequestAIStr = ""
-
+    private var mTTSplaying = false;
     private var chat: ChatServer? = null
 
     private val scene_matcher: SceneMatch = SceneMatch()
@@ -119,31 +119,31 @@ class AIAgentService : Service() {
         }
         if (!mChating) {
             mPositiveReqExecuting = true
-            if (mCaptureCnt % 3 == 0) {
 
-                var scene = SceneMatch.Scene("其他", "无效场景")
-                scene =
-                    scene_matcher.vl_scene_match(
-                        getBase64(applicationContext, p.getValue()),
-                        "image/jpeg"
-                    )
-                Log.d(
-                    "TAG",
-                    "ProcessCaptureGot scene.name = " + scene.name + " mLastScence =" + mLastScence
+
+            var scene = SceneMatch.Scene("其他", "无效场景")
+            scene =
+                scene_matcher.vl_scene_match(
+                    getBase64(applicationContext, p.getValue()),
+                    "image/jpeg"
                 )
+            Log.d(
+                "TAG",
+                "ProcessCaptureGot scene.name = " + scene.name + " mLastScence =" + mLastScence
+            )
 
-                if (scene.name.equals("其他") || scene.name.equals("")) {
-                    //  mLastScence = scene.name
-                } else if (scene.name.equals(mLastScence)) {
-                    mLastScence = scene.name
-                } else {
-                    val res: String = scene_server!!.scene_server(scene)
-               //     cleanChat()
-                    mLastScence = scene.name
-                    appendPositiveResponseToChat("AI:", res)
-                    //  processPositiveRequest(res);
-                }
+            if (scene.name.equals("其他") || scene.name.equals("")) {
+                //  mLastScence = scene.name
+            } else if (scene.name.equals(mLastScence)) {
+                mLastScence = scene.name
+            } else {
+                val res: String = scene_server!!.scene_server(scene)
+                //     cleanChat()
+                mLastScence = scene.name
+                appendPositiveResponseToChat("AI:", res)
+                //  processPositiveRequest(res);
             }
+
             Log.d("TAG", "ProcessCaptureGot end !!!!!!!!!!!!!!!! seqid = " + seqid)
             mPositiveReqExecuting = false
         }
@@ -162,17 +162,30 @@ class AIAgentService : Service() {
         override fun onTTsState(var1: Int) {
            Log.d("TAG", "onTTsState var1 = " + var1)
             if (var1 == 2 || var1 == 3) {
+                mTTSplaying = false;
                 mainHandler.post {
                     hideAIAgent(var1)
                 }
+            }
+            else {
+                mTTSplaying = true;
             }
         }
     }
     inner class CameraListener : ICameraServiceListener {
 
         override fun onCaptureGot(seqid: Int, mode: Int, p: CameraData) {
+            Log.d("TAG", "mPositiveReqExecuting = " + mPositiveReqExecuting + " mNagativeReqExecuting = " + mNagativeReqExecuting + " mTTSplaying = " + mTTSplaying );
             if (mPositiveReqExecuting) {
                 Log.d("TAG", "onCaptureGot mPositiveReqExecuting !!!!!!!!!!!!!!!!!!")
+            }
+            else if (mNagativeReqExecuting) {
+                Log.d("TAG", "onCaptureGot mNagativeReqExecuting !!!!!!!!!!!!!!!!!!")
+
+            }
+            else if (mTTSplaying) {
+                Log.d("TAG", "onCaptureGot mTTSplaying  !!!!!!!!!!!!!!!!!!")
+
             }
             else {
                 mWorkHandler!!.post {
@@ -269,7 +282,7 @@ class AIAgentService : Service() {
             } catch (e: Exception) {
                 e.printStackTrace() // 或者其他错误处理方式
             }
-        }, 5, 3, TimeUnit.SECONDS) // 每1秒执行一次
+        }, 5, 1, TimeUnit.SECONDS) // 每1秒执行一次
 
 
         vl = VlManager(this)
@@ -386,7 +399,7 @@ class AIAgentService : Service() {
 
             }
             else if (arg.equals("@#%^StopListen")) {
-                mChating = false
+
                 var messgae = mRequestAIStr
                 Log.d("TAG","requestAI stopListen!!!!!!!!!!!!!!!!! mRequestAIStr = " + mRequestAIStr + " mNagativeReqExecuting = " + mNagativeReqExecuting)
                 if (mNagativeReqExecuting == false && mRequestAIStr != "") {
@@ -395,6 +408,7 @@ class AIAgentService : Service() {
                     }
                 }
                 else if (mRequestAIStr == "" && mNagativeReqExecuting == false){
+                    mChating = false
                     mainHandler.post {
                         hideAIAgent(1)
                     }
@@ -537,6 +551,8 @@ class AIAgentService : Service() {
             AIUpdateNagativeResponse(prefix + message + "\n")
 
             mManager?.speak(message);
+            mChating = false
+
 
         }
     }
