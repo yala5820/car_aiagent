@@ -113,5 +113,6 @@ dependencies {
     implementation(project(":VlManager"))
     implementation(project(":SceneMatch"))
     implementation(project(":SceneServer"))
+    implementation(project(":ChatServer"))
 
 }
