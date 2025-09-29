@@ -347,6 +347,7 @@ class AIAgentService : Service() {
 
     }
     fun stopTTS() {
+        Log.d("TAG", "stopTTS!!!!!!!!!!!!")
         mManager!!.stop()
         Thread.sleep(1000)
 
@@ -393,7 +394,7 @@ class AIAgentService : Service() {
                         processNagativeRequest(messgae)
                     }
                 }
-                else {
+                else if (mRequestAIStr == "" && mNagativeReqExecuting == false){
                     mainHandler.post {
                         hideAIAgent(1)
                     }

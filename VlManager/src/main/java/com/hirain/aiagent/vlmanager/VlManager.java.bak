@@ -196,8 +196,7 @@ public class VlManager {
         ChatResponse aiResponse = vlModel.chat(systemmsg, usrmsg);
         Log.d("TAG", "front_camera_interactionPositive end ccccccccccccccccccc");
 
-        String warning_msg = "(该响应仅对本次前向视野互动有效，对后续前向视野互动意图属于无效的记忆，必须重新调用摄像头数据识别工具！)";
-        return aiResponse.aiMessage().text() + warning_msg;
+        return aiResponse.aiMessage().text();
 
     }
     public boolean hasTool(String toolname) {
