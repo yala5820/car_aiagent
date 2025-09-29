@@ -113,11 +113,12 @@ class AIAgentService : Service() {
     }
     private fun ProcessCaptureGot(seqid: Int, mode: Int, p: CameraData) {
 
-        Log.d("TAG", "ProcessCaptureGot start !!!!!!!!!!!!!! seqid = " + seqid + " mCaptureCnt = " + mCaptureCnt)
+        Log.d("TAG", "ProcessCaptureGot start !!!!!!!!!!!!!! mChating = " + mChating + " mTTSplaying = " + mTTSplaying)
         if (vl!= null ) {
             vl!!.front_camera_save("", p.getValue())
         }
-        if (!mChating) {
+
+        if (!mChating && !mTTSplaying) {
             mPositiveReqExecuting = true
 
 
@@ -362,7 +363,7 @@ class AIAgentService : Service() {
     fun stopTTS() {
         Log.d("TAG", "stopTTS!!!!!!!!!!!!")
         mManager!!.stop()
-        Thread.sleep(1000)
+        Thread.sleep(500)
 
 
     }
@@ -383,10 +384,11 @@ class AIAgentService : Service() {
         override fun requestAI(arg: String?): Int {
             Log.d("TAG","requestAI arg = " + arg)
             if (arg.equals("@#%^StartListen")) {
-                mRequestAIStr = ""
-                mChating = true;
-                stopTTS()
+
                 mainHandler.post {
+                    mRequestAIStr = ""
+                    mChating = true;
+                    stopTTS()
                     hideAIAgent(0)
                     AIUpdateRequestProcuder(
                         false
@@ -542,9 +544,10 @@ class AIAgentService : Service() {
 
     }
     private fun appendNagativeResponse(prefix:String, message: String) {
-        mChating = false
-        stopTTS()
+
         mainHandler.post {
+            mChating = false
+            stopTTS()
             Log.d("TAG", "appendNagativeResponse message =" + message)
             hideAIAgent(0)
 
@@ -557,8 +560,9 @@ class AIAgentService : Service() {
         }
     }
     private fun appendPositiveResponseToChat(prefix:String, message: String) {
-        stopTTS()
+
         mainHandler.post {
+            stopTTS()
             cleanChat()
 
             hideAIAgent(0)

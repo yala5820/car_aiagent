@@ -157,7 +157,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
         mHandler.post {
 
-            mCount = 900 //5秒后消失
+            mCount = 10000 //5秒后消失
 
             if (isFirstUpdate) {
                 Log.d("TAG", "appendToWebView: isFirstUpdate")
@@ -488,8 +488,14 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     fun updateRequestTextInfo(content:String, idx: Int) {
         mHandler.post {
             if (content.length > 0) {
-                mCount = 900;
+                mCount = 10000;
+                mInputView.visibility = View.VISIBLE
             }
+            else {
+                mInputView.visibility = View.GONE
+
+            }
+
             mInputView.text = content
         }
     }
