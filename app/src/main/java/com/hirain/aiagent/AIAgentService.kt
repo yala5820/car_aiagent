@@ -17,6 +17,7 @@ import android.os.IBinder
 import android.os.IBinder.DeathRecipient
 import android.os.Looper
 import android.os.RemoteException
+import android.os.SharedMemory
 import android.provider.Settings
 import android.util.Base64
 import android.util.DisplayMetrics
@@ -29,44 +30,16 @@ import com.hirain.adapter.vr.VRServiceManager
 import com.hirain.aiagent.chatserver.ChatServer
 import com.hirain.aiagent.scenematch.SceneMatch
 import com.hirain.aiagent.sceneserver.SceneServer
-import com.hirain.aiagent.vehicleacmanager.VehicleAcManager
-import com.hirain.aiagent.vehicledoormanager.VehicleDoorManager
-import com.hirain.aiagent.vehiclefragmanager.VehicleDMSManager
-import com.hirain.aiagent.vehiclefragmanager.VehicleFragManager
-import com.hirain.aiagent.vehiclefragmanager.VehicleSpeedManager
-import com.hirain.aiagent.vehicleseatmanager.VehicleSeatManager
-import com.hirain.aiagent.vehiclewindowmanager.VehicleWindowManager
 import com.hirain.aiagent.vlmanager.VlManager
 import com.hirain.camera.Camera
 import com.hirain.camera.CameraData
 import com.hirain.camera.ICameraServiceListener
-import dev.langchain4j.agent.tool.ToolExecutionRequest
-import dev.langchain4j.agent.tool.ToolSpecification
-import dev.langchain4j.agent.tool.ToolSpecifications
-import dev.langchain4j.data.message.ChatMessage
-import dev.langchain4j.data.message.SystemMessage
-import dev.langchain4j.data.message.ToolExecutionResultMessage
-import dev.langchain4j.data.message.UserMessage
-import dev.langchain4j.memory.ChatMemory
-import dev.langchain4j.memory.chat.MessageWindowChatMemory
-import dev.langchain4j.model.chat.ChatModel
-import dev.langchain4j.model.chat.request.ChatRequest
-import dev.langchain4j.model.chat.response.ChatResponse
-import dev.langchain4j.model.openai.OpenAiChatModel
-import langchain4j.chat_memory_sqlite.PersistentChatMemorySqlite
-import langchain4j.http_client_ok.OkHttpClient
-import map.web.weatherutils.WeatherUtils
-import org.json.JSONException
-import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.time.Duration
 import java.util.TimeZone
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import java.util.stream.Collectors
-import java.util.stream.Stream
 
 class AIAgentService : Service() {
     private lateinit var windowManager: WindowManager
@@ -86,7 +59,7 @@ class AIAgentService : Service() {
     private var mPositiveReqExecuting = false;
     private var mNagativeReqExecuting = false;
     private var mRequestAIStr = ""
-    private var mTTSplaying = false;
+    private var mNagativeTTSplaying = false;
     private var chat: ChatServer? = null
 
     private val scene_matcher: SceneMatch = SceneMatch()
@@ -111,14 +84,15 @@ class AIAgentService : Service() {
             )
         }
     }
-    private fun ProcessCaptureGot(seqid: Int, mode: Int, p: CameraData) {
 
-        Log.d("TAG", "ProcessCaptureGot start !!!!!!!!!!!!!! mChating = " + mChating + " mTTSplaying = " + mTTSplaying)
+    private fun ProcessCaptureGot(seqid: Int, mode: Int, p: CameraData, fullTask:Boolean) {
+
+        Log.d("TAG", "ProcessCaptureGot start !!!!!!!!!!!!!! mChating = " + mChating + " mNagativeTTSplaying = " + mNagativeTTSplaying)
         if (vl!= null ) {
             vl!!.front_camera_save("", p.getValue())
         }
 
-        if (!mChating && !mTTSplaying) {
+        if (!mChating && !mNagativeTTSplaying && fullTask) {
             mPositiveReqExecuting = true
 
 
@@ -136,8 +110,8 @@ class AIAgentService : Service() {
             if (scene.name.equals("其他") || scene.name.equals("")) {
                 //  mLastScence = scene.name
             } else if (scene.name.equals(mLastScence)) {
-                mLastScence = scene.name
-            } else {
+                    mLastScence = scene.name
+                } else {
                 val res: String = scene_server!!.scene_server(scene)
                 //     cleanChat()
                 mLastScence = scene.name
@@ -163,36 +137,51 @@ class AIAgentService : Service() {
         override fun onTTsState(var1: Int) {
            Log.d("TAG", "onTTsState var1 = " + var1)
             if (var1 == 2 || var1 == 3) {
-                mTTSplaying = false;
+                mNagativeTTSplaying = false;
                 mainHandler.post {
                     hideAIAgent(var1)
                 }
             }
-            else {
-                mTTSplaying = true;
-            }
+
         }
     }
     inner class CameraListener : ICameraServiceListener {
 
         override fun onCaptureGot(seqid: Int, mode: Int, p: CameraData) {
-            Log.d("TAG", "mPositiveReqExecuting = " + mPositiveReqExecuting + " mNagativeReqExecuting = " + mNagativeReqExecuting + " mTTSplaying = " + mTTSplaying );
+            Log.d("TAG", "mPositiveReqExecuting = " + mPositiveReqExecuting + " mNagativeReqExecuting = " + mNagativeReqExecuting + " mNagativeTTSplaying = " + mNagativeTTSplaying );
             if (mPositiveReqExecuting) {
                 Log.d("TAG", "onCaptureGot mPositiveReqExecuting !!!!!!!!!!!!!!!!!!")
+                mWorkHandler!!.post {
+                    ProcessCaptureGot(seqid, mode, p, false)
+                }
             }
             else if (mNagativeReqExecuting) {
                 Log.d("TAG", "onCaptureGot mNagativeReqExecuting !!!!!!!!!!!!!!!!!!")
-
+                mWorkHandler!!.post {
+                    ProcessCaptureGot(seqid, mode, p, false)
+                }
             }
-            else if (mTTSplaying) {
-                Log.d("TAG", "onCaptureGot mTTSplaying  !!!!!!!!!!!!!!!!!!")
-
+            else if (mNagativeTTSplaying) {
+                Log.d("TAG", "onCaptureGot mNagativeTTSplaying  !!!!!!!!!!!!!!!!!!")
+                mWorkHandler!!.post {
+                    ProcessCaptureGot(seqid, mode, p, false)
+                }
             }
             else {
                 mWorkHandler!!.post {
-                    ProcessCaptureGot(seqid, mode, p)
+                    ProcessCaptureGot(seqid, mode, p, true)
                 }
             }
+        }
+        override fun onRawData(
+            var1: Int,
+            var2: Int,
+            var3: Int,
+            var4: Long,
+            var6: Int,
+            var7: SharedMemory?
+        ) {
+
         }
 
         override fun onCameraServiceDisconnected() {
@@ -544,6 +533,7 @@ class AIAgentService : Service() {
 
     }
     private fun appendNagativeResponse(prefix:String, message: String) {
+        mNagativeTTSplaying = true;
 
         mainHandler.post {
             mChating = false
@@ -552,7 +542,6 @@ class AIAgentService : Service() {
             hideAIAgent(0)
 
             AIUpdateNagativeResponse(prefix + message + "\n")
-
             mManager?.speak(message);
             mChating = false
 

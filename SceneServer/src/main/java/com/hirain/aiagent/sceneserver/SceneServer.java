@@ -114,8 +114,8 @@ public class SceneServer {
                 "        2) 驾驶员疲劳场景，空调温度设置在19-22摄氏度之间。\n" +
                 "        3) 乘员休息场景，空调设置为舒适温度。\n" +
                 "    2. 如果调节了空调温度，需要同时关闭已开启的车窗。\n" +
-                "    3. 保证仅在雪天寒冷场景下控制方向盘与座椅加热，其他场景禁止开启加热";
-        chatMemory.add(UserMessage.from(userPrompt));
+                "    3. 保证仅在雪天寒冷场景下控制方向盘与座椅加热，其他场景禁止开启加热" +
+                "    4. 雪天需要把行驶模式切换为雪地模式，保证安全驾驶";        chatMemory.add(UserMessage.from(userPrompt));
         ChatRequest request = ChatRequest.builder()
                 .messages(chatMemory.messages())
                 .toolSpecifications(tools.get(scene.name))
