@@ -129,7 +129,11 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 }
             }
             else {
-                params.width = 700;
+                var textlength = mInputView.text.length
+                params.width = 250 + textlength * 40;
+                if (params.width > 700) {
+                    params.width = 700
+                }
                 params.x = 958;
                 roboticonParams.leftMargin = 30 // 设置左侧边距为100dp
                 inputParams.leftMargin = 150
