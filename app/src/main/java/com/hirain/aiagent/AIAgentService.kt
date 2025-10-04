@@ -108,10 +108,10 @@ class AIAgentService : Service() {
             )
 
             if (scene.name.equals("其他") || scene.name.equals("")) {
-                //  mLastScence = scene.name
+                  // mLastScence = scene.name
             } else if (scene.name.equals(mLastScence)) {
                     mLastScence = scene.name
-                } else {
+            } else {
                 val res: String = scene_server!!.scene_server(scene)
                 //     cleanChat()
                 mLastScence = scene.name
@@ -326,8 +326,8 @@ class AIAgentService : Service() {
 
         Log.d("TAG","scnwidth =" + scnwidth + " scnheight " + scnheight + " Screen Height: $screenHeight dp"  + "Screen Width: $screenWidth dp")
         var posx = 0;
-        if (scnwidth == 2560) {
-            posx = 658
+        if (scnwidth >= 1920) {
+            posx = 558
         }
         layoutAIAgentParams = WindowManager.LayoutParams().apply {
             this.type = type
@@ -372,7 +372,9 @@ class AIAgentService : Service() {
         @Throws(RemoteException::class)
         override fun requestAI(arg: String?): Int {
             Log.d("TAG","requestAI arg = " + arg)
+
             if (arg.equals("@#%^StartListen")) {
+                Log.d("TAG","requestAI arg = " + arg)
 
                 mainHandler.post {
                     mRequestAIStr = ""
@@ -385,30 +387,39 @@ class AIAgentService : Service() {
                     AIUpdateRequestText(
                         "聆听中...", 0
                     )
+                //    AIHideWebView()
 
                 }
 
             }
             else if (arg.equals("@#%^StopListen")) {
+                mainHandler.post {
 
-                var messgae = mRequestAIStr
-                Log.d("TAG","requestAI stopListen!!!!!!!!!!!!!!!!! mRequestAIStr = " + mRequestAIStr + " mNagativeReqExecuting = " + mNagativeReqExecuting)
-                if (mNagativeReqExecuting == false && mRequestAIStr != "") {
-                    mWorkHandler!!.post {
-                        processNagativeRequest(messgae)
+                    Log.d("TAG", "requestAI arg = " + arg)
+
+                    var messgae = mRequestAIStr
+                    Log.d(
+                        "TAG",
+                        "requestAI stopListen!!!!!!!!!!!!!!!!! mRequestAIStr = " + mRequestAIStr + " mNagativeReqExecuting = " + mNagativeReqExecuting
+                    )
+                    if (mNagativeReqExecuting == false && mRequestAIStr != "") {
+                        mWorkHandler!!.post {
+                            processNagativeRequest(messgae)
+                        }
+                    } else if (mRequestAIStr == "" && mNagativeReqExecuting == false) {
+                        mChating = false
+                        mainHandler.post {
+                            hideAIAgent(1)
+                        }
                     }
+                    mRequestAIStr = ""
                 }
-                else if (mRequestAIStr == "" && mNagativeReqExecuting == false){
-                    mChating = false
-                    mainHandler.post {
-                        hideAIAgent(1)
-                    }
-                }
-                mRequestAIStr = ""
             }
             else if (arg.equals("@#%^ClearChatMemory")) {
-                Log.d("TAG","requestAI CleanChat!!!!!!!!!!!!!!!!!")
+
                 mainHandler.post {
+                    Log.d("TAG","requestAI arg = " + arg)
+
                     chat!!.cleanMemory()
                 }
             }
@@ -416,8 +427,12 @@ class AIAgentService : Service() {
 
 
             else  {
-                mRequestAIStr = arg!!
-                appendToChat(arg)
+                mainHandler.post {
+                    Log.d("TAG","requestAI arg = " + arg)
+
+                    mRequestAIStr = arg!!
+                    appendToChat(arg)
+                }
 
             }
 
@@ -461,7 +476,10 @@ class AIAgentService : Service() {
     {
         floatAIAgentView.updateRequestTextProcuder(visible)
     }
-
+    fun AIHideWebView()
+    {
+        floatAIAgentView.hideWebView()
+    }
     fun AIUpdateRequestText(content: String, idx: Int)
     {
         floatAIAgentView.updateRequestTextInfo(content, idx)
@@ -539,7 +557,7 @@ class AIAgentService : Service() {
             mChating = false
             stopTTS()
             Log.d("TAG", "appendNagativeResponse message =" + message)
-            hideAIAgent(0)
+            AIHideWebView()
 
             AIUpdateNagativeResponse(prefix + message + "\n")
             mManager?.speak(message);
@@ -551,15 +569,19 @@ class AIAgentService : Service() {
     private fun appendPositiveResponseToChat(prefix:String, message: String) {
 
         mainHandler.post {
-            stopTTS()
-            cleanChat()
+            if (mChating == false && mNagativeTTSplaying == false) {
+                stopTTS()
+                cleanChat()
 
-            hideAIAgent(0)
-            mManager?.speak(message);
-            Log.d("TAG", "appendPositiveResponseToChat 2222222222222222222 message = " + message)
+                AIHideWebView()
+                mManager?.speak(message);
+                Log.d(
+                    "TAG",
+                    "appendPositiveResponseToChat 2222222222222222222 message = " + message
+                )
 
-            AIUpdatePositiveResponseText(prefix + mLastScence + " " + message + "\n", 0 );
-
+                AIUpdatePositiveResponseText(prefix + mLastScence + " " + message + "\n", 0);
+            }
 
         }
     }

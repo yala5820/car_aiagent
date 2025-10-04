@@ -8,22 +8,18 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.ActivityManager
 import android.content.Context
-import android.graphics.drawable.LayerDrawable
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.LayoutInflater
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.webkit.ValueCallback
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
-import android.widget.LinearLayout
-import android.widget.Switch
+import android.widget.ImageView
 import android.widget.TextView
 import com.hirain.aiagent.databinding.AiagentWindowLayoutBinding
 import java.util.concurrent.Executors
@@ -94,52 +90,76 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     private fun updateWindowVisibility(visible:Boolean)  {
 
 
-        val frameLayout: LinearLayout = findViewById(R.id.aiagentlinearLayout)
+        val roboticon: ImageView = findViewById(R.id.roboticon)
         if (mLogCnt % 100 == 0)
             Log.d("TAG", "updateWindowVisibility mCount= " + mCount)
         val params = layoutParams as WindowManager.LayoutParams
-        var curHeight = params.height
-        var curWidth = params.width
+
         if (!visible) {
-            // m_view.visibility = View.INVISIBLE;
+            m_view.visibility = View.INVISIBLE;
          //   Log.d("TAG", "loadInitialHtml xxxxxxxxxxxxxx" )
 
             params.height = 1
             params.width = 1
             mLastHegight = 0
+            mWebView.visibility = View.INVISIBLE
             loadInitialHtml()
             //Thread.sleep(1)
 
 
         } else {
             m_view.visibility = View.VISIBLE;
-            params.width = WindowManager.LayoutParams.WRAP_CONTENT
-            var maxHeight = mWebView.measuredHeight
-            if (maxHeight < mWebView.contentHeight) {
-                maxHeight = mWebView.contentHeight
+            var roboticonParams: ViewGroup.MarginLayoutParams = roboticon.getLayoutParams() as ViewGroup.MarginLayoutParams
+            var inputParams: ViewGroup.MarginLayoutParams = mInputView.getLayoutParams() as ViewGroup.MarginLayoutParams
+            var producerParams: ViewGroup.MarginLayoutParams = mProcuderView.getLayoutParams() as ViewGroup.MarginLayoutParams
+            var maxHeight = 0
+         //   Log.d("TAG", "roboticon left = " + roboticon.left + " mWebView.visibility " + mWebView.visibility + " roboticon.visibility " + roboticon.visibility)
+            if (mWebView.visibility == View.VISIBLE) {
+                params.width = 1244;
+                params.x = 658;
+                roboticonParams.leftMargin = 330 // 设置左侧边距为100dp
+                inputParams.leftMargin = 450
+                producerParams.leftMargin = 450
+                maxHeight = mWebView.measuredHeight
+                if (maxHeight < mWebView.contentHeight) {
+                    maxHeight = mWebView.contentHeight
+                }
+                if (maxHeight < mWebView.height) {
+                    maxHeight = mWebView.height
+                }
             }
-            if (maxHeight < mWebView.height) {
-                maxHeight = mWebView.height
+            else {
+                params.width = 700;
+                params.x = 958;
+                roboticonParams.leftMargin = 30 // 设置左侧边距为100dp
+                inputParams.leftMargin = 150
+                producerParams.leftMargin = 150
+
+
+
             }
-            maxHeight  += 150
+            mInputView.setLayoutParams(inputParams)
+            roboticon.setLayoutParams(roboticonParams)
+            mProcuderView.setLayoutParams(producerParams)
+
+      //      Log.d("TAG", "after roboticon left = " + roboticon.left + " mWebView.visibility " + mWebView.visibility + " roboticon.visibility " + roboticon.visibility)
+
+
+            maxHeight  += 170
             if (maxHeight > 1272) {
                 maxHeight = 1272
             }
             if ( mLastHegight > maxHeight && (mLastHegight - maxHeight < 100)) {
                 maxHeight = mLastHegight// 防抖
-                //  Log.d("TAG", "avoid shake!!!!!!!!!!!! maxHeight = " + maxHeight)
+               //   Log.d("TAG", "avoid shake!!!!!!!!!!!! maxHeight = " + maxHeight + " mLastHegight = " + mLastHegight)
             }
             mLastHegight = maxHeight
 
             if (mLogCnt % 100 == 0)
-                Log.d("TAG", " webview height = " + mWebView.measuredHeight + "conentheight = " + mWebView.contentHeight + " height = " + mWebView.height + " maxHeight = " + maxHeight)
+                Log.d("TAG", " webview height = " + mWebView.measuredHeight + "conentheight = " + mWebView.contentHeight + " height = " + mWebView.height + " maxHeight = " + maxHeight + " mLastHegight = " + mLastHegight)
             params.height = maxHeight;//WindowManager.LayoutParams.WRAP_CONTENT
-            val backgroundDrawable = resources.getDrawable(R.drawable.aiagentwindowbigbg, null)
 
-            // val layerDrawable = LayerDrawable(arrayOf(backgroundDrawable))
-            // layerDrawable.setLayerInset(0, 0, 0, 0, 0) // 无边距填充
             windowManager.updateViewLayout(m_view, params)
-            //   frameLayout.background = layerDrawable
 
 
         }
@@ -188,7 +208,9 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
         Log.d("TAG", "appendTextViaJs aaaaaaaaaaaaaaaaaaaaa text message = " + text)
 
         // 使用JavaScript接口追加内容
-            mWebView.visibility = View.VISIBLE
+        Log.d("TAG", "roboticon mWebView.visibility show2 " )
+
+        mWebView.visibility = View.VISIBLE
             mWebView!!.evaluateJavascript(
                 "appendText(\"$escapedText\");",
                 null
@@ -499,6 +521,10 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             mInputView.text = content
         }
     }
+    fun hideWebView() {
+        mWebView.visibility = View.INVISIBLE
+        loadInitialHtml()
+    }
     fun updateRequestTextProcuder(visible:Boolean) {
         mHandler.post {
             if (visible) {
@@ -513,7 +539,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
     fun updateNagativeResponse(content:String) {
         mHandler.post {
 
-            mWebView.visibility = View.GONE
+            mWebView.visibility = View.INVISIBLE
             appendToWebView(content, 0, m_curSessionId)
 
         }
@@ -523,6 +549,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             if (idx == 0) {
                 m_curSessionId++;
             }
+            Log.d("TAG", "roboticon mWebView.visibility show1 " )
             mWebView.visibility = View.VISIBLE
             appendToWebView(content, idx, m_curSessionId)
 

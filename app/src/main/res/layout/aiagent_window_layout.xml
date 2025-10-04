@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content">
+
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="1244px"
+    android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:id="@+id/myFrameLayout"
     android:background="@drawable/aiagentwindowsmallbg"
     android:scaleType="fitXY"
+
     android:padding="1dp">
     <!-- 背景ImageView -->
 
@@ -15,60 +20,48 @@
         android:id="@+id/aiagentlinearLayout"
 
         android:orientation="vertical">
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-
-            android:id="@+id/tipslayout"
-            android:layout_marginLeft="600px"
-            android:orientation="horizontal">
-            <ImageView
-                android:id="@+id/roboticon"
-                android:layout_width="72px"
-                android:layout_height="72px"
-
-                android:scaleType="fitXY"
-                android:src="@drawable/robot"
-                android:visibility="visible" />
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginLeft="50px"
-                android:layout_marginTop="30px"
-                android:id="@+id/inputtextslayout"
-
-                android:orientation="vertical">
-                <TextView
-                    android:id="@+id/inputtext"
-                    android:layout_width="500px"
-                    android:layout_height="40px"
-                    android:maxLines="1"
-                    android:ellipsize="start"
-                    android:textColor="#FF000000"
-                    android:textSize="20sp"/>
-
-            </LinearLayout>
 
 
-        </LinearLayout>
-        <TextView
-            android:id="@+id/proceduer"
-            android:layout_width="235px"
-            android:layout_height="40px"
-            android:textColor="#FF007AFF"
-            android:text="qwen3.0生成中..."
-            android:visibility="gone"
-            android:layout_marginLeft="550px"
-            android:textSize="15sp"/>
         <WebView
             android:id="@+id/responseWebView"
             android:layout_width="1200px"
             android:layout_height="wrap_content"
             android:layout_marginLeft="20px"
-            android:layout_marginTop="5px"
+            android:layout_marginTop="85px"
             android:layout_marginBottom="25px"
-
+            android:visibility="invisible"
             android:elevation="2dp" />
     </LinearLayout>
 
 </FrameLayout>
+    <ImageView
+        android:id="@+id/roboticon"
+        android:layout_width="120px"
+        android:layout_height="120px"
+        android:layout_marginLeft="30px"
+        android:layout_marginTop="0px"
+
+        android:scaleType="fitXY"
+        android:src="@drawable/robot"
+        android:visibility="visible" />
+    <TextView
+        android:id="@+id/inputtext"
+        android:layout_width="500px"
+        android:layout_height="40px"
+        android:layout_marginLeft="200px"
+        android:layout_marginTop="40px"
+        android:maxLines="1"
+        android:ellipsize="start"
+        android:textColor="#FF000000"
+        android:textSize="20sp"/>
+    <TextView
+        android:id="@+id/proceduer"
+        android:layout_width="235px"
+        android:layout_height="40px"
+        android:layout_marginLeft="200px"
+        android:layout_marginTop="90px"
+        android:textColor="#FF007AFF"
+        android:text="qwen3.0生成中..."
+        android:visibility="gone"
+        android:textSize="15sp"/>
+</RelativeLayout>
