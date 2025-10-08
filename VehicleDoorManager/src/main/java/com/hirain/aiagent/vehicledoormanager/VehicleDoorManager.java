@@ -5,7 +5,7 @@ import dev.langchain4j.agent.tool.ToolExecutionRequest;
 
 import org.json.JSONException;
 import org.json.JSONObject;
-
+import com.hirain.aiagent.soaservice.SoaService;
 public class VehicleDoorManager {
     private static final String KEY_DOOR_FL_STATUS = "左前门开启";
     private static final String KEY_DOOR_FR_STATUS = "右前门开启";
@@ -26,6 +26,7 @@ public class VehicleDoorManager {
         this.door_locked = false;
     }
     public String getDoorStatus() {
+        SoaService.Companion.getInstance().getDoorStatus();
         JSONObject json = new JSONObject();
         try {
             json.put(KEY_DOOR_FL_STATUS, door_fl_open);
@@ -40,6 +41,8 @@ public class VehicleDoorManager {
     }
     @Tool("控制车门闭锁/解锁")
     public String set_door_lock(@P(value = "控制车门闭锁：true, 控制车门开锁：false") boolean lock) {
+        SoaService.Companion.getInstance().set_door_lock(lock);
+
         if (!lock) {
             if (formalfunc) this.door_locked = false;
             return "车门解锁成功";

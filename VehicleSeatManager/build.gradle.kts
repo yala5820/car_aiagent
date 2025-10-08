@@ -36,4 +36,6 @@ dependencies {
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
     implementation("dev.langchain4j:langchain4j:1.1.0")
+    implementation(project(":SoaService"))
+
 }

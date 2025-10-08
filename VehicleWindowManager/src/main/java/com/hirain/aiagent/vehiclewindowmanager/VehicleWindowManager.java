@@ -5,6 +5,7 @@ import dev.langchain4j.agent.tool.ToolExecutionRequest;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+import com.hirain.aiagent.soaservice.SoaService;
 
 public class VehicleWindowManager {
     private static final String KEY_WINDOW_FL_STATUS = "左前车窗开度百分比";
@@ -44,6 +45,8 @@ public class VehicleWindowManager {
         this.no_window_opening_passengers = false;
     }
     public String getWindowStatus() {
+        SoaService.Companion.getInstance().getWindowStatus();
+
         JSONObject json = new JSONObject();
         try {
             json.put(KEY_WINDOW_FL_STATUS, window_fl_open);
@@ -64,60 +67,82 @@ public class VehicleWindowManager {
     }
     @Tool("调节左前车窗开度")
     public String setFlWindowStatus(@P(value = "开度百分比") int status) {
+        SoaService.Companion.getInstance().setFlWindowStatus(status);
+
         if (formalfunc) this.window_fl_open = status;
         return "左前车窗控制成功";
     }
     @Tool("调节右前车窗开度")
     public String setFrWindowStatus(@P(value = "开度百分比") int status) {
+        SoaService.Companion.getInstance().setFrWindowStatus(status);
+
         if (formalfunc) this.window_fr_open = status;
         return "右前车窗控制成功";
     }
     @Tool("调节左后车窗开度")
     public String setRlWindowStatus(@P(value = "开度百分比") int status) {
+        SoaService.Companion.getInstance().setRlWindowStatus(status);
+
         if (formalfunc) this.window_rl_open = status;
         return "左后车窗控制成功";
     }
     @Tool("调节右后车窗开度")
     public String setRrWindowStatus(@P(value = "开度百分比") int status) {
+        SoaService.Companion.getInstance().setRrWindowStatus(status);
+
         if (formalfunc) this.window_fl_open = status;
         return "右后车窗控制成功";
     }
     @Tool("调节天窗开度")
     public String setTopWindowStatus(@P(value = "开度百分比") int status) {
+        SoaService.Companion.getInstance().setTopWindowStatus(status);
+
         if (formalfunc) this.window_top_open = status;
         return "天窗控制成功";
     }
     @Tool("调节遮阳帘开度")
     public String setSunShadowStatus(@P(value = "开度百分比") int status) {
+        SoaService.Companion.getInstance().setSunShadowStatus(status);
+
         if (formalfunc) this.window_top_open = status;
         return "遮阳帘控制成功";
     }
     @Tool("控制前风挡除霜功能开启/关闭。")
     public String set_window_f_defrosting(@P(value = "开启：true, 关闭：false") boolean defrosting) {
+        SoaService.Companion.getInstance().set_window_f_defrosting(defrosting);
+
         if (formalfunc) this.window_f_defrosting = defrosting;
         String tmp = defrosting ? "开启": "关闭";
         return "前风挡除霜" + tmp + "成功";
     }
     @Tool("控制后风挡加热功能开启/关闭。")
     public String set_window_r_heat(@P(value = "开启：true, 关闭：false") boolean heat) {
+        SoaService.Companion.getInstance().set_window_r_heat(heat);
+
         if (formalfunc) this.window_r_heat = heat;
         String tmp = heat ? "开启": "关闭";
         return "后风挡加热" + tmp + "成功";
     }
     @Tool("控制左后视镜加热功能开启/关闭。")
     public String set_mirror_l_heat(@P(value = "开启：true, 关闭：false") boolean heat) {
+        SoaService.Companion.getInstance().set_mirror_l_heat(heat);
+
         if (formalfunc) this.mirror_l_heat = heat;
         String tmp = heat ? "开启": "关闭";
         return "左后视镜加热" + tmp + "成功";
     }
     @Tool("控制右后视镜加热功能开启/关闭。")
     public String set_mirror_r_heat(@P(value = "开启：true, 关闭：false") boolean heat) {
-        this.mirror_r_heat = heat;
+        SoaService.Companion.getInstance().set_mirror_r_heat(heat);
+
+        if (formalfunc) this.mirror_r_heat = heat;
         String tmp = heat ? "开启": "关闭";
         return "右后视镜加热" + tmp + "成功";
     }
     @Tool("乘员禁止开窗功能开启/关闭。")
     public String set_no_window_opening_passengers(@P(value = "开启：true, 关闭：false") boolean open) {
+        SoaService.Companion.getInstance().set_no_window_opening_passengers(open);
+
         if (formalfunc) this.no_window_opening_passengers = open;
         String tmp = open ? "开启": "关闭";
         return "乘员禁止开窗功能" + tmp + "成功";

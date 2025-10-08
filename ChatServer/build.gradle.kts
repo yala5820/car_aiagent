@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.chatserver"
+    namespace = "com.hirain.aiagent.chatserver"
     compileSdk = 35
 
     defaultConfig {

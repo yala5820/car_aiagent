@@ -27,7 +27,7 @@
             android:layout_width="1200px"
             android:layout_height="wrap_content"
             android:layout_marginLeft="20px"
-            android:layout_marginTop="85px"
+            android:layout_marginTop="90px"
             android:layout_marginBottom="25px"
             android:visibility="invisible"
             android:elevation="2dp" />
@@ -46,14 +46,14 @@
         android:visibility="visible" />
     <TextView
         android:id="@+id/inputtext"
-        android:layout_width="500px"
+        android:layout_width="700px"
         android:layout_height="40px"
         android:layout_marginLeft="200px"
         android:layout_marginTop="40px"
         android:maxLines="1"
         android:ellipsize="start"
         android:textColor="#FF000000"
-        android:textSize="20sp"/>
+        android:textSize="30sp"/>
     <TextView
         android:id="@+id/proceduer"
         android:layout_width="235px"

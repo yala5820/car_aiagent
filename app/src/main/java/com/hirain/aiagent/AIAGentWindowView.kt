@@ -113,11 +113,19 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             var inputParams: ViewGroup.MarginLayoutParams = mInputView.getLayoutParams() as ViewGroup.MarginLayoutParams
             var producerParams: ViewGroup.MarginLayoutParams = mProcuderView.getLayoutParams() as ViewGroup.MarginLayoutParams
             var maxHeight = 0
-         //   Log.d("TAG", "roboticon left = " + roboticon.left + " mWebView.visibility " + mWebView.visibility + " roboticon.visibility " + roboticon.visibility)
+            var textlength = mInputView.text.length
+
+            //   Log.d("TAG", "roboticon left = " + roboticon.left + " mWebView.visibility " + mWebView.visibility + " roboticon.visibility " + roboticon.visibility)
             if (mWebView.visibility == View.VISIBLE) {
                 params.width = 1244;
                 params.x = 658;
-                roboticonParams.leftMargin = 330 // 设置左侧边距为100dp
+                if (textlength == 0) {
+                    roboticonParams.leftMargin = 580 // 设置左侧边距为100dp
+
+                }
+                else {
+                    roboticonParams.leftMargin = 330 // 设置左侧边距为100dp
+                }
                 inputParams.leftMargin = 450
                 producerParams.leftMargin = 450
                 maxHeight = mWebView.measuredHeight
@@ -129,10 +137,9 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 }
             }
             else {
-                var textlength = mInputView.text.length
                 params.width = 250 + textlength * 40;
-                if (params.width > 700) {
-                    params.width = 700
+                if (params.width > 900) {
+                    params.width = 900
                 }
                 params.x = 958;
                 roboticonParams.leftMargin = 30 // 设置左侧边距为100dp

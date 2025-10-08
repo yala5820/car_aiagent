@@ -5,6 +5,8 @@ import dev.langchain4j.agent.tool.ToolExecutionRequest;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+import com.hirain.aiagent.soaservice.SoaService;
+
 public class VehicleFragManager {
     private static final String KEY_FRAG_TYPE = "车载香氛类型";
     private static final String KEY_FRAG_INTENSITY = "车载香氛浓度";
@@ -16,6 +18,8 @@ public class VehicleFragManager {
         this.frag_intensity = "关闭";
     }
     public String getFragStatus() {
+        SoaService.Companion.getInstance().getFragStatus();
+
         JSONObject json = new JSONObject();
         try {
             json.put(KEY_FRAG_TYPE, frag_type);
@@ -27,11 +31,15 @@ public class VehicleFragManager {
     }
     @Tool("控制车载香氛类型。")
     public String set_frag_type(@P(value = "类型，必须为：‘晨间松木’、‘正午丁香’、‘午夜橙香’中的一个。") String type) {
+        SoaService.Companion.getInstance().set_frag_type(type);
+
         if (formalfunc) this.frag_type = type;
         return "车载香氛类型成功设置为：" + type;
     }
     @Tool("控制车载香氛强度。")
     public String set_frag_intensity(@P(value = "强度，必须为：‘关闭’、‘低’、‘中’、‘高’中的一个。") String intensity) {
+        SoaService.Companion.getInstance().set_frag_intensity(intensity);
+
         if (formalfunc) this.frag_intensity = intensity;
         return "车载香氛强度成功设置为：" + intensity;
     }

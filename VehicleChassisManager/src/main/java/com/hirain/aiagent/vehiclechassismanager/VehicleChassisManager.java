@@ -5,6 +5,8 @@ import dev.langchain4j.agent.tool.ToolExecutionRequest;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+import com.hirain.aiagent.soaservice.SoaService;
+
 public class VehicleChassisManager {
     private static final String KEY_CHASSIS_MODE = "底盘行驶模式";
     private String chassis_mode;
@@ -13,6 +15,8 @@ public class VehicleChassisManager {
         this.chassis_mode = "普通模式";
     }
     public String getChassisStatus() {
+        SoaService.Companion.getInstance().getChassisStatus();
+
         JSONObject json = new JSONObject();
         try {
             json.put(KEY_CHASSIS_MODE, "普通模式");
@@ -23,6 +27,8 @@ public class VehicleChassisManager {
     }
     @Tool("控制底盘行驶模式，用于适应雪地、越野、普通驾驶场景。")
     public String set_chassis_mode(@P(value = "模式，必须为：‘普通模式’、‘越野模式’、‘雪地模式’中的一个。") String mode) {
+        SoaService.Companion.getInstance().set_chassis_mode(mode);
+
         if (formalfunc)this.chassis_mode = mode;
         return "底盘行驶模式成功设置为：" + mode;
     }
