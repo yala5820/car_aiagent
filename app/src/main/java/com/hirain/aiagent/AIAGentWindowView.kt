@@ -42,6 +42,8 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
     private var mLastHegight = 0;
     private var m_view: AIAgentWindowView =this
     private var m_curSessionId = 0;
+    private var mNeedAdjustViewWidth = 2
+    private var mWebViewVisibility = View.INVISIBLE
     init {
 
 
@@ -107,6 +109,7 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
 
 
             //Thread.sleep(1)
+            windowManager.updateViewLayout(m_view, params)
 
 
         } else {
@@ -117,8 +120,7 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
             var maxHeight = 0
             var textlength = mInputView.text.length
 
-            if (mWebView.visibility == View.VISIBLE) {
-                params.width = 1244;
+            if (mWebViewVisibility == View.VISIBLE) {
                 params.x = 658;
                 if (textlength == 0) {
                     roboticonParams.leftMargin = 530 // 设置左侧边距为100dp
@@ -137,9 +139,23 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
                     maxHeight = mWebView.height
                 }
                 maxHeight  += 170
+                if (mNeedAdjustViewWidth > 0) {
+                    //  params.width = 1244;
+                    mNeedAdjustViewWidth --
+                }
+                if (mNeedAdjustViewWidth == 0) {
+                    params.width = 1244;
+                    mWebView.visibility = View.VISIBLE
+
+                    mNeedAdjustViewWidth = 5
+                }
+
 
             }
             else {
+                mNeedAdjustViewWidth = 2
+                mWebView.visibility = View.INVISIBLE
+
                 params.width = 250 + textlength * 40;
                 if (params.width > 900) {
                     params.width = 900
@@ -177,7 +193,6 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
 
         }
 
-        windowManager.updateViewLayout(m_view, params)
 
         // Kotlin 示例
 
@@ -222,8 +237,8 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
 
         // 使用JavaScript接口追加内容
         Log.d("TAG", "roboticon mWebView.visibility show2 " )
-
-        mWebView.visibility = View.VISIBLE
+        mWebViewVisibility = View.VISIBLE
+      //  mWebView.visibility = View.VISIBLE
             mWebView!!.evaluateJavascript(
                 "appendText(\"$escapedText\");",
                 null
@@ -540,7 +555,9 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
             loadInitialHtml()
 
         }
-        mWebView.visibility = View.INVISIBLE
+        mWebViewVisibility = View.INVISIBLE
+
+//        mWebView.visibility = View.INVISIBLE
     }
     fun updateRequestTextProcuder(visible:Boolean) {
         mHandler.post {
@@ -555,8 +572,9 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
     }
     fun updateNagativeResponse(content:String) {
         mHandler.post {
+            mWebViewVisibility = View.INVISIBLE
 
-            mWebView.visibility = View.INVISIBLE
+         //   mWebView.visibility = View.INVISIBLE
             appendToWebView(content, 0, m_curSessionId)
 
         }
@@ -567,7 +585,9 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
                 m_curSessionId++;
             }
             Log.d("TAG", "roboticon mWebView.visibility show1 " )
-            mWebView.visibility = View.VISIBLE
+          //  mWebView.visibility = View.VISIBLE
+            mWebViewVisibility = View.VISIBLE
+
             appendToWebView(content, idx, m_curSessionId)
 
             // Log.d("TAG", "update TextInfo content = " + content)
