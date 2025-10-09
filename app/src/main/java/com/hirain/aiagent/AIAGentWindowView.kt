@@ -96,14 +96,15 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
         val params = layoutParams as WindowManager.LayoutParams
 
         if (!visible) {
+            hideWebView()
             m_view.visibility = View.INVISIBLE;
          //   Log.d("TAG", "loadInitialHtml xxxxxxxxxxxxxx" )
 
             params.height = 1
             params.width = 1
             mLastHegight = 0
-            mWebView.visibility = View.INVISIBLE
-            loadInitialHtml()
+
+
             //Thread.sleep(1)
 
 
@@ -115,19 +116,18 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             var maxHeight = 0
             var textlength = mInputView.text.length
 
-            //   Log.d("TAG", "roboticon left = " + roboticon.left + " mWebView.visibility " + mWebView.visibility + " roboticon.visibility " + roboticon.visibility)
             if (mWebView.visibility == View.VISIBLE) {
                 params.width = 1244;
                 params.x = 658;
                 if (textlength == 0) {
-                    roboticonParams.leftMargin = 580 // 设置左侧边距为100dp
+                    roboticonParams.leftMargin = 530 // 设置左侧边距为100dp
 
                 }
                 else {
-                    roboticonParams.leftMargin = 330 // 设置左侧边距为100dp
+                    roboticonParams.leftMargin = 230 // 设置左侧边距为100dp
                 }
-                inputParams.leftMargin = 450
-                producerParams.leftMargin = 450
+                inputParams.leftMargin = 350
+                producerParams.leftMargin = 350
                 maxHeight = mWebView.measuredHeight
                 if (maxHeight < mWebView.contentHeight) {
                     maxHeight = mWebView.contentHeight
@@ -141,7 +141,7 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 if (params.width > 900) {
                     params.width = 900
                 }
-                params.x = 958;
+                params.x = 858;
                 roboticonParams.leftMargin = 30 // 设置左侧边距为100dp
                 inputParams.leftMargin = 150
                 producerParams.leftMargin = 150
@@ -153,7 +153,6 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
             roboticon.setLayoutParams(roboticonParams)
             mProcuderView.setLayoutParams(producerParams)
 
-      //      Log.d("TAG", "after roboticon left = " + roboticon.left + " mWebView.visibility " + mWebView.visibility + " roboticon.visibility " + roboticon.visibility)
 
 
             maxHeight  += 170
@@ -195,11 +194,11 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 loadInitialHtml()
                 mHandler.postDelayed({
                     appendTextViaJs(text, sessionid)
-                }, 50)
+                }, 200)
             } else {
 
                 mHandler.postDelayed({appendTextViaJs(text, sessionid)
-                }, 100)
+                }, 200)
 
 
             }
@@ -533,8 +532,12 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
         }
     }
     fun hideWebView() {
+        if (mWebView.visibility == View.VISIBLE) {
+            Log.d("TAG", "hide Webview")
+            loadInitialHtml()
+
+        }
         mWebView.visibility = View.INVISIBLE
-        loadInitialHtml()
     }
     fun updateRequestTextProcuder(visible:Boolean) {
         mHandler.post {

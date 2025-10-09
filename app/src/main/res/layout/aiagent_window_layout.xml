@@ -53,7 +53,7 @@
         android:maxLines="1"
         android:ellipsize="start"
         android:textColor="#FF000000"
-        android:textSize="30sp"/>
+        android:textSize="20sp"/>
     <TextView
         android:id="@+id/proceduer"
         android:layout_width="235px"
