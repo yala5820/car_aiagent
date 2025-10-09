@@ -147,7 +147,7 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
                     params.width = 1244;
                     mWebView.visibility = View.VISIBLE
 
-                    mNeedAdjustViewWidth = 5
+                    mNeedAdjustViewWidth = 2
                 }
 
 
