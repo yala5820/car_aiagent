@@ -26,14 +26,14 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 
-class AIAgentWindowView(context: Context) : FrameLayout(context) {
+class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : FrameLayout(context) {
     private val binding = AiagentWindowLayoutBinding.inflate(LayoutInflater.from(context), this, true)
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val activityManager = context.getSystemService(Activity.ACTIVITY_SERVICE) as ActivityManager
     private var mWebView: WebView = findViewById(R.id.responseWebView)
-
-    private var mInputView: TextView = findViewById(R.id.inputtext)
-    private var mProcuderView: TextView = findViewById(R.id.proceduer)
+    private var floatWindowView:FloatWindowView = floatingWindow
+    private var mInputView: TextView = floatWindowView.getInputView()//findViewById(R.id.inputtext)
+    private var mProcuderView: TextView = floatWindowView.getProducerView()//findViewById(R.id.proceduer)
 
     private val mHandler: Handler = Handler(Looper.getMainLooper())
     private var isFirstUpdate = true
@@ -89,14 +89,15 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
 
     private fun updateWindowVisibility(visible:Boolean)  {
 
-
-        val roboticon: ImageView = findViewById(R.id.roboticon)
+        floatWindowView.updateWindowVisibility(visible)
+        val roboticon: ImageView = floatWindowView.getRobotIcon()
         if (mLogCnt % 100 == 0)
             Log.d("TAG", "updateWindowVisibility mCount= " + mCount)
         val params = layoutParams as WindowManager.LayoutParams
 
         if (!visible) {
             hideWebView()
+
             m_view.visibility = View.INVISIBLE;
          //   Log.d("TAG", "loadInitialHtml xxxxxxxxxxxxxx" )
 
@@ -126,8 +127,8 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 else {
                     roboticonParams.leftMargin = 230 // 设置左侧边距为100dp
                 }
-                inputParams.leftMargin = 350
-                producerParams.leftMargin = 350
+             //   inputParams.leftMargin = 350
+              //  producerParams.leftMargin = 350
                 maxHeight = mWebView.measuredHeight
                 if (maxHeight < mWebView.contentHeight) {
                     maxHeight = mWebView.contentHeight
@@ -135,6 +136,8 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                 if (maxHeight < mWebView.height) {
                     maxHeight = mWebView.height
                 }
+                maxHeight  += 170
+
             }
             else {
                 params.width = 250 + textlength * 40;
@@ -142,20 +145,20 @@ class AIAgentWindowView(context: Context) : FrameLayout(context) {
                     params.width = 900
                 }
                 params.x = 858;
-                roboticonParams.leftMargin = 30 // 设置左侧边距为100dp
-                inputParams.leftMargin = 150
-                producerParams.leftMargin = 150
+                roboticonParams.leftMargin = 230 // 设置左侧边距为100dp
+         //       inputParams.leftMargin = 150
+         //       producerParams.leftMargin = 150
 
+                maxHeight  += 170
 
 
             }
-            mInputView.setLayoutParams(inputParams)
+         //   mInputView.setLayoutParams(inputParams)
             roboticon.setLayoutParams(roboticonParams)
-            mProcuderView.setLayoutParams(producerParams)
+         //   mProcuderView.setLayoutParams(producerParams)
 
 
 
-            maxHeight  += 170
             if (maxHeight > 1272) {
                 maxHeight = 1272
             }

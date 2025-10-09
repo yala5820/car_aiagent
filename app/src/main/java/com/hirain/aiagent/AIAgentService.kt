@@ -44,6 +44,9 @@ import java.util.concurrent.TimeUnit
 class AIAgentService : Service() {
     private lateinit var windowManager: WindowManager
     private lateinit var floatAIAgentView: AIAgentWindowView
+    private lateinit var floatWindowView: FloatWindowView
+    private lateinit var layoutFloatingViewParams: WindowManager.LayoutParams
+
     private lateinit var layoutAIAgentParams: WindowManager.LayoutParams
     private val mIAIAgentAidlListeners:  MutableMap<IAIAgentAidlListener, DeathRecipient> = mutableMapOf()
     private var mLastScence:String = ""
@@ -303,9 +306,10 @@ class AIAgentService : Service() {
         floatAIAgentView.hideFloatingWindow(var1)
     }
 
-    private fun showAIAgent(windowmanager: WindowManager) {
 
-        floatAIAgentView = AIAgentWindowView(this)
+    private fun showFloatingWindow(windowmanager: WindowManager) {
+
+        floatWindowView = FloatWindowView(this)
         // 配置悬浮窗 LayoutParams
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -329,7 +333,49 @@ class AIAgentService : Service() {
         Log.d("TAG","scnwidth =" + scnwidth + " scnheight " + scnheight + " Screen Height: $screenHeight dp"  + "Screen Width: $screenWidth dp")
         var posx = 0;
         if (scnwidth >= 1920) {
-            posx = 558
+            posx = 658
+        }
+        layoutFloatingViewParams = WindowManager.LayoutParams().apply {
+            this.type = type
+            format = PixelFormat.TRANSLUCENT
+            flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+            width = WindowManager.LayoutParams.WRAP_CONTENT
+            height = WindowManager.LayoutParams.WRAP_CONTENT
+            gravity = Gravity.TOP or Gravity.START
+            x = posx
+            y = 20
+        }
+    }
+
+    private fun showAIAgent(windowmanager: WindowManager) {
+        showFloatingWindow(windowmanager)
+
+        floatAIAgentView = AIAgentWindowView(this, floatWindowView)
+        // 配置悬浮窗 LayoutParams
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        else WindowManager.LayoutParams.TYPE_PHONE
+        val display: Display = windowManager.defaultDisplay
+        val displayMetrics: DisplayMetrics = DisplayMetrics()
+        display.getMetrics(displayMetrics)
+
+        val scnwidth: Int = displayMetrics.widthPixels
+        val scnheight: Int = displayMetrics.heightPixels
+        val scndensity: Float = displayMetrics.density
+
+
+        // 屏幕宽度（像素）
+        val screenWidth = Math.round(scnwidth /scndensity)
+
+        // 屏幕高度（像素）
+        val screenHeight = Math.round(scnheight / scndensity)
+
+
+        Log.d("TAG","scnwidth =" + scnwidth + " scnheight " + scnheight + " Screen Height: $screenHeight dp"  + "Screen Width: $screenWidth dp")
+        var posx = 0;
+        if (scnwidth >= 1920) {
+            posx = 658
         }
         layoutAIAgentParams = WindowManager.LayoutParams().apply {
             this.type = type
@@ -343,11 +389,14 @@ class AIAgentService : Service() {
             y = 20
         }
         windowManager.addView(floatAIAgentView, layoutAIAgentParams)
+        windowManager.addView(floatWindowView, layoutFloatingViewParams)
+
     }
     override fun onDestroy() {
         super.onDestroy()
         Log.d("TAG", "onDestroy")
         windowManager.removeViewImmediate(floatAIAgentView)
+        windowManager.removeViewImmediate(floatWindowView)
         // 解注册广播接收器
 
     }
@@ -406,7 +455,11 @@ class AIAgentService : Service() {
                     )
                     if (mNagativeReqExecuting == false && mRequestAIStr != "") {
                         mWorkHandler!!.post {
+                            AIUpdateRequestProcuder(
+                                true
+                            )
                             processNagativeRequest(messgae)
+
                         }
                     } else if (mRequestAIStr == "" && mNagativeReqExecuting == false && mNagativeTTSplaying == false) {
                         mChating = false
@@ -542,11 +595,7 @@ class AIAgentService : Service() {
                 message, 0
             )
         }
-        mainHandler.postDelayed({
-            AIUpdateRequestProcuder(
-                true
-            )
-        }, 1000)
+
 
 
 
@@ -571,7 +620,13 @@ class AIAgentService : Service() {
     private fun appendPositiveResponseToChat(prefix:String, message: String) {
 
         mainHandler.post {
-            if (mChating == false && mNagativeTTSplaying == false) {
+            if (mChating == true || mNagativeTTSplaying == true || mNagativeReqExecuting == true) {
+                mWorkHandler!!.post {
+                    mLastScence = "";
+                }
+                Log.d("TAG", "appendPositiveResponseToChat nagitavereq is executing!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            }
+            if (mChating == false && mNagativeTTSplaying == false && mNagativeReqExecuting == false) {
                 stopTTS()
                 cleanChat()
 
