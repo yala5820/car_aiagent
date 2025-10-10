@@ -96,6 +96,7 @@ class AIAgentService : Service() {
         }
 
         if (!mChating && !mNagativeTTSplaying && fullTask) {
+            var start =  System.currentTimeMillis()
             Log.d("TAG", "SceneService ProcessCaptureGot after save capture !!!!!!!!!!!!!! mChating = " + mChating + " mNagativeTTSplaying = " + mNagativeTTSplaying + " fullTask = " + fullTask)
 
             mPositiveReqExecuting = true
@@ -126,8 +127,8 @@ class AIAgentService : Service() {
                 }
                 //  processPositiveRequest(res);
             }
-
-            Log.d("TAG", "SceneService ProcessCaptureGot end !!!!!!!!!!!!!!!! seqid = " + seqid)
+            var end = System.currentTimeMillis()
+            Log.d("TAG", "SceneService ProcessCaptureGot end !!!!!!!!!!!!!!!! seqid = " + seqid + " cost =" + (end - start))
             mPositiveReqExecuting = false
         }
         mCaptureCnt++;
