@@ -61,7 +61,9 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
         binding.root.setOnClickListener {
             Log.d("TAG", "onClick xxxxxxxxxxxxxx")
             mHandler.post {
+                hideWebView()
                 mCount = 0
+
             }
 
         }
@@ -98,7 +100,7 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
         val params = layoutParams as WindowManager.LayoutParams
 
         if (!visible) {
-            hideWebView()
+      //      hideWebView()
 
             m_view.visibility = View.INVISIBLE;
          //   Log.d("TAG", "loadInitialHtml xxxxxxxxxxxxxx" )
@@ -117,6 +119,8 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
             var roboticonParams: ViewGroup.MarginLayoutParams = roboticon.getLayoutParams() as ViewGroup.MarginLayoutParams
             var inputParams: ViewGroup.MarginLayoutParams = mInputView.getLayoutParams() as ViewGroup.MarginLayoutParams
             var producerParams: ViewGroup.MarginLayoutParams = mProcuderView.getLayoutParams() as ViewGroup.MarginLayoutParams
+            var webviewParams: ViewGroup.MarginLayoutParams = mWebView.getLayoutParams() as ViewGroup.MarginLayoutParams
+
             var maxHeight = 0
             var textlength = mInputView.text.length
 
@@ -187,6 +191,10 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
             if (mLogCnt % 100 == 0)
                 Log.d("TAG", " webview height = " + mWebView.measuredHeight + "conentheight = " + mWebView.contentHeight + " height = " + mWebView.height + " maxHeight = " + maxHeight + " mLastHegight = " + mLastHegight)
             params.height = maxHeight;//WindowManager.LayoutParams.WRAP_CONTENT
+            if (mWebViewVisibility == View.VISIBLE) {
+                webviewParams.height = WindowManager.LayoutParams.WRAP_CONTENT;
+                mWebView.setLayoutParams(webviewParams)
+            }
 
             windowManager.updateViewLayout(m_view, params)
 
@@ -212,7 +220,7 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
                 loadInitialHtml()
                 mHandler.postDelayed({
                     appendTextViaJs(text, sessionid)
-                }, 200)
+                }, 500)
             } else {
 
                 mHandler.postDelayed({appendTextViaJs(text, sessionid)
@@ -525,13 +533,16 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
         //确保该函数在hanlder里面调用
         if (var1 == 0) {
             Log.d("TAG", "updateWindowVisibility false!!!!!!!!!!!!!!!!!")
+            hideWebView()
             updateWindowVisibility(false)
+
           //  mCount = 0
 
         //    Thread.sleep(500)
         }
         else {
             mCount = 0
+            hideWebView()
         }
 
     }
@@ -551,7 +562,7 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
     }
     fun hideWebView() {
         if (mWebView.visibility == View.VISIBLE) {
-            Log.d("TAG", "hide Webview")
+            Log.d("TAG", "initialaaaaaaaaa Webview")
             loadInitialHtml()
 
         }

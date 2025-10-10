@@ -90,12 +90,14 @@ class AIAgentService : Service() {
 
     private fun ProcessCaptureGot(seqid: Int, mode: Int, p: CameraData, fullTask:Boolean) {
 
-        Log.d("TAG", "SceneService ProcessCaptureGot start !!!!!!!!!!!!!! mChating = " + mChating + " mNagativeTTSplaying = " + mNagativeTTSplaying + " fullTask = " + fullTask)
+        Log.d("TAG", " ProcessCaptureGot start !!!!!!!!!!!!!! mChating = " + mChating + " mNagativeTTSplaying = " + mNagativeTTSplaying + " fullTask = " + fullTask)
         if (vl!= null ) {
             vl!!.front_camera_save("", p.getValue())
         }
 
         if (!mChating && !mNagativeTTSplaying && fullTask) {
+            Log.d("TAG", "SceneService ProcessCaptureGot after save capture !!!!!!!!!!!!!! mChating = " + mChating + " mNagativeTTSplaying = " + mNagativeTTSplaying + " fullTask = " + fullTask)
+
             mPositiveReqExecuting = true
 
 
@@ -115,10 +117,13 @@ class AIAgentService : Service() {
             } else if (scene.name.equals(mLastScence)) {
                     mLastScence = scene.name
             } else {
-                val res: String = scene_server!!.scene_server(scene)
-                //     cleanChat()
-                mLastScence = scene.name
-                appendPositiveResponseToChat("AI:", res)
+                if (!mChating && !mNagativeTTSplaying && fullTask) {
+
+                    val res: String = scene_server!!.scene_server(scene)
+                    //     cleanChat()
+                    mLastScence = scene.name
+                    appendPositiveResponseToChat("AI:", res)
+                }
                 //  processPositiveRequest(res);
             }
 
@@ -151,27 +156,27 @@ class AIAgentService : Service() {
     inner class CameraListener : ICameraServiceListener {
 
         override fun onCaptureGot(seqid: Int, mode: Int, p: CameraData) {
-            Log.d("TAG", "SceneService mPositiveReqExecuting = " + mPositiveReqExecuting + " mNagativeReqExecuting = " + mNagativeReqExecuting + " mNagativeTTSplaying = " + mNagativeTTSplaying );
+            Log.d("TAG", " mPositiveReqExecuting = " + mPositiveReqExecuting + " mNagativeReqExecuting = " + mNagativeReqExecuting + " mNagativeTTSplaying = " + mNagativeTTSplaying );
             if (mPositiveReqExecuting) {
-                Log.d("TAG", "SceneService onCaptureGot mPositiveReqExecuting !!!!!!!!!!!!!!!!!!")
+                Log.d("TAG", " onCaptureGot mPositiveReqExecuting !!!!!!!!!!!!!!!!!!")
                 mWorkHandler!!.post {
                     ProcessCaptureGot(seqid, mode, p, false)
                 }
             }
             else if (mNagativeReqExecuting) {
-                Log.d("TAG", "SceneService onCaptureGot mNagativeReqExecuting !!!!!!!!!!!!!!!!!!")
+                Log.d("TAG", " onCaptureGot mNagativeReqExecuting !!!!!!!!!!!!!!!!!!")
                 mWorkHandler!!.post {
                     ProcessCaptureGot(seqid, mode, p, false)
                 }
             }
             else if (mNagativeTTSplaying) {
-                Log.d("TAG", "SceneService onCaptureGot mNagativeTTSplaying  !!!!!!!!!!!!!!!!!!")
+                Log.d("TAG", " onCaptureGot mNagativeTTSplaying  !!!!!!!!!!!!!!!!!!")
                 mWorkHandler!!.post {
                     ProcessCaptureGot(seqid, mode, p, false)
                 }
             }
             else {
-                Log.d("TAG", "SceneService fulltask  !!!!!!!!!!!!!!!!!!")
+                Log.d("TAG", " fulltask  !!!!!!!!!!!!!!!!!!")
 
                 mWorkHandler!!.post {
                     ProcessCaptureGot(seqid, mode, p, true)
@@ -462,8 +467,9 @@ class AIAgentService : Service() {
 
                         }
                     } else if (mRequestAIStr == "" && mNagativeReqExecuting == false && mNagativeTTSplaying == false) {
-                        mChating = false
                         mainHandler.post {
+                            mChating = false
+
                             hideAIAgent(1)
                         }
                     }
