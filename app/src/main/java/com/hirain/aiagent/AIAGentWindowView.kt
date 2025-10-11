@@ -128,6 +128,11 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView, agentS
 
             var maxHeight = 0
             var textlength = mInputView.text.length
+            if (mProcuderView.visibility == View.VISIBLE) {
+                if (textlength < 5) {
+                    textlength = 5
+                }
+            }
 
             if (mWebViewVisibility == View.VISIBLE) {
                 params.x = 658;

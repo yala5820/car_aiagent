@@ -60,7 +60,7 @@ class AIAgentService : Service() {
     private var mManager: VRServiceManager? = null
     private var mLastRequestAITimeStamp:Long = 0
     private var mCaptureCnt = 0;
-    private var mPositiveReqExecuting = false;
+    private var mPositiveReqExecuting: AtomicBoolean = AtomicBoolean(false);
     private var mNagativeReqExecuting: AtomicBoolean = AtomicBoolean(false);
     private var mRequestAIStr = ""
     private var mNagativeTTSplaying = false;
@@ -100,7 +100,6 @@ class AIAgentService : Service() {
             var start =  System.currentTimeMillis()
             Log.d("TAG", "SceneService ProcessCaptureGot after save capture !!!!!!!!!!!!!! mChating = " + mChating + " mNagativeTTSplaying = " + mNagativeTTSplaying + " fullTask = " + fullTask)
 
-            mPositiveReqExecuting = true
 
 
             var scene = SceneMatch.Scene("其他", "无效场景")
@@ -132,8 +131,9 @@ class AIAgentService : Service() {
             }
             var end = System.currentTimeMillis()
             Log.d("TAG", "SceneService ProcessCaptureGot end !!!!!!!!!!!!!!!! seqid = " + seqid + " cost1 =" + (middle - start)  + " total cost = " + (end - start))
-            mPositiveReqExecuting = false
         }
+        mPositiveReqExecuting.set(false)
+
         mCaptureCnt++;
 
     }
@@ -160,8 +160,8 @@ class AIAgentService : Service() {
     inner class CameraListener : ICameraServiceListener {
 
         override fun onCaptureGot(seqid: Int, mode: Int, p: CameraData) {
-            Log.d("TAG", " mPositiveReqExecuting = " + mPositiveReqExecuting + " mNagativeReqExecuting = " + mNagativeReqExecuting + " mNagativeTTSplaying = " + mNagativeTTSplaying );
-            if (mPositiveReqExecuting) {
+            Log.d("TAG", " mPositiveReqExecuting = " + mPositiveReqExecuting.get() + " mNagativeReqExecuting = " + mNagativeReqExecuting + " mNagativeTTSplaying = " + mNagativeTTSplaying );
+            if (mPositiveReqExecuting.get()) {
                 Log.d("TAG", " onCaptureGot mPositiveReqExecuting !!!!!!!!!!!!!!!!!!")
                 mWorkHandler!!.post {
                     ProcessCaptureGot(seqid, mode, p, false)
@@ -181,7 +181,7 @@ class AIAgentService : Service() {
             }
             else {
                 Log.d("TAG", " fulltask  !!!!!!!!!!!!!!!!!!")
-
+                mPositiveReqExecuting.set(true)
                 mWorkHandler!!.post {
                     ProcessCaptureGot(seqid, mode, p, true)
                 }
