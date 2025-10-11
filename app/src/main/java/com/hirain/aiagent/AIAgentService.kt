@@ -40,6 +40,7 @@ import java.io.IOException
 import java.util.TimeZone
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class AIAgentService : Service() {
     private lateinit var windowManager: WindowManager
@@ -60,7 +61,7 @@ class AIAgentService : Service() {
     private var mLastRequestAITimeStamp:Long = 0
     private var mCaptureCnt = 0;
     private var mPositiveReqExecuting = false;
-    private var mNagativeReqExecuting = false;
+    private var mNagativeReqExecuting: AtomicBoolean = AtomicBoolean(false);
     private var mRequestAIStr = ""
     private var mNagativeTTSplaying = false;
     private var chat: ChatServer? = null
@@ -90,12 +91,12 @@ class AIAgentService : Service() {
 
     private fun ProcessCaptureGot(seqid: Int, mode: Int, p: CameraData, fullTask:Boolean) {
 
-        Log.d("TAG", " ProcessCaptureGot start !!!!!!!!!!!!!! mChating = " + mChating + " mNagativeTTSplaying = " + mNagativeTTSplaying + " fullTask = " + fullTask)
+        Log.d("TAG", " ProcessCaptureGot start !!!!!!!!!!!!!! mChating = " + mChating + " mNagativeTTSplaying = " + mNagativeTTSplaying + " mNagativeReqExecuting = " + mNagativeReqExecuting +  " fullTask = " + fullTask)
         if (vl!= null ) {
             vl!!.front_camera_save("", p.getValue())
         }
 
-        if (!mChating && !mNagativeTTSplaying && fullTask) {
+        if (!mChating && !mNagativeTTSplaying && !mNagativeReqExecuting.get() && fullTask) {
             var start =  System.currentTimeMillis()
             Log.d("TAG", "SceneService ProcessCaptureGot after save capture !!!!!!!!!!!!!! mChating = " + mChating + " mNagativeTTSplaying = " + mNagativeTTSplaying + " fullTask = " + fullTask)
 
@@ -112,13 +113,15 @@ class AIAgentService : Service() {
                 "TAG",
                 "SceneService ProcessCaptureGot scene.name = " + scene.name + " mLastScence =" + mLastScence
             )
+            var middle =  System.currentTimeMillis()
+
 
             if (scene.name.equals("其他") || scene.name.equals("")) {
                   // mLastScence = scene.name
             } else if (scene.name.equals(mLastScence)) {
                     mLastScence = scene.name
             } else {
-                if (!mChating && !mNagativeTTSplaying && fullTask) {
+                if (!mChating && !mNagativeTTSplaying && !mNagativeReqExecuting.get() && fullTask) {
 
                     val res: String = scene_server!!.scene_server(scene)
                     //     cleanChat()
@@ -128,7 +131,7 @@ class AIAgentService : Service() {
                 //  processPositiveRequest(res);
             }
             var end = System.currentTimeMillis()
-            Log.d("TAG", "SceneService ProcessCaptureGot end !!!!!!!!!!!!!!!! seqid = " + seqid + " cost =" + (end - start))
+            Log.d("TAG", "SceneService ProcessCaptureGot end !!!!!!!!!!!!!!!! seqid = " + seqid + " cost1 =" + (middle - start)  + " total cost = " + (end - start))
             mPositiveReqExecuting = false
         }
         mCaptureCnt++;
@@ -164,7 +167,7 @@ class AIAgentService : Service() {
                     ProcessCaptureGot(seqid, mode, p, false)
                 }
             }
-            else if (mNagativeReqExecuting) {
+            else if (mNagativeReqExecuting.get()) {
                 Log.d("TAG", " onCaptureGot mNagativeReqExecuting !!!!!!!!!!!!!!!!!!")
                 mWorkHandler!!.post {
                     ProcessCaptureGot(seqid, mode, p, false)
@@ -357,7 +360,7 @@ class AIAgentService : Service() {
     private fun showAIAgent(windowmanager: WindowManager) {
         showFloatingWindow(windowmanager)
 
-        floatAIAgentView = AIAgentWindowView(this, floatWindowView)
+        floatAIAgentView = AIAgentWindowView(this, floatWindowView, this)
         // 配置悬浮窗 LayoutParams
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -457,9 +460,10 @@ class AIAgentService : Service() {
                     var messgae = mRequestAIStr
                     Log.d(
                         "TAG",
-                        "requestAI stopListen!!!!!!!!!!!!!!!!! mRequestAIStr = " + mRequestAIStr + " mNagativeReqExecuting = " + mNagativeReqExecuting
+                        "requestAI stopListen!!!!!!!!!!!!!!!!! mRequestAIStr = " + mRequestAIStr + " mNagativeReqExecuting = " + mNagativeReqExecuting + " mNagativeTTSplaying = " + mNagativeTTSplaying
                     )
-                    if (mNagativeReqExecuting == false && mRequestAIStr != "") {
+                    if (!mNagativeReqExecuting.get()&& mNagativeTTSplaying == false && mRequestAIStr != "") {
+                        mNagativeReqExecuting.set(true)
                         mWorkHandler!!.post {
                             AIUpdateRequestProcuder(
                                 true
@@ -467,7 +471,7 @@ class AIAgentService : Service() {
                             processNagativeRequest(messgae)
 
                         }
-                    } else if (mRequestAIStr == "" && mNagativeReqExecuting == false && mNagativeTTSplaying == false) {
+                    } else if (mRequestAIStr == "" && !mNagativeReqExecuting.get() && mNagativeTTSplaying == false) {
                         mainHandler.post {
                             mChating = false
 
@@ -488,13 +492,16 @@ class AIAgentService : Service() {
 
 
 
-            else  {
+            else  if (!mNagativeReqExecuting.get() && mNagativeTTSplaying == false){
                 mainHandler.post {
                     Log.d("TAG","requestAI arg = " + arg)
 
                     mRequestAIStr = arg!!
                     appendToChat(arg)
                 }
+
+            }
+            else {
 
             }
 
@@ -563,7 +570,6 @@ class AIAgentService : Service() {
 
 
     private fun processNagativeRequest(userMessage: String) {
-        mNagativeReqExecuting = true
 
         try {
             Log.d("TAG", "processNagativeRequest begin userMessage =" + userMessage);
@@ -575,7 +581,7 @@ class AIAgentService : Service() {
         } catch (e: java.lang.Exception) {
             appendNagativeResponse("系统: 请求失败 - ", e.message + "")
         }
-        mNagativeReqExecuting = false
+
 
     }
 
@@ -612,7 +618,6 @@ class AIAgentService : Service() {
         mNagativeTTSplaying = true;
 
         mainHandler.post {
-            mChating = false
             stopTTS()
             Log.d("TAG", "appendNagativeResponse message =" + message)
             AIHideWebView()
@@ -620,6 +625,7 @@ class AIAgentService : Service() {
             AIUpdateNagativeResponse(prefix + message + "\n")
             mManager?.speak(message);
             mChating = false
+            mNagativeReqExecuting.set(false)
 
 
         }
@@ -627,13 +633,13 @@ class AIAgentService : Service() {
     private fun appendPositiveResponseToChat(prefix:String, message: String) {
 
         mainHandler.post {
-            if (mChating == true || mNagativeTTSplaying == true || mNagativeReqExecuting == true) {
+            if (mChating == true || mNagativeTTSplaying == true || mNagativeReqExecuting.get()) {
                 mWorkHandler!!.post {
                     mLastScence = "";
                 }
                 Log.d("TAG", "appendPositiveResponseToChat nagitavereq is executing!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             }
-            if (mChating == false && mNagativeTTSplaying == false && mNagativeReqExecuting == false) {
+            if (mChating == false && mNagativeTTSplaying == false && !mNagativeReqExecuting.get()) {
                 stopTTS()
                 cleanChat()
 

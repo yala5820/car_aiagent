@@ -21,12 +21,13 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
+import com.hirain.adapter.vr.VRServiceManager
 import com.hirain.aiagent.databinding.AiagentWindowLayoutBinding
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 
-class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : FrameLayout(context) {
+class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView, agentService:AIAgentService?) : FrameLayout(context) {
     private val binding = AiagentWindowLayoutBinding.inflate(LayoutInflater.from(context), this, true)
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val activityManager = context.getSystemService(Activity.ACTIVITY_SERVICE) as ActivityManager
@@ -34,6 +35,7 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
     private var floatWindowView:FloatWindowView = floatingWindow
     private var mInputView: TextView = floatWindowView.getInputView()//findViewById(R.id.inputtext)
     private var mProcuderView: TextView = floatWindowView.getProducerView()//findViewById(R.id.proceduer)
+    private var mAgentService: AIAgentService? = agentService
 
     private val mHandler: Handler = Handler(Looper.getMainLooper())
     private var isFirstUpdate = true
@@ -62,6 +64,9 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView) : Fram
             Log.d("TAG", "onClick xxxxxxxxxxxxxx")
             mHandler.post {
                 hideWebView()
+                mAgentService?.stopTTS()
+                Thread.sleep(500)
+
                 mCount = 0
 
             }
