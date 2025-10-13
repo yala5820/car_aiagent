@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "map.web.weatherutils"
+    namespace = "com.example.geoutils"
     compileSdk = 35
 
     defaultConfig {
@@ -38,6 +38,4 @@ dependencies {
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.8.9")
-    implementation("dev.langchain4j:langchain4j:1.1.0")
-    implementation(project(":geoutils"))
 }

@@ -13,9 +13,12 @@ import com.hirain.aiagent.vlmanager.VlManager;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.text.SimpleDateFormat;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -65,7 +68,8 @@ public class ChatServer {
             "        自然聊天：保持友好、专业且符合驾驶场景的对话风格，避免过度拟人化。\n" +
             "        娱乐互动：可根据请求讲笑话/故事，但需控制时长，单次不超过1分钟。\n" +
             "        百科问答：提供准确简洁的信息，复杂问题提供摘要并询问是否需要详情。\n" +
-            "        天气查询：使用对应工具查询天气，回答用户关于天气的对话。\n" +
+            "        天气查询：使用对应工具查询天气，回答用户关于天气的对话(未提供地址信息时参考当前地址信息)。\n" +
+"        天气查询：使用对应工具查询天气，回答用户关于天气的对话。\n" +
             "    推荐能力\n" +
             "        音乐/影视推荐：结合对话上下文智能推荐，仅能推荐，无法主动播放。\n" +
             "        旅游景点：结合对话上下文，提供个性化推荐。\n" +
@@ -78,13 +82,13 @@ public class ChatServer {
             "        支持自然语言理解的车辆控制，例如：把空调温度调节为22℃ --> 设置空调温度为22℃\n" +
             "        复杂指令拆解：例如：打开车窗通风并播放轻松音乐 --> 分步执行\n" +
             "    模糊控车\n" +
-            "        识别隐含需求：例如：\"有点冷\" --> 自动调高空调温度。\n" +
+            "        识别用户隐含需求，主动控车提升用户体验。\n" +
             "交互规范\n" +
             "    话术要求\n" +
             "        保持简洁，单次语音输出不超过30秒。\n" +
             "        模糊控车需要二次确认。\n" +
             "    功能规范之外的用户请求，必须以当前系统不支持为由礼貌拒绝，禁止承诺无法完成的用户请求！\n";
-
+    private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy年MM月dd日 HH时mm分", Locale.getDefault());
     private final WeatherUtils weatherutils;
     VehicleDoorManager doorManager;
     VehicleWindowManager windowManager;
@@ -96,7 +100,7 @@ public class ChatServer {
         OkHttpClientBuilder okHttpClientBuilder = langchain4j.http_client_ok.OkHttpClient.builder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .readTimeout(Duration.ofSeconds(120));
-        weatherutils = new WeatherUtils(context, "c9af807ed95f93b56855a928417586f9");
+        weatherutils = new WeatherUtils("c9af807ed95f93b56855a928417586f9");
         List<ToolSpecification> weatherTools = ToolSpecifications.toolSpecificationsFrom(WeatherUtils.class);
         doorManager = new VehicleDoorManager();
         List<ToolSpecification> doorTools = ToolSpecifications.toolSpecificationsFrom(VehicleDoorManager.class);
@@ -190,6 +194,7 @@ public class ChatServer {
             json.put("座椅、方向盘", seatjson);
             json.put("空调", acjson);
             json.put("香氛", fragjson);
+            json.put("当前地址", "天津市西青区");
             return json.toString();
         } catch (JSONException e){
             return "无效的车辆状态";
