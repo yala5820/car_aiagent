@@ -79,6 +79,7 @@ public class SceneMatch {
                 "2. 必须包含且仅包含两个字段：\n" +
                 "   - name: 场景名称（必须为精确值：'舱外浓烟'/'雨雪天气'/'工程施工'/'乘客休息'/'驾驶员疲劳'/'其他'）\n" +
                 "   - description: 结合识别到的场景，对图片中内容进行详细描述、并提供与当前场景匹配的座舱相关舒适调节建议与安全驾驶相关建议。\n" +
+                "3. 例如：{\"name\":\"xxx\", \"description\":\"xxx\"}\n" +
                 "## 当前任务\n" +
                 "请严格按规则输出JSON";
         SystemMessage system = SystemMessage.from(systemPrompt);
