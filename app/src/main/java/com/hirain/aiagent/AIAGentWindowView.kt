@@ -44,6 +44,7 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView, agentS
     private var mLastHegight = 0;
     private var m_view: AIAgentWindowView =this
     private var m_curSessionId = 0;
+    private var m_firstUpdateSession = 0;
     private var mNeedAdjustViewWidth = 2
     private var mWebViewVisibility = View.INVISIBLE
     init {
@@ -152,7 +153,7 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView, agentS
                 if (maxHeight < mWebView.height) {
                     maxHeight = mWebView.height
                 }
-                maxHeight  += 170
+                maxHeight  += 180
                 if (mNeedAdjustViewWidth > 0) {
                     //  params.width = 1244;
                     mNeedAdjustViewWidth --
@@ -192,7 +193,7 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView, agentS
             if (maxHeight > 1272) {
                 maxHeight = 1272
             }
-            if ( mLastHegight > maxHeight && (mLastHegight - maxHeight < 100)) {
+            if ( mLastHegight > maxHeight && (mLastHegight - maxHeight < 200)) {
                 maxHeight = mLastHegight// 防抖
                //   Log.d("TAG", "avoid shake!!!!!!!!!!!! maxHeight = " + maxHeight + " mLastHegight = " + mLastHegight)
             }
@@ -219,7 +220,7 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView, agentS
 
     }
 
-    private fun appendToWebView(text: String, idx:Int, sessionid:Int) {
+    private fun appendToWebView(text: String, idx:Int, sessionid:Int, needPlayTTS:Boolean) {
 
         mHandler.post {
 
@@ -228,23 +229,33 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView, agentS
             if (isFirstUpdate) {
                 Log.d("TAG", "appendToWebView: isFirstUpdate")
                 loadInitialHtml()
+                m_firstUpdateSession = sessionid
+                var delay=500 + 80*idx
                 mHandler.postDelayed({
-                    appendTextViaJs(text, sessionid)
-                }, 500)
+                    appendTextViaJs(text, sessionid, needPlayTTS)
+                }, delay.toLong())
             } else {
+                var delay = 200 + 80 * idx
 
-                mHandler.postDelayed({appendTextViaJs(text, sessionid)
-                }, 200)
+                if (m_firstUpdateSession == sessionid) {
+                    delay = 500 + 80 * idx
 
+                }
+                mHandler.postDelayed({
+                    appendTextViaJs(text, sessionid, needPlayTTS)
+                }, delay.toLong())
 
             }
         }
     }
 
-    private fun appendTextViaJs(text: String, sessionid:Int) {
+    private fun appendTextViaJs(text: String, sessionid:Int, needPlayTTS: Boolean) {
 
-        if (sessionid != m_curSessionId && !text.equals("\n")) {
-         //   return;
+        if (sessionid != m_curSessionId ) {
+            return;
+        }
+        if (needPlayTTS) {
+            mAgentService?.playTTS(text)
         }
         val escapedText = text
             .replace("\\", "\\\\")
@@ -320,7 +331,7 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView, agentS
                 "    var html = text.replace(/\\n/g, '<br>');" +
                 "    var contentDiv = document.getElementById('content');" +
                 "    contentDiv.innerHTML += html;" +
-                "    window.scrollTo(0, contentDiv.scrollHeight);" +
+  //              "    window.scrollTo(0, contentDiv.scrollHeight);" +
                 "}" +
                 "</script>" +
                 "</body></html>"
@@ -576,6 +587,7 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView, agentS
             loadInitialHtml()
 
         }
+        m_curSessionId ++
         mWebViewVisibility = View.INVISIBLE
 
 //        mWebView.visibility = View.INVISIBLE
@@ -596,11 +608,11 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView, agentS
             mWebViewVisibility = View.INVISIBLE
 
          //   mWebView.visibility = View.INVISIBLE
-            appendToWebView(content, 0, m_curSessionId)
+            appendToWebView(content, 0, m_curSessionId, false)
 
         }
     }
-    fun updatePositiveResponseTextInfo(content:String, idx: Int) {
+    fun updatePositiveResponseTextInfo(content:String, idx: Int, needPlayTTS:Boolean) {
         mHandler.post {
             if (idx == 0) {
                 m_curSessionId++;
@@ -608,8 +620,7 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView, agentS
             Log.d("TAG", "roboticon mWebView.visibility show1 " )
           //  mWebView.visibility = View.VISIBLE
             mWebViewVisibility = View.VISIBLE
-
-            appendToWebView(content, idx, m_curSessionId)
+            appendToWebView(content, idx, m_curSessionId, needPlayTTS)
 
             // Log.d("TAG", "update TextInfo content = " + content)
             /*    recyclerView?.post(Runnable {

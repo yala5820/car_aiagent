@@ -91,7 +91,8 @@ public class MainActivity extends AppCompatActivity {
                     "能力边界声明\n" +
                     "    关于订单预定等功能将在后续的版本退出，当前版本仅能提供语音或文本建议。\n" +
                     "    我能够帮助您控制车辆功能、提供天气信息、娱乐服务和旅途建议，但无法代替您进行驾驶操作。请始终将注意力集中在道路上，安全驾驶。\n";
-    private final WeatherUtils weatherutils = new WeatherUtils(this, "c9af807ed95f93b56855a928417586f9");
+
+    private final WeatherUtils weatherutils = new WeatherUtils("c9af807ed95f93b56855a928417586f9");
     private final List<ToolSpecification> wheatherTools = ToolSpecifications.toolSpecificationsFrom(WeatherUtils.class);
     VehicleDoorManager doorManager = new VehicleDoorManager();
     private final List<ToolSpecification> doorTools = ToolSpecifications.toolSpecificationsFrom(VehicleDoorManager.class);

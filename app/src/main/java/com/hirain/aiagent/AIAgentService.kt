@@ -51,6 +51,7 @@ class AIAgentService : Service() {
     private lateinit var layoutAIAgentParams: WindowManager.LayoutParams
     private val mIAIAgentAidlListeners:  MutableMap<IAIAgentAidlListener, DeathRecipient> = mutableMapOf()
     private var mLastScence:String = ""
+    private var mLastDesc:String = ""
     private val mBinder: AIAgentService.AIAgentBinder = AIAgentBinder()
     private var m_connected = false
     private var vl: VlManager? = null
@@ -125,7 +126,10 @@ class AIAgentService : Service() {
                     val res: String = scene_server!!.scene_server(scene)
                     //     cleanChat()
                     mLastScence = scene.name
-                    appendPositiveResponseToChat("AI:", res)
+                    if ("" != scene.description) {
+                        mLastDesc = scene.description
+                    }
+                    appendPositiveResponseToChat("AI:", res, mLastDesc)
                 }
                 //  processPositiveRequest(res);
             }
@@ -409,6 +413,12 @@ class AIAgentService : Service() {
         // 解注册广播接收器
 
     }
+    fun playTTS(message:String) {
+        Log.d("TAG", "playTTS!!!!!!!!!!!!")
+        mManager!!.speak(message)
+
+
+    }
     fun stopTTS() {
         Log.d("TAG", "stopTTS!!!!!!!!!!!!")
         mManager!!.stop()
@@ -423,7 +433,7 @@ class AIAgentService : Service() {
             AIUpdateRequestText(content, idx)
         }
         fun updatePositiveResponse(content: String, idx: Int) {
-            AIUpdatePositiveResponseText(content, idx)
+            AIUpdatePositiveResponseText(content, idx, false)
         }
         fun updateNagativeResponse(content: String) {
             AIUpdateNagativeResponse(content)
@@ -553,9 +563,9 @@ class AIAgentService : Service() {
     {
         floatAIAgentView.updateRequestTextInfo(content, idx)
     }
-    fun AIUpdatePositiveResponseText(content: String, idx: Int)
+    fun AIUpdatePositiveResponseText(content: String, idx: Int, needPlayTTS:Boolean)
     {
-        floatAIAgentView.updatePositiveResponseTextInfo(content, idx)
+        floatAIAgentView.updatePositiveResponseTextInfo(content, idx, needPlayTTS)
     }
     fun AIUpdateNagativeResponse(content: String)
     {
@@ -630,7 +640,7 @@ class AIAgentService : Service() {
 
         }
     }
-    private fun appendPositiveResponseToChat(prefix:String, message: String) {
+    private fun appendPositiveResponseToChat(prefix:String, message: String, description:String) {
 
         mainHandler.post {
             if (mChating == true || mNagativeTTSplaying == true || mNagativeReqExecuting.get()) {
@@ -640,17 +650,49 @@ class AIAgentService : Service() {
                 Log.d("TAG", "appendPositiveResponseToChat nagitavereq is executing!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             }
             if (mChating == false && mNagativeTTSplaying == false && !mNagativeReqExecuting.get()) {
-                stopTTS()
                 cleanChat()
+                stopTTS()
 
                 AIHideWebView()
-                mManager?.speak(message);
+                var cnt = 0
+                var line = ""
+                val completeMsg = "AI推理: " + description + "\n"
+                for (idx in 0..<completeMsg.length) {
+                    line += completeMsg.substring(idx, idx + 1)
+                    if (line.length > 3) {
+                        AIUpdatePositiveResponseText(line, cnt, false)
+                        cnt++
+                        line = ""
+                    }
+                }
+                if (line.length > 0) {
+                    AIUpdatePositiveResponseText(line, cnt, false)
+                }
+                cnt ++
+               // AIUpdatePositiveResponseText( "AI推理:" + description + "\n", 0);
                 Log.d(
                     "TAG",
                     "appendPositiveResponseToChat 2222222222222222222 message = " + message
                 )
+                mainHandler.post{
+                    if (mChating == false && mNagativeTTSplaying == false && !mNagativeReqExecuting.get()) {
+                        Log.d(
+                            "TAG",
+                            "appendPositiveResponseToChat 3333 message = " + message
+                        )
 
-                AIUpdatePositiveResponseText(prefix + mLastScence + " " + message + "\n", 0);
+                        //mManager?.speak(message);
+                        AIUpdatePositiveResponseText(
+                            "\n" + prefix + mLastScence + " ",
+                            cnt, false
+                        );
+                        cnt++
+                        AIUpdatePositiveResponseText(
+                             message + "\n",
+                            cnt, true
+                        );
+                    }
+                }
             }
 
         }
