@@ -230,7 +230,7 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView, agentS
                 Log.d("TAG", "appendToWebView: isFirstUpdate")
                 loadInitialHtml()
                 m_firstUpdateSession = sessionid
-                var delay=500 + 80*idx
+                var delay=300 + 80*idx
                 mHandler.postDelayed({
                     appendTextViaJs(text, sessionid, needPlayTTS)
                 }, delay.toLong())
@@ -238,7 +238,7 @@ class AIAgentWindowView(context: Context, floatingWindow:FloatWindowView, agentS
                 var delay = 200 + 80 * idx
 
                 if (m_firstUpdateSession == sessionid) {
-                    delay = 500 + 80 * idx
+                    delay = 300 + 80 * idx
 
                 }
                 mHandler.postDelayed({
