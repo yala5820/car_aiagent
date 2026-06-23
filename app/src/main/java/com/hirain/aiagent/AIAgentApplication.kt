@@ -11,7 +11,7 @@ import android.os.Build
 
 class AIAgentApplication : Application() {
     companion object {
-        const val CHANNEL_ID = "floating_service_channel"
+        const val CHANNEL_ID = "aiagent_service_channel"
     }
     override fun onCreate() {
         super.onCreate()
@@ -20,10 +20,9 @@ class AIAgentApplication : Application() {
             nm.createNotificationChannel(
                 NotificationChannel(
                     CHANNEL_ID,
-                    "悬浮窗服务",
+                    "AIAgent 常驻服务",
                     NotificationManager.IMPORTANCE_LOW
                 )
-
             )
         }
     }

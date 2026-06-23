@@ -8,8 +8,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-import android.graphics.PixelFormat
-import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -18,19 +16,14 @@ import android.os.IBinder.DeathRecipient
 import android.os.Looper
 import android.os.RemoteException
 import android.os.SharedMemory
-import android.provider.Settings
 import android.util.Base64
-import android.util.DisplayMetrics
 import android.util.Log
-import android.view.Display
-import android.view.Gravity
-import android.view.WindowManager
 import com.hirain.adapter.vr.VRListener
 import com.hirain.adapter.vr.VRServiceManager
-import com.hirain.aiagent.chatserver.ChatServer
-import com.hirain.aiagent.scenematch.SceneMatch
-import com.hirain.aiagent.sceneserver.SceneServer
-import com.hirain.aiagent.vlmanager.VlManager
+import com.hirain.aiagent.engines.chat.ChatServer
+import com.hirain.aiagent.engines.scenematch.SceneMatch
+import com.hirain.aiagent.engines.sceneserver.SceneServer
+import com.hirain.aiagent.tools.vision.vl.VlManager
 import com.hirain.camera.Camera
 import com.hirain.camera.CameraData
 import com.hirain.camera.ICameraServiceListener
@@ -43,12 +36,6 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 class AIAgentService : Service() {
-    private lateinit var windowManager: WindowManager
-    private lateinit var floatAIAgentView: AIAgentWindowView
-    private lateinit var floatWindowView: FloatWindowView
-    private lateinit var layoutFloatingViewParams: WindowManager.LayoutParams
-
-    private lateinit var layoutAIAgentParams: WindowManager.LayoutParams
     private val mIAIAgentAidlListeners:  MutableMap<IAIAgentAidlListener, DeathRecipient> = mutableMapOf()
     private var mLastScence:String = ""
     private var mLastDesc:String = ""
@@ -74,9 +61,7 @@ class AIAgentService : Service() {
     private var mChating = false
 
     companion object {
-       // val service = AIAgentService() // Now it is an instance of Service
-
-
+        private const val SENDMESSAGE_TIMEOUT_MS = 15000L
     }
 
     private fun createWorkThreadHandle() {
@@ -154,9 +139,6 @@ class AIAgentService : Service() {
            Log.d("TAG", "onTTsState var1 = " + var1)
             if (var1 == 2 || var1 == 3) {
                 mNagativeTTSplaying = false;
-                mainHandler.post {
-                    hideAIAgent(var1)
-                }
             }
 
         }
@@ -250,9 +232,6 @@ class AIAgentService : Service() {
     private val m_listener: ICameraServiceListener = CameraListener()
     override fun onCreate() {
         super.onCreate()
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        Log.d("TAG", "windowManager = " + windowManager);
-
         TimeZone.setDefault(TimeZone.getTimeZone("GMT+8"))
 
 
@@ -267,38 +246,30 @@ class AIAgentService : Service() {
             applicationContext, channel.id
         ).build()
         startForeground(1, notification, FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        if (Settings.canDrawOverlays(this)) {
-            Log.d("TAG","need not request floating window permission")
-            showAIAgent(windowManager)
-        } else {
-            Log.d("TAG","need  request floating window permission")
-
-            val intent = Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")
-            )
-            intent!!.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-
-            startActivity(intent)
-
+        try {
+            Camera.getInstance().init(applicationContext, m_listener);
+        } catch (e: Exception) {
+            Log.e("TAG", "Camera init failed", e);
         }
-        Camera.getInstance().init(applicationContext, m_listener);
         val scheduler = Executors.newScheduledThreadPool(1)
         scheduler.scheduleAtFixedRate({
             try {
                 requestCapture()
             } catch (e: Exception) {
-                e.printStackTrace() // 或者其他错误处理方式
+                e.printStackTrace()
             }
-        }, 5, 1, TimeUnit.SECONDS) // 每1秒执行一次
+        }, 5, 1, TimeUnit.SECONDS)
 
 
         vl = VlManager(this)
-      //  Thread { processUserRequest("Hello World") }.start()
         mManager = VRServiceManager.getInstance(this)
         mManager?.initCallback(m_vrlistener)
         scene_server = SceneServer(this)
-        chat = ChatServer(this, vl)
+        try {
+            chat = ChatServer(this, vl)
+        } catch (e: Exception) {
+            Log.e("TAG", "ChatServer init failed, AI chat will be unavailable", e);
+        }
 
     }
 
@@ -311,107 +282,12 @@ class AIAgentService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 注册广播接收器
-
         return START_STICKY
     }
-    private fun hideAIAgent(var1:Int) {
-        floatAIAgentView.hideFloatingWindow(var1)
-    }
 
-
-    private fun showFloatingWindow(windowmanager: WindowManager) {
-
-        floatWindowView = FloatWindowView(this)
-        // 配置悬浮窗 LayoutParams
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        else WindowManager.LayoutParams.TYPE_PHONE
-        val display: Display = windowManager.defaultDisplay
-        val displayMetrics: DisplayMetrics = DisplayMetrics()
-        display.getMetrics(displayMetrics)
-
-        val scnwidth: Int = displayMetrics.widthPixels
-        val scnheight: Int = displayMetrics.heightPixels
-        val scndensity: Float = displayMetrics.density
-
-
-        // 屏幕宽度（像素）
-        val screenWidth = Math.round(scnwidth /scndensity)
-
-        // 屏幕高度（像素）
-        val screenHeight = Math.round(scnheight / scndensity)
-
-
-        Log.d("TAG","scnwidth =" + scnwidth + " scnheight " + scnheight + " Screen Height: $screenHeight dp"  + "Screen Width: $screenWidth dp")
-        var posx = 0;
-        if (scnwidth >= 1920) {
-            posx = 658
-        }
-        layoutFloatingViewParams = WindowManager.LayoutParams().apply {
-            this.type = type
-            format = PixelFormat.TRANSLUCENT
-            flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-            width = WindowManager.LayoutParams.WRAP_CONTENT
-            height = WindowManager.LayoutParams.WRAP_CONTENT
-            gravity = Gravity.TOP or Gravity.START
-            x = posx
-            y = 20
-        }
-    }
-
-    private fun showAIAgent(windowmanager: WindowManager) {
-        showFloatingWindow(windowmanager)
-
-        floatAIAgentView = AIAgentWindowView(this, floatWindowView, this)
-        // 配置悬浮窗 LayoutParams
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        else WindowManager.LayoutParams.TYPE_PHONE
-        val display: Display = windowManager.defaultDisplay
-        val displayMetrics: DisplayMetrics = DisplayMetrics()
-        display.getMetrics(displayMetrics)
-
-        val scnwidth: Int = displayMetrics.widthPixels
-        val scnheight: Int = displayMetrics.heightPixels
-        val scndensity: Float = displayMetrics.density
-
-
-        // 屏幕宽度（像素）
-        val screenWidth = Math.round(scnwidth /scndensity)
-
-        // 屏幕高度（像素）
-        val screenHeight = Math.round(scnheight / scndensity)
-
-
-        Log.d("TAG","scnwidth =" + scnwidth + " scnheight " + scnheight + " Screen Height: $screenHeight dp"  + "Screen Width: $screenWidth dp")
-        var posx = 0;
-        if (scnwidth >= 1920) {
-            posx = 658
-        }
-        layoutAIAgentParams = WindowManager.LayoutParams().apply {
-            this.type = type
-            format = PixelFormat.TRANSLUCENT
-            flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-            width = WindowManager.LayoutParams.WRAP_CONTENT
-            height = WindowManager.LayoutParams.WRAP_CONTENT
-            gravity = Gravity.TOP or Gravity.START
-            x = posx
-            y = 20
-        }
-        windowManager.addView(floatAIAgentView, layoutAIAgentParams)
-        windowManager.addView(floatWindowView, layoutFloatingViewParams)
-
-    }
     override fun onDestroy() {
         super.onDestroy()
         Log.d("TAG", "onDestroy")
-        windowManager.removeViewImmediate(floatAIAgentView)
-        windowManager.removeViewImmediate(floatWindowView)
-        // 解注册广播接收器
-
     }
     fun playTTS(message:String) {
         Log.d("TAG", "playTTS!!!!!!!!!!!!")
@@ -429,16 +305,6 @@ class AIAgentService : Service() {
 
     inner class AIAgentBinder :  IAIAgentAidlInterface.Stub() {
 
-        fun updateRequest(content: String, idx: Int) {
-            AIUpdateRequestText(content, idx)
-        }
-        fun updatePositiveResponse(content: String, idx: Int) {
-            AIUpdatePositiveResponseText(content, idx, false)
-        }
-        fun updateNagativeResponse(content: String) {
-            AIUpdateNagativeResponse(content)
-        }
-
         @Throws(RemoteException::class)
         override fun requestAI(arg: String?): Int {
             Log.d("TAG","requestAI arg = " + arg)
@@ -450,15 +316,6 @@ class AIAgentService : Service() {
                     mRequestAIStr = ""
                     mChating = true;
                     stopTTS()
-                    hideAIAgent(0)
-                    AIUpdateRequestProcuder(
-                        false
-                    )
-                    AIUpdateRequestText(
-                        "聆听中...", 0
-                    )
-                //    AIHideWebView()
-
                 }
 
             }
@@ -475,17 +332,11 @@ class AIAgentService : Service() {
                     if (!mNagativeReqExecuting.get()&& mNagativeTTSplaying == false && mRequestAIStr != "") {
                         mNagativeReqExecuting.set(true)
                         mWorkHandler!!.post {
-                            AIUpdateRequestProcuder(
-                                true
-                            )
                             processNagativeRequest(messgae)
-
                         }
                     } else if (mRequestAIStr == "" && !mNagativeReqExecuting.get() && mNagativeTTSplaying == false) {
                         mainHandler.post {
                             mChating = false
-
-                            hideAIAgent(1)
                         }
                     }
                     mRequestAIStr = ""
@@ -550,26 +401,90 @@ class AIAgentService : Service() {
 
         }
 
-    }
-    fun AIUpdateRequestProcuder(visible:Boolean)
-    {
-        floatAIAgentView.updateRequestTextProcuder(visible)
-    }
-    fun AIHideWebView()
-    {
-        floatAIAgentView.hideWebView()
-    }
-    fun AIUpdateRequestText(content: String, idx: Int)
-    {
-        floatAIAgentView.updateRequestTextInfo(content, idx)
-    }
-    fun AIUpdatePositiveResponseText(content: String, idx: Int, needPlayTTS:Boolean)
-    {
-        floatAIAgentView.updatePositiveResponseTextInfo(content, idx, needPlayTTS)
-    }
-    fun AIUpdateNagativeResponse(content: String)
-    {
-        floatAIAgentView.updateNagativeResponse(content)
+        @Throws(RemoteException::class)
+        override fun sendMessage(text: String?) {
+            Log.d("TAG", "sendMessage text = " + text)
+            val message = text ?: ""
+
+            val timeoutRunnable = Runnable {
+                Log.e("TAG", "sendMessage timeout after 15s")
+                val errorData = AIAgentData().apply {
+                    value = "系统: 请求超时".toByteArray(Charsets.UTF_8)
+                }
+                notifyAIAgentListeners(0, 0, errorData)
+            }
+            mainHandler.postDelayed(timeoutRunnable, SENDMESSAGE_TIMEOUT_MS)
+
+            mWorkHandler?.post {
+                try {
+                    Log.d("TAG", "sendMessage begin chat")
+                    if (chat == null) {
+                        throw Exception("ChatServer 未初始化")
+                    }
+                    val res = chat!!.chat(message)
+                    mainHandler.removeCallbacks(timeoutRunnable)
+                    Log.d("TAG", "sendMessage chat result = " + res)
+                    val resultData = AIAgentData().apply {
+                        value = res.toByteArray(Charsets.UTF_8)
+                    }
+                    notifyAIAgentListeners(0, 0, resultData)
+                } catch (e: Exception) {
+                    mainHandler.removeCallbacks(timeoutRunnable)
+                    Log.e("TAG", "sendMessage chat failed", e)
+                    val errorData = AIAgentData().apply {
+                        value = ("系统: 请求失败 - " + e.message).toByteArray(Charsets.UTF_8)
+                    }
+                    notifyAIAgentListeners(0, 0, errorData)
+                }
+            }
+        }
+
+        @Throws(RemoteException::class)
+        override fun sendMessageWithImage(text: String?, imageBase64: String?) {
+            Log.d("TAG", "sendMessageWithImage text = " + text)
+            val message = text ?: ""
+            val imgB64 = imageBase64 ?: ""
+
+            val timeoutRunnable = Runnable {
+                Log.e("TAG", "sendMessageWithImage timeout after 15s")
+                val errorData = AIAgentData().apply {
+                    value = "系统: 请求超时".toByteArray(Charsets.UTF_8)
+                }
+                notifyAIAgentListeners(0, 0, errorData)
+            }
+            mainHandler.postDelayed(timeoutRunnable, SENDMESSAGE_TIMEOUT_MS)
+
+            mWorkHandler?.post {
+                try {
+                    Log.d("TAG", "sendMessageWithImage begin vl chat")
+                    val imageBytes = Base64.decode(imgB64, Base64.DEFAULT)
+                    if (vl != null) {
+                        val res = vl!!.front_camera_interactionPositive(message, imageBytes)
+                        mainHandler.removeCallbacks(timeoutRunnable)
+                        Log.d("TAG", "sendMessageWithImage vl result = " + res)
+                        val resultData = AIAgentData().apply {
+                            value = res.toByteArray(Charsets.UTF_8)
+                        }
+                        notifyAIAgentListeners(0, 0, resultData)
+                    } else {
+                        mainHandler.removeCallbacks(timeoutRunnable)
+                        Log.e("TAG", "sendMessageWithImage vl is null")
+                        val errorData = AIAgentData().apply {
+                            value = "系统: 多模态模型未初始化".toByteArray(Charsets.UTF_8)
+                        }
+                        notifyAIAgentListeners(0, 0, errorData)
+                    }
+                } catch (e: Exception) {
+                    mainHandler.removeCallbacks(timeoutRunnable)
+                    Log.e("TAG", "sendMessageWithImage failed", e)
+                    val errorData = AIAgentData().apply {
+                        value = ("系统: 请求失败 - " + e.message).toByteArray(Charsets.UTF_8)
+                    }
+                    notifyAIAgentListeners(0, 0, errorData)
+                }
+            }
+        }
+
     }
     override fun onBind(intent: Intent?): IBinder? {
         Log.d("TAG", "onBind")
@@ -578,6 +493,18 @@ class AIAgentService : Service() {
 
 
 
+
+    private fun notifyAIAgentListeners(seqId: Int, captureMode: Int, data: AIAgentData) {
+        mainHandler.post {
+            for ((listener) in mIAIAgentAidlListeners) {
+                try {
+                    listener.onAIResponse(seqId, captureMode, data)
+                } catch (e: RemoteException) {
+                    Log.e("TAG", "notify listener failed", e)
+                }
+            }
+        }
+    }
 
     private fun processNagativeRequest(userMessage: String) {
 
@@ -596,33 +523,11 @@ class AIAgentService : Service() {
     }
 
 
-    private fun cleanChat() {
-
-        AIUpdateRequestProcuder(
-            false
-        )
-        AIUpdateRequestText(
-            "", 0
-        )
-
-
-    }
     private fun appendToChat(message: String) {
         val timeMillis = System.currentTimeMillis()
         var delta = timeMillis - mLastRequestAITimeStamp
         Log.d("TAG", "appentToChat delta = " + delta)
         mLastRequestAITimeStamp = timeMillis
-
-        mainHandler.post {//显示说话内容
-            AIUpdateRequestText(
-                message, 0
-            )
-        }
-
-
-
-
-
     }
     private fun appendNagativeResponse(prefix:String, message: String) {
         mNagativeTTSplaying = true;
@@ -630,14 +535,9 @@ class AIAgentService : Service() {
         mainHandler.post {
             stopTTS()
             Log.d("TAG", "appendNagativeResponse message =" + message)
-            AIHideWebView()
-
-            AIUpdateNagativeResponse(prefix + message + "\n")
             mManager?.speak(message);
             mChating = false
             mNagativeReqExecuting.set(false)
-
-
         }
     }
     private fun appendPositiveResponseToChat(prefix:String, message: String, description:String) {
@@ -650,51 +550,10 @@ class AIAgentService : Service() {
                 Log.d("TAG", "appendPositiveResponseToChat nagitavereq is executing!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             }
             if (mChating == false && mNagativeTTSplaying == false && !mNagativeReqExecuting.get()) {
-                cleanChat()
                 stopTTS()
-
-                AIHideWebView()
-                var cnt = 0
-                var line = ""
-                val completeMsg = "AI推理: " + description + "\n"
-                for (idx in 0..<completeMsg.length) {
-                    line += completeMsg.substring(idx, idx + 1)
-                    if (line.length > 3) {
-                        AIUpdatePositiveResponseText(line, cnt, false)
-                        cnt++
-                        line = ""
-                    }
-                }
-                if (line.length > 0) {
-                    AIUpdatePositiveResponseText(line, cnt, false)
-                }
-                cnt ++
-               // AIUpdatePositiveResponseText( "AI推理:" + description + "\n", 0);
-                Log.d(
-                    "TAG",
-                    "appendPositiveResponseToChat 2222222222222222222 message = " + message
-                )
-                mainHandler.post{
-                    if (mChating == false && mNagativeTTSplaying == false && !mNagativeReqExecuting.get()) {
-                        Log.d(
-                            "TAG",
-                            "appendPositiveResponseToChat 3333 message = " + message
-                        )
-
-                        //mManager?.speak(message);
-                        AIUpdatePositiveResponseText(
-                            "\n" + prefix + mLastScence + " ",
-                            cnt, false
-                        );
-                        cnt++
-                        AIUpdatePositiveResponseText(
-                             message + "\n",
-                            cnt, true
-                        );
-                    }
-                }
+                Log.d("TAG", "appendPositiveResponseToChat message = " + message)
+                mManager?.speak(message);
             }
-
         }
     }
     private fun getBase64(context: Context, byteArray: ByteArray): String {

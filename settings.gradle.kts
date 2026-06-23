@@ -27,23 +27,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "AIAgent"
 include(":app")
-include(":http-client-ok")
-include(":chat_memory_sqlite")
-include(":android_document_loader")
-include(":weatherutils")
-includeBuild("build-logic")
-include(":VehicleDoorManager")
-include(":VehicleWindowManager")
-include(":VehicleSeatManager")
-include(":VehicleACController")
-include(":VehicleAcManager")
-include(":VehicleAcManager")
-include(":VehicleFragManager")
-include(":VehicleChassisManager")
-
-include(":VlManager")
-include(":SceneMatch")
-include(":SceneServer")
-include(":ChatServer")
-include(":SoaService")
-include(":geoutils")
