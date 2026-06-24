@@ -7,6 +7,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import android.util.Log;
 
+import com.hirain.aiagent.BuildConfig;
+
 import dev.langchain4j.data.message.ImageContent;
 import dev.langchain4j.data.message.TextContent;
 import dev.langchain4j.data.message.UserMessage;
@@ -40,7 +42,7 @@ public class SceneMatch {
                 .readTimeout(Duration.ofSeconds(120));
         this.vlModel = OpenAiChatModel.builder()
                 .httpClientBuilder(okHttpClientBuilder)
-                .apiKey("sk-11129fb7941f49dbb083039a93a160bc")
+                .apiKey(BuildConfig.DASHSCOPE_API_KEY)
                 .baseUrl("https://dashscope.aliyuncs.com/compatible-mode/v1")
                 .modelName("qwen3-vl-plus")
                 .build();

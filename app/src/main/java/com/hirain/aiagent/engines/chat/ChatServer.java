@@ -10,6 +10,8 @@ import com.hirain.aiagent.tools.vehicle.seat.VehicleSeatManager;
 import com.hirain.aiagent.tools.vehicle.window.VehicleWindowManager;
 import com.hirain.aiagent.tools.vision.vl.VlManager;
 
+import com.hirain.aiagent.BuildConfig;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -118,7 +120,7 @@ public class ChatServer {
                 .flatMap(List::stream).collect(Collectors.toList());
         model = OpenAiChatModel.builder()
                 .httpClientBuilder(okHttpClientBuilder)
-                .apiKey("sk-11129fb7941f49dbb083039a93a160bc")
+                .apiKey(BuildConfig.DASHSCOPE_API_KEY)
                 .baseUrl("https://dashscope.aliyuncs.com/compatible-mode/v1")
                 .modelName("qwen-turbo")
                 .parallelToolCalls(true)

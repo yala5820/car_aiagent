@@ -11,6 +11,8 @@ import com.hirain.aiagent.tools.vehicle.window.VehicleWindowManager;
 import com.hirain.aiagent.tools.vehicle.chassis.VehicleChassisManager;
 import com.hirain.aiagent.engines.scenematch.*;
 
+import com.hirain.aiagent.BuildConfig;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -91,7 +93,7 @@ public class SceneServer {
                 .readTimeout(Duration.ofSeconds(120));
         model = OpenAiChatModel.builder()
                 .httpClientBuilder(okHttpClientBuilder)
-                .apiKey("sk-11129fb7941f49dbb083039a93a160bc")
+                .apiKey(BuildConfig.DASHSCOPE_API_KEY)
                 .baseUrl("https://dashscope.aliyuncs.com/compatible-mode/v1")
                 .modelName("qwen-flash")
                 .parallelToolCalls(true)

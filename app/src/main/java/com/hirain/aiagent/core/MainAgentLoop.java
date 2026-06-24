@@ -3,6 +3,8 @@ package com.hirain.aiagent.core;
 import android.content.Context;
 import android.util.Log;
 
+import com.hirain.aiagent.BuildConfig;
+
 import com.hirain.aiagent.tools.external.weather.WeatherUtils;
 import com.hirain.aiagent.tools.vehicle.ac.VehicleAcManager;
 import com.hirain.aiagent.tools.vehicle.chassis.VehicleChassisManager;
@@ -88,7 +90,7 @@ public class MainAgentLoop {
                 .readTimeout(Duration.ofSeconds(120));
         model = OpenAiChatModel.builder()
                 .httpClientBuilder(httpBuilder)
-                .apiKey("sk-11129fb7941f49dbb083039a93a160bc")
+                .apiKey(BuildConfig.DASHSCOPE_API_KEY)
                 .baseUrl("https://dashscope.aliyuncs.com/compatible-mode/v1")
                 .modelName("qwen-turbo")
                 .parallelToolCalls(true)

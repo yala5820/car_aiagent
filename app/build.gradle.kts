@@ -1,12 +1,19 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
 }
 
+val localProps = Properties().also { props ->
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use {
+        props.load(it)
+    }
+}
+
 android {
     namespace = "com.hirain.aiagent"
     compileSdk = 35
-
 
     defaultConfig {
         applicationId = "com.hirain.aiagent"
@@ -16,36 +23,28 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "DASHSCOPE_API_KEY", "\"${localProps.getProperty("dashscope.api_key", "")}\"")
     }
 
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file(projectDir.toString() + "/../platform.jks")
+            storePassword = localProps.getProperty("signing.storePassword", "")
+            keyAlias = localProps.getProperty("signing.keyAlias", "")
+            keyPassword = localProps.getProperty("signing.keyPassword", "")
+        }
+    }
     buildTypes {
-        release {
+        getByName("release") {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
-    }
-
-    signingConfigs {
-
         getByName("debug") {
-            storeFile = file(projectDir.toString() + "/../platform.jks")
-            storePassword = "123456789"
-            keyAlias = "123456789"
-            keyPassword = "123456789"
-        }
-
-    }
-    buildTypes {
-        getByName("release") {
-            // 使用debug签名配置，默认不需要设置，但如果你想用自定义的，可以这样：
-        //    signingConfig = signingConfigs.getByName("release")
-        }
-        getByName("debug") {
-            // 使用debug签名配置，默认不需要设置，但如果你想用自定义的，可以这样：
-             signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {
@@ -57,6 +56,7 @@ android {
     }
     buildFeatures {
         aidl = true
+        buildConfig = true
     }
 }
 

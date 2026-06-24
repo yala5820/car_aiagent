@@ -1,0 +1,10 @@
+# Android SDK path
+# sdk.dir=D:\\path\\to\\Android\\Sdk
+
+# DashScope API key (required)
+# dashscope.api_key=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Signing configuration (required for debug build)
+# signing.storePassword=123456789
+# signing.keyAlias=123456789
+# signing.keyPassword=123456789

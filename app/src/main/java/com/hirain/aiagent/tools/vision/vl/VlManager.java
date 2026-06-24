@@ -6,6 +6,8 @@ import android.content.Context;
 import android.util.Base64;
 import android.util.Log;
 
+import com.hirain.aiagent.BuildConfig;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -51,7 +53,7 @@ public class VlManager {
                 .readTimeout(Duration.ofSeconds(120));
         this.vlModel = OpenAiChatModel.builder()
                 .httpClientBuilder(okHttpClientBuilder)
-                .apiKey("sk-11129fb7941f49dbb083039a93a160bc")
+                .apiKey(BuildConfig.DASHSCOPE_API_KEY)
                 .baseUrl("https://dashscope.aliyuncs.com/compatible-mode/v1")
                 .modelName("qwen-vl-max")
                 .build();
