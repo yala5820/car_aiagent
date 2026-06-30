@@ -1,63 +1,62 @@
 package com.hirain.aiagent.tools.vehicle.frag;
+
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.P;
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+
 import com.hirain.aiagent.infra.soa.SoaService;
 
 public class VehicleFragManager {
+
     private static final String KEY_FRAG_TYPE = "车载香氛类型";
     private static final String KEY_FRAG_INTENSITY = "车载香氛浓度";
-    private String frag_type;
-    private String frag_intensity;
+
+    private String fragType;
+    private String fragIntensity;
     private boolean formalfunc = false;
+
     public VehicleFragManager() {
-        this.frag_type = "晨间松木";
-        this.frag_intensity = "关闭";
+        this.fragType = "晨间松木";
+        this.fragIntensity = "关闭";
     }
+
+    /** 查询香氛状态（非工具方法，供 AgentLoop 采集车辆状态） */
     public String getFragStatus() {
         SoaService.Companion.getInstance().getFragStatus();
 
         JSONObject json = new JSONObject();
         try {
-            json.put(KEY_FRAG_TYPE, frag_type);
-            json.put(KEY_FRAG_INTENSITY, frag_intensity);
+            json.put(KEY_FRAG_TYPE, fragType);
+            json.put(KEY_FRAG_INTENSITY, fragIntensity);
         } catch (JSONException e) {
             return "获取香氛系统状态失败。";
         }
         return json.toString();
     }
-    @Tool("控制车载香氛类型。")
-    public String set_frag_type(@P(value = "类型，必须为：‘晨间松木’、‘正午丁香’、‘午夜橙香’中的一个。") String type) {
+
+    /**
+     * 控制车载香氛类型。当用户需要切换香氛气味时调用。
+     */
+    @Tool(name = "set_frag_type", value = "控制车载香氛类型。当用户需要切换香氛气味时调用。")
+    public String setFragType(
+            @P("类型，可选：'晨间松木'、'正午丁香'、'午夜橙香'") String type) {
         SoaService.Companion.getInstance().set_frag_type(type);
 
-        if (formalfunc) this.frag_type = type;
+        if (formalfunc) this.fragType = type;
         return "车载香氛类型成功设置为：" + type;
     }
-    @Tool("控制车载香氛强度。")
-    public String set_frag_intensity(@P(value = "强度，必须为：‘关闭’、‘低’、‘中’、‘高’中的一个。") String intensity) {
+
+    /**
+     * 控制车载香氛强度。当用户需要调节香氛浓度时调用。
+     */
+    @Tool(name = "set_frag_intensity", value = "控制车载香氛强度。当用户需要调节香氛浓度时调用。")
+    public String setFragIntensity(
+            @P("强度，可选：'关闭'、'低'、'中'、'高'") String intensity) {
         SoaService.Companion.getInstance().set_frag_intensity(intensity);
 
-        if (formalfunc) this.frag_intensity = intensity;
+        if (formalfunc) this.fragIntensity = intensity;
         return "车载香氛强度成功设置为：" + intensity;
-    }
-    public boolean hasTool(String toolname) {
-        return toolname.equals("set_frag_type") || toolname.equals("set_frag_intensity");
-    }
-    public String handleToolRequest(ToolExecutionRequest request) {
-        try {
-            JSONObject json = new JSONObject(request.arguments());
-            if (request.name().equals("set_frag_type")) {
-                return set_frag_type(json.getString("arg0"));
-            } else if (request.name().equals("set_frag_intensity")) {
-                return set_frag_intensity(json.getString("arg0"));
-            } else {
-                return "无效的工具请求。";
-            }
-        } catch (JSONException e) {
-            return "无效的工具请求。";
-        }
     }
 }

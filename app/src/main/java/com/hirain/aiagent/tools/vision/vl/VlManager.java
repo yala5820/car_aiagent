@@ -1,12 +1,12 @@
 package com.hirain.aiagent.tools.vision.vl;
 
-import static androidx.fragment.app.FragmentManager.TAG;
-
 import android.content.Context;
 import android.util.Base64;
 import android.util.Log;
 
 import com.hirain.aiagent.BuildConfig;
+import com.hirain.aiagent.prompt.PromptConstants;
+import com.hirain.aiagent.prompt.PromptManager;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -20,48 +20,45 @@ import java.time.Duration;
 
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.P;
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.ImageContent;
 import dev.langchain4j.data.message.TextContent;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.model.chat.request.ChatRequest;
-import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 
-import langchain4j.http_client_ok.*;
-public class VlManager {
-    private Context ctx;
-    private ChatModel vlModel;
-    private byte[] mFrontImage = null;
-    private final String front_camera_system_msg =
-        "你是一个运行在智能座舱中的多模态视觉问答助手，名为'窗景随问'。"
-        + "你的任务是根据车辆前置摄像头实时拍摄的画面（图像模态）和驾驶员的自然语言提问（文本模态），"
-        + "在单轮交互中准确、简洁、安全地回答关于前方视野内可见物体、场景、交通状况或环境信息的问题。\n"
-        + "请遵循以下原则响应：\n"
-        + "1. 以图像内容为核心依据。\n"
-        + "2. 聚焦前方视野：仅关注前置摄像头拍摄的道路及周边可见区域（如车道、车辆、行人、交通标志、信号灯、建筑物、天气状况等），不涉及车内或后方场景。\n"
-        + "3. 安全优先：避免提供可能分散驾驶注意力的冗长或无关信息。"
-        + "4. 不确定时诚实回应：若图像模糊、目标不清晰或问题超出视觉理解能力，回应‘看不太清楚’或‘当前画面中未发现相关对象’。"
-        + "5. 不支持多轮记忆：每次提问均为独立交互，无需记忆上下文。";
+import langchain4j.http_client_ok.OkHttpClient;
+import langchain4j.http_client_ok.OkHttpClientBuilder;
 
-    public VlManager(Context context) {
-        ctx = context.getApplicationContext();
-        OkHttpClientBuilder okHttpClientBuilder = langchain4j.http_client_ok.OkHttpClient.builder()
+public class VlManager {
+
+    private static final String TAG = "VlManager";
+
+    private final Context ctx;
+    private final ChatModel vlModel;
+    private final PromptManager promptManager;
+    private byte[] mFrontImage = null;
+
+    public VlManager(Context context, PromptManager promptManager) {
+        this.ctx = context.getApplicationContext();
+        this.promptManager = promptManager;
+        OkHttpClientBuilder httpBuilder = OkHttpClient.builder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .readTimeout(Duration.ofSeconds(120));
         this.vlModel = OpenAiChatModel.builder()
-                .httpClientBuilder(okHttpClientBuilder)
+                .httpClientBuilder(httpBuilder)
                 .apiKey(BuildConfig.DASHSCOPE_API_KEY)
                 .baseUrl("https://dashscope.aliyuncs.com/compatible-mode/v1")
                 .modelName("qwen-vl-max")
                 .build();
     }
-    private String getBase64(Context context, byte[] byteArray) {
 
+    // ── 私有辅助 ──
+
+    private String getBase64(Context context, byte[] byteArray) {
         return Base64.encodeToString(byteArray, Base64.DEFAULT);
     }
+
     private String getBase64(Context context, String filePath) {
         InputStream inputStream = null;
         ByteArrayOutputStream byteOutputStream = null;
@@ -73,71 +70,59 @@ public class VlManager {
             while ((len = inputStream.read(buffer)) != -1) {
                 byteOutputStream.write(buffer, 0, len);
             }
-
-            byte[] bytes = byteOutputStream.toByteArray();
-
-            return Base64.encodeToString(bytes, Base64.DEFAULT);
-
+            return Base64.encodeToString(byteOutputStream.toByteArray(), Base64.DEFAULT);
         } catch (IOException e) {
-            e.printStackTrace();
+            Log.e(TAG, "Failed to read file: " + filePath, e);
             return "";
         } finally {
             if (inputStream != null) {
-                try {
-                    inputStream.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
+                try { inputStream.close(); } catch (IOException ignored) {}
             }
             if (byteOutputStream != null) {
-                try {
-                    byteOutputStream.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
+                try { byteOutputStream.close(); } catch (IOException ignored) {}
             }
         }
     }
+
     public long writeFile(String path, byte[] data) {
         File file = new File(path);
-
         FileOutputStream out = null;
         try {
-            File fileParent = file.getParentFile();
-            if (!fileParent.exists()) {
-                boolean isMkdirs = fileParent.mkdirs();
-                boolean isNewFile = file.createNewFile();
-                if (isMkdirs & isNewFile) {
-                    Log.d(TAG,"create new file success");
-                }
+            File parent = file.getParentFile();
+            if (!parent.exists()) {
+                parent.mkdirs();
+                file.createNewFile();
             }
-
             out = new FileOutputStream(file);
             out.write(data);
-            out.close();
             return data.length;
-        } catch (IOException ex) {
-            Log.d(TAG, "Failed to write data " + ex);
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to write file", e);
         } finally {
-            try {
-                if (out != null) {
-                    out.close();
-                }
-            } catch (IOException ex) {
-                Log.d(TAG, "Failed to close file after write " + ex);
+            if (out != null) {
+                try { out.close(); } catch (IOException ignored) {}
             }
         }
         return 0;
     }
-    @Tool("前向摄像头数据识别工具，该工具可以获取前置舱外摄像头实时图像数据，并根据图像数据与车主的文本输入，给出车主回应。")
-    public String front_camera_interaction(@P(value = "经过处理后的车主文本输入，尽量简洁清晰")String text) {
 
-        Log.d(TAG, "front_camera_interaction xxxxxxxxxyyyywwwwwwwwwwwwwwwwwwwwwwwwww");
+    // ── 工具方法 ──
+
+    /**
+     * 前向摄像头数据识别工具。
+     * 当用户询问前方视野中的物体、路况或环境时调用此工具获取摄像头图像并回答。
+     */
+    @Tool(name = "front_camera_interaction",
+          value = "前向摄像头数据识别工具。当用户询问前方视野中的物体、路况、交通标志或环境时，"
+                + "通过此工具获取前置摄像头实时图像并给出回答。")
+    public String frontCameraInteraction(
+            @P("用户关于前方视野的文本提问，简洁清晰") String text) {
+        Log.d(TAG, "frontCameraInteraction invoked");
+
         if (mFrontImage != null) {
-            //writeFile("/sdcard/Android/data/com.hirain.aiagent/files/xxx.jpg", mFrontImage);
-            return front_camera_interactionPositive(text, mFrontImage);
+            return frontCameraInteractionPositive(text, mFrontImage);
         }
-        Log.d(TAG, "front_camera_interaction use audi image");
+        Log.d(TAG, "frontCameraInteraction: using default image");
 
         InputStream inputStream = null;
         ByteArrayOutputStream byteOutputStream = null;
@@ -149,72 +134,36 @@ public class VlManager {
             while ((len = inputStream.read(buffer)) != -1) {
                 byteOutputStream.write(buffer, 0, len);
             }
-
-            byte[] bytes = byteOutputStream.toByteArray();
-
-            return front_camera_interactionPositive(text, bytes);
-
+            return frontCameraInteractionPositive(text, byteOutputStream.toByteArray());
         } catch (IOException e) {
-            e.printStackTrace();
+            Log.e(TAG, "Failed to load default image", e);
             return "";
         } finally {
             if (inputStream != null) {
-                try {
-                    inputStream.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
+                try { inputStream.close(); } catch (IOException ignored) {}
             }
             if (byteOutputStream != null) {
-                try {
-                    byteOutputStream.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
+                try { byteOutputStream.close(); } catch (IOException ignored) {}
             }
         }
-
-
     }
 
-    public void front_camera_save(@P(value = "经过处理后的车主文本输入，尽量简洁清晰")String text, byte[] byteArray) {
-        Log.d("TAG", "front_camera_save end aaaa");
-
-        mFrontImage = byteArray.clone();
+    public void frontCameraSave(String text, byte[] byteArray) {
+        Log.d(TAG, "frontCameraSave: saving image data");
+        this.mFrontImage = byteArray.clone();
     }
-    public String front_camera_interactionPositive(@P(value = "经过处理后的车主文本输入，尽量简洁清晰")String text, byte[] byteArray) {
 
-        Log.d("TAG", "front_camera_interactionPositive end ccccccccccccccccccc");
-
-        String img_b64 = getBase64(ctx, byteArray);
-        SystemMessage systemmsg = SystemMessage.from(front_camera_system_msg);
-           //     Log.d("TAG", "front_camera_interaction text = " + text);
-
-                UserMessage usrmsg = UserMessage.from(
+    public String frontCameraInteractionPositive(String text, byte[] byteArray) {
+        String imgB64 = getBase64(ctx, byteArray);
+        SystemMessage systemMsg = SystemMessage.from(
+                promptManager.render(PromptConstants.TASK_FRONT_VIEW_QA));
+        UserMessage userMsg = UserMessage.from(
                 TextContent.from(text),
-                ImageContent.from(img_b64, "image/jpeg")
+                ImageContent.from(imgB64, "image/jpeg")
         );
-        Log.d("TAG", "front_camera_interactionPositive tool ccccccccccccc imagesize1 = " +  byteArray.length);
-        ChatResponse aiResponse = vlModel.chat(systemmsg, usrmsg);
-        Log.d("TAG", "front_camera_interactionPositive end ccccccccccccccccccc");
 
-        String warning_msg = "(该响应仅对本次前向视野互动有效，对后续前向视野互动意图属于无效的记忆，必须重新调用摄像头数据识别工具！)";
-        return aiResponse.aiMessage().text() + warning_msg;
-
-    }
-    public boolean hasTool(String toolname) {
-        return toolname.equals("front_camera_interaction");
-    }
-    public String handleToolRequest(ToolExecutionRequest request) {
-        try {
-            JSONObject json = new JSONObject(request.arguments());
-            if (request.name().equals("front_camera_interaction")) {
-                return front_camera_interaction(json.getString("arg0"));
-            } else {
-                return "无效的工具请求。";
-            }
-        } catch (JSONException e) {
-            return "无效的工具请求。";
-        }
+        String response = vlModel.chat(systemMsg, userMsg).aiMessage().text();
+        String warning = promptManager.render(PromptConstants.MSG_VL_WARNING);
+        return response + warning;
     }
 }

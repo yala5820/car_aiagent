@@ -1,19 +1,25 @@
 package com.hirain.aiagent.tools.vehicle.chassis;
+
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.P;
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
 
 import org.json.JSONException;
 import org.json.JSONObject;
+
 import com.hirain.aiagent.infra.soa.SoaService;
 
 public class VehicleChassisManager {
+
     private static final String KEY_CHASSIS_MODE = "底盘行驶模式";
+
     private String chassis_mode;
     private Boolean formalfunc = false;
+
     public VehicleChassisManager() {
         this.chassis_mode = "普通模式";
     }
+
+    /** 查询底盘行驶模式（非工具方法，供 AgentLoop 采集车辆状态） */
     public String getChassisStatus() {
         SoaService.Companion.getInstance().getChassisStatus();
 
@@ -25,26 +31,18 @@ public class VehicleChassisManager {
         }
         return json.toString();
     }
-    @Tool("控制底盘行驶模式，用于适应雪地、越野、普通驾驶场景。")
-    public String set_chassis_mode(@P(value = "模式，必须为：‘普通模式’、‘越野模式’、‘雪地模式’中的一个。") String mode) {
+
+    /**
+     * 控制底盘行驶模式，用于适应雪地、越野、普通驾驶场景。
+     * 当用户需要切换驾驶模式时调用此工具。
+     */
+    @Tool(name = "set_chassis_mode",
+          value = "控制底盘行驶模式。当用户需要切换驾驶模式（雪地/越野/普通）时调用。")
+    public String setChassisMode(
+            @P("模式，可选：'普通模式'、'越野模式'、'雪地模式'") String mode) {
         SoaService.Companion.getInstance().set_chassis_mode(mode);
 
-        if (formalfunc)this.chassis_mode = mode;
+        if (formalfunc) this.chassis_mode = mode;
         return "底盘行驶模式成功设置为：" + mode;
-    }
-    public boolean hasTool(String toolname) {
-        return toolname.equals("set_chassis_mode");
-    }
-    public String handleToolRequest(ToolExecutionRequest request) {
-        try {
-            JSONObject json = new JSONObject(request.arguments());
-            if (request.name().equals("set_chassis_mode")) {
-                return set_chassis_mode(json.getString("arg0"));
-            } else {
-                return "无效的工具请求。";
-            }
-        } catch (JSONException e) {
-            return "无效的工具请求。";
-        }
     }
 }

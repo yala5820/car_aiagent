@@ -12,6 +12,8 @@ import com.hirain.aiagent.tools.vehicle.chassis.VehicleChassisManager;
 import com.hirain.aiagent.engines.scenematch.*;
 
 import com.hirain.aiagent.BuildConfig;
+import com.hirain.aiagent.prompt.PromptConstants;
+import com.hirain.aiagent.prompt.PromptManager;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -44,26 +46,8 @@ public class SceneServer {
     private static final String TAG = "SceneService";
     private final ChatMemory chatMemory;
     private final ChatModel model;
-    private final String systemPrompt_ =
-            "角色定义：\n" +
-            "    你是一位专业、友好且高度智能的车载AI助手，专注于提供安全、高效、愉悦的驾驶体验。\n" +
-            "    你集成多种人工智能技术，通过不断学习迭代升级功能，在软硬件配合下实现自然流畅的人车智能交互。\n" +
-            "    你的核心使命是在保障驾驶安全的前提下，为用户提供全方位的智能座舱服务。\n" +
-            "核心原则\n" +
-            "    认知友好：从用户认知角度出发，使用简化易懂高效的提示，尽量避免或减少专业术语。\n" +
-            "    上下文感知：持续跟踪对话历史，结合当前车辆状态、舱内外场景描述等上下文提供个性化服务。\n" +
-            "    主动智能：能够预测用户需求，在适当时机提供主动建议，但不过度打扰。\n" +
-            "    安全相关：施工、火灾、车祸、大雾雨雪等极端场景，必须提供安全驾驶建议。\n" +
-            "功能规范\n" +
-            "    通用对话能力\n" +
-            "        1. 对话风格：保持友好、专业且符合驾驶场景的对话风格，避免过度拟人化。\n" +
-            "    智能座舱专属功能\n" +
-            "        识别隐含需求，根据场景模糊控车。\n" +
-            "交互规范\n" +
-            "    话术必须包括如下内容：\n" +
-            "        1. 简单描述场景且概扩调用的工具\n" +
-            "        2. 必要时提供安全驾驶建议\n " +
-            "    自然语言响应限制在80字以内。\n";
+    private final PromptManager promptManager;
+    private final String systemPrompt;
     VehicleDoorManager doorManager = new VehicleDoorManager();
     VehicleWindowManager windowManager = new VehicleWindowManager();
     private final List<ToolSpecification> windowTools = ToolSpecifications.toolSpecificationsFrom(VehicleWindowManager.class);
@@ -87,7 +71,7 @@ public class SceneServer {
         put("乘客休息", Stream.of(fragTools, windowTools, acTools).
                 flatMap(List::stream).collect(Collectors.toList()));
     }};
-    public SceneServer(Context context) {
+    public SceneServer(Context context, PromptManager promptManager) {
         OkHttpClientBuilder okHttpClientBuilder = langchain4j.http_client_ok.OkHttpClient.builder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .readTimeout(Duration.ofSeconds(120));
@@ -103,21 +87,19 @@ public class SceneServer {
                 .chatMemoryStore(new PersistentChatMemorySqlite(context.getApplicationContext(), "SceneMemory"))
                 .build();
 
-        chatMemory.add(SystemMessage.systemMessage(systemPrompt_));
+        this.promptManager = promptManager;
+        systemPrompt = promptManager.render(PromptConstants.SYSTEM_ASSISTANT_SCENE);
+        chatMemory.add(SystemMessage.systemMessage(systemPrompt));
     }
     public String scene_server(SceneMatch.Scene scene) {
-        chatMemory.add(UserMessage.userMessage("场景描述",scene.to_string()));
-        chatMemory.add(UserMessage.userMessage("车辆状态", getVehicleStatus()));
-        String userPrompt =
-                "基于当前座舱内/外场景描述，帮我主动控车，使用工具能力一次把座舱调节至最理想状态。\n" +
-                "工具使用规则：\n" +
-                "    1. 保证仅在以下场景调节空调温度，其他场景禁止调节空调温度：\n" +
-                "        1) 雪天寒冷场景，空调设置在27-30摄氏度之间；\n" +
-                "        2) 驾驶员疲劳场景，空调温度设置在19-22摄氏度之间。\n" +
-                "        3) 乘员休息场景，空调设置为舒适温度。\n" +
-                "    2. 如果调节了空调温度，需要同时关闭已开启的车窗。\n" +
-                "    3. 保证仅在雪天寒冷场景下控制方向盘与座椅加热，其他场景禁止开启加热" +
-                "    4. 雪天需要把行驶模式切换为雪地模式，保证安全驾驶";        chatMemory.add(UserMessage.from(userPrompt));
+        chatMemory.add(UserMessage.userMessage(
+                promptManager.render(PromptConstants.USER_SCENE_DESCRIPTION,
+                        Map.of("scene_description", scene.to_string()))));
+        chatMemory.add(UserMessage.userMessage(
+                promptManager.render(PromptConstants.USER_VEHICLE_STATUS,
+                        Map.of("vehicle_status", getVehicleStatus()))));
+        chatMemory.add(UserMessage.from(
+                promptManager.render(PromptConstants.USER_ACTIVE_CONTROL)));
         ChatRequest request = ChatRequest.builder()
                 .messages(chatMemory.messages())
                 .toolSpecifications(tools.get(scene.name))
@@ -125,7 +107,7 @@ public class SceneServer {
         ChatResponse aiResponse = model.chat(request);
         String res = processFunctionCall(aiResponse, scene);
         chatMemory.clear();
-        chatMemory.add(SystemMessage.systemMessage(systemPrompt_));
+        chatMemory.add(SystemMessage.systemMessage(systemPrompt));
         return res;
     }
     private String getVehicleStatus() {
@@ -205,7 +187,10 @@ public class SceneServer {
             Log.d(TAG, first);
             Log.d(TAG, second);
             ChatRequest request_with_specified = ChatRequest.builder()
-                    .messages(UserMessage.userMessage("整合下面两段话，字数80字以内：\n" + first + "\n" + second))
+                    .messages(UserMessage.userMessage(
+                            promptManager.render(PromptConstants.USER_SUMMARIZE,
+                                    Map.of("first_part", first,
+                                            "second_part", second))))
                     .build();
             ChatResponse aiResponse_with_specified = model.chat(request_with_specified);
             return aiResponse_with_specified.aiMessage().text();

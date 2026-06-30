@@ -20,13 +20,31 @@ import android.util.Base64
 import android.util.Log
 import com.hirain.adapter.vr.VRListener
 import com.hirain.adapter.vr.VRServiceManager
-import com.hirain.aiagent.engines.chat.ChatServer
+import com.hirain.aiagent.ai.langchain4j.tool.ToolRegistry
+import com.hirain.aiagent.core.AgentResult
+import com.hirain.aiagent.core.AgentLoopOrchestrator
+import com.hirain.aiagent.core.factory.AgentConfigFactory
+import com.hirain.aiagent.core.preprocessor.VehicleStatusPreProcessor
+import com.hirain.aiagent.memory.MemoryOrchestrator
+import com.hirain.aiagent.trace.TraceConfig
+import com.hirain.aiagent.trace.TraceManager
 import com.hirain.aiagent.engines.scenematch.SceneMatch
-import com.hirain.aiagent.engines.sceneserver.SceneServer
+import com.hirain.aiagent.tools.external.weather.WeatherUtils
+import com.hirain.aiagent.tools.vehicle.ac.VehicleAcManager
+import com.hirain.aiagent.tools.vehicle.chassis.VehicleChassisManager
+import com.hirain.aiagent.tools.vehicle.dms.VehicleDMSManager
+import com.hirain.aiagent.tools.vehicle.door.VehicleDoorManager
+import com.hirain.aiagent.tools.vehicle.frag.VehicleFragManager
+import com.hirain.aiagent.tools.vehicle.seat.VehicleSeatManager
+import com.hirain.aiagent.tools.vehicle.speed.VehicleSpeedManager
+import com.hirain.aiagent.tools.vehicle.window.VehicleWindowManager
 import com.hirain.aiagent.tools.vision.vl.VlManager
+import com.hirain.aiagent.prompt.PromptManager
 import com.hirain.camera.Camera
 import com.hirain.camera.CameraData
 import com.hirain.camera.ICameraServiceListener
+import dev.langchain4j.model.openai.OpenAiChatModel
+import langchain4j.http_client_ok.OkHttpClient
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -41,7 +59,13 @@ class AIAgentService : Service() {
     private var mLastDesc:String = ""
     private val mBinder: AIAgentService.AIAgentBinder = AIAgentBinder()
     private var m_connected = false
+    private var promptManager: PromptManager? = null
     private var vl: VlManager? = null
+    private lateinit var toolRegistry: ToolRegistry
+    private lateinit var memoryOrchestrator: MemoryOrchestrator
+    private lateinit var traceManager: TraceManager
+    private lateinit var chatOrchestrator: AgentLoopOrchestrator
+    private lateinit var statusProvider: VehicleStatusPreProcessor.VehicleStatusProvider
     private var mWorkHandlerThread: HandlerThread? = null
     private var mWorkHandler: Handler? = null
 
@@ -52,10 +76,7 @@ class AIAgentService : Service() {
     private var mNagativeReqExecuting: AtomicBoolean = AtomicBoolean(false);
     private var mRequestAIStr = ""
     private var mNagativeTTSplaying = false;
-    private var chat: ChatServer? = null
-
-    private val scene_matcher: SceneMatch = SceneMatch()
-    private var scene_server: SceneServer? = null
+    private lateinit var sceneMatcher: SceneMatch
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var mChating = false
@@ -79,7 +100,7 @@ class AIAgentService : Service() {
 
         Log.d("TAG", " ProcessCaptureGot start !!!!!!!!!!!!!! mChating = " + mChating + " mNagativeTTSplaying = " + mNagativeTTSplaying + " mNagativeReqExecuting = " + mNagativeReqExecuting +  " fullTask = " + fullTask)
         if (vl!= null ) {
-            vl!!.front_camera_save("", p.getValue())
+            vl!!.frontCameraSave("", p.getValue())
         }
 
         if (!mChating && !mNagativeTTSplaying && !mNagativeReqExecuting.get() && fullTask) {
@@ -90,7 +111,7 @@ class AIAgentService : Service() {
 
             var scene = SceneMatch.Scene("其他", "无效场景")
             scene =
-                scene_matcher.vl_scene_match(
+                sceneMatcher.vl_scene_match(
                     getBase64(applicationContext, p.getValue()),
                     "image/jpeg"
                 )
@@ -108,8 +129,15 @@ class AIAgentService : Service() {
             } else {
                 if (!mChating && !mNagativeTTSplaying && !mNagativeReqExecuting.get() && fullTask) {
 
-                    val res: String = scene_server!!.scene_server(scene)
-                    //     cleanChat()
+                    val sceneConfig = AgentConfigFactory.createScenePersona(
+                        this@AIAgentService, promptManager!!, toolRegistry,
+                        statusProvider, VehicleSpeedManager(), scene)
+                    val sceneOrchestrator = AgentLoopOrchestrator(
+                        sceneConfig, this@AIAgentService, promptManager!!,
+                        memoryOrchestrator, toolRegistry.toolSpecifications)
+                    val result = sceneOrchestrator.execute("", mapOf("scene" to scene))
+                    val res = if (result.isSuccess) result.output()
+                              else "系统: 场景服务暂时不可用"
                     mLastScence = scene.name
                     if ("" != scene.description) {
                         mLastDesc = scene.description
@@ -261,15 +289,63 @@ class AIAgentService : Service() {
         }, 5, 1, TimeUnit.SECONDS)
 
 
-        vl = VlManager(this)
+        promptManager = PromptManager(this)
+
+        // ── 工具管理器和注册表 ──
+        val doorManager = VehicleDoorManager()
+        val windowManager = VehicleWindowManager()
+        val seatManager = VehicleSeatManager()
+        val acManager = VehicleAcManager()
+        val chassisManager = VehicleChassisManager()
+        val fragManager = VehicleFragManager()
+        val speedManager = VehicleSpeedManager()
+        val dmsManager = VehicleDMSManager()
+        vl = VlManager(this, promptManager!!)
+        val weatherUtils = WeatherUtils("c9af807ed95f93b56855a928417586f9")
+
+        toolRegistry = ToolRegistry().apply {
+            registerAll(
+                weatherUtils, doorManager, windowManager, seatManager,
+                acManager, chassisManager, fragManager, speedManager,
+                dmsManager, vl!!
+            )
+        }
+
+        // ── 车辆状态提供者 ──
+        statusProvider = VehicleStatusPreProcessor.VehicleStatusProvider {
+            org.json.JSONObject().apply {
+                put("车门", org.json.JSONObject(doorManager.doorStatus))
+                put("车窗", org.json.JSONObject(windowManager.windowStatus))
+                put("座椅、方向盘", org.json.JSONObject(seatManager.seatStatus))
+                put("空调", org.json.JSONObject(acManager.acStatus))
+                put("底盘", org.json.JSONObject(chassisManager.chassisStatus))
+                put("香氛", org.json.JSONObject(fragManager.fragStatus))
+                put("车速", org.json.JSONObject(speedManager.speedStatus))
+                put("DMS", org.json.JSONObject(dmsManager.dmsStatus))
+                put("当前地址", "北京市东城区")
+            }.toString()
+        }
+
+        // ── 记忆系统 ──
+        val summaryModel = buildQwenTurbo()
+        val extractModel = buildQwenTurbo()
+        memoryOrchestrator = MemoryOrchestrator(this, summaryModel, extractModel)
+
+        // ── Trace 初始化 ──
+        traceManager = TraceManager(TraceConfig.development(BuildConfig.VERSION_NAME))
+
+        // ── 对话 Agent（持久化 Persona） ──
+        chatOrchestrator = AgentLoopOrchestrator(
+            AgentConfigFactory.createChatPersona(
+                this, promptManager!!, memoryOrchestrator, toolRegistry,
+                statusProvider, speedManager),
+            this, promptManager!!, memoryOrchestrator, toolRegistry.toolSpecifications)
+
+        // ── 场景识别 ──
+        sceneMatcher = SceneMatch(promptManager!!)
+
         mManager = VRServiceManager.getInstance(this)
         mManager?.initCallback(m_vrlistener)
-        scene_server = SceneServer(this)
-        try {
-            chat = ChatServer(this, vl)
-        } catch (e: Exception) {
-            Log.e("TAG", "ChatServer init failed, AI chat will be unavailable", e);
-        }
 
     }
 
@@ -287,6 +363,8 @@ class AIAgentService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        memoryOrchestrator.shutdown()
+        traceManager.shutdown()
         Log.d("TAG", "onDestroy")
     }
     fun playTTS(message:String) {
@@ -347,7 +425,8 @@ class AIAgentService : Service() {
                 mainHandler.post {
                     Log.d("TAG","requestAI arg = " + arg)
 
-                    chat!!.cleanMemory()
+                    memoryOrchestrator.startNewSession("default_user")
+                    chatOrchestrator.cleanMemory()
                 }
             }
 
@@ -416,25 +495,32 @@ class AIAgentService : Service() {
             mainHandler.postDelayed(timeoutRunnable, SENDMESSAGE_TIMEOUT_MS)
 
             mWorkHandler?.post {
+                val session = traceManager.startSession("chat", "default_user", message)
                 try {
                     Log.d("TAG", "sendMessage begin chat")
-                    if (chat == null) {
-                        throw Exception("ChatServer 未初始化")
-                    }
-                    val res = chat!!.chat(message)
+                    val ctx = mapOf("user_id" to "default_user") + session.toTraceContext().toContextData()
+                    val result = chatOrchestrator.execute(message, ctx)
                     mainHandler.removeCallbacks(timeoutRunnable)
-                    Log.d("TAG", "sendMessage chat result = " + res)
-                    val resultData = AIAgentData().apply {
-                        value = res.toByteArray(Charsets.UTF_8)
+                    session.setStatus(result.isSuccess, result.errorDetail())
+                    if (result.isSuccess) {
+                        Log.d("TAG", "sendMessage chat result = " + result.output())
+                        val resultData = AIAgentData().apply {
+                            value = result.output().toByteArray(Charsets.UTF_8)
+                        }
+                        notifyAIAgentListeners(0, 0, resultData)
+                    } else {
+                        throw Exception(result.errorDetail() ?: "请求失败")
                     }
-                    notifyAIAgentListeners(0, 0, resultData)
                 } catch (e: Exception) {
                     mainHandler.removeCallbacks(timeoutRunnable)
                     Log.e("TAG", "sendMessage chat failed", e)
+                    session.setStatus(false, e.message)
                     val errorData = AIAgentData().apply {
                         value = ("系统: 请求失败 - " + e.message).toByteArray(Charsets.UTF_8)
                     }
                     notifyAIAgentListeners(0, 0, errorData)
+                } finally {
+                    session.close()
                 }
             }
         }
@@ -459,7 +545,7 @@ class AIAgentService : Service() {
                     Log.d("TAG", "sendMessageWithImage begin vl chat")
                     val imageBytes = Base64.decode(imgB64, Base64.DEFAULT)
                     if (vl != null) {
-                        val res = vl!!.front_camera_interactionPositive(message, imageBytes)
+                        val res = vl!!.frontCameraInteractionPositive(message, imageBytes)
                         mainHandler.removeCallbacks(timeoutRunnable)
                         Log.d("TAG", "sendMessageWithImage vl result = " + res)
                         val resultData = AIAgentData().apply {
@@ -508,15 +594,23 @@ class AIAgentService : Service() {
 
     private fun processNagativeRequest(userMessage: String) {
 
+        val session = traceManager.startSession("chat", "default_user", userMessage)
         try {
             Log.d("TAG", "processNagativeRequest begin userMessage =" + userMessage);
-            var res = chat!!.chat(userMessage)
+            val ctx = mapOf("user_id" to "default_user") + session.toTraceContext().toContextData()
+            val result = chatOrchestrator.execute(userMessage, ctx)
+            session.setStatus(result.isSuccess, result.errorDetail())
+            val res = if (result.isSuccess) result.output()
+                      else "系统: 请求失败 - " + (result.errorDetail() ?: "未知错误")
             appendNagativeResponse("AI:", res)
 
             Log.d("TAG", "processNagativeRequest end" );
 
         } catch (e: java.lang.Exception) {
+            session.setStatus(false, e.message)
             appendNagativeResponse("系统: 请求失败 - ", e.message + "")
+        } finally {
+            session.close()
         }
 
 
@@ -558,6 +652,19 @@ class AIAgentService : Service() {
     }
     private fun getBase64(context: Context, byteArray: ByteArray): String {
         return Base64.encodeToString(byteArray, Base64.DEFAULT)
+    }
+
+    private fun buildQwenTurbo(): OpenAiChatModel {
+        val httpBuilder = OkHttpClient.builder()
+            .connectTimeout(java.time.Duration.ofSeconds(30))
+            .readTimeout(java.time.Duration.ofSeconds(120))
+        return OpenAiChatModel.builder()
+            .httpClientBuilder(httpBuilder)
+            .apiKey(BuildConfig.DASHSCOPE_API_KEY)
+            .baseUrl("https://dashscope.aliyuncs.com/compatible-mode/v1")
+            .modelName("qwen-turbo")
+            .parallelToolCalls(true)
+            .build()
     }
 }
  

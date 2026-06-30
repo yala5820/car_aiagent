@@ -16,7 +16,6 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import dev.langchain4j.agent.tool.P;
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.OkHttpClient;
@@ -28,24 +27,31 @@ import dev.langchain4j.agent.tool.Tool;
 import com.hirain.aiagent.infra.geo.*;
 
 public class WeatherUtils {
+
     private static final String TAG = "WeatherUtils";
     private static final String BASE_URL = "https://restapi.amap.com/v3/weather/weatherInfo";
+    private static final int DAY_MIN = 1;
+    private static final int DAY_MAX = 4;
+
     private final String apiKey;
     private final OkHttpClient httpClient;
     private final Gson gson;
-    private final GeoUtils geo_utils;
+    private final GeoUtils geoUtils;
+
     public WeatherUtils(String apiKey) {
         this.apiKey = apiKey;
         this.httpClient = new OkHttpClient();
         this.gson = new Gson();
-        this.geo_utils = new GeoUtils(apiKey);
+        this.geoUtils = new GeoUtils(apiKey);
     }
 
-    public void getWeatherForecast(String cityCode, int day, WeatherCallback<WeatherForecast> callback) {
+    // ── 内部异步查询（非工具） ──
+
+    private void getWeatherForecast(String cityCode, int day, WeatherCallback<WeatherForecast> callback) {
         HttpUrl url = HttpUrl.parse(BASE_URL).newBuilder()
                 .addQueryParameter("key", apiKey)
                 .addQueryParameter("city", cityCode)
-                .addQueryParameter("extensions", "all")  // 实时天气
+                .addQueryParameter("extensions", "all")
                 .addQueryParameter("output", "JSON")
                 .build();
 
@@ -54,68 +60,63 @@ public class WeatherUtils {
                 .get()
                 .build();
 
-        httpClient.newCall(request).enqueue(
-                new Callback() {
-                    @Override
-                    public void onFailure(@NonNull Call call, @NonNull IOException e) {
-                        callback.onFailure("http request failed: " + e.getMessage());
-                    }
-
-                    @Override
-                    public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
-                        if (!response.isSuccessful()) {
-                            callback.onFailure("http server error: " + response.code());
-                            return;
-                        }
-
-                        String json = response.body().string();
-                        Log.d("ChatService", "raw response: " + json);
-                        WeatherForecastResponse result = gson.fromJson(json, WeatherForecastResponse.class);
-                        if ("1".equals(result.status) && result.forecasts !=null && !result.forecasts.isEmpty() &&
-                            result.forecasts.get(0).casts != null && result.forecasts.get(0).casts.size() == 4) {
-                            Log.d("ChatService", "forecast size: " + result.forecasts.get(0).casts.size());
-                            WeatherForecast tmp = result.forecasts.get(0).casts.get(day - 1);
-                            tmp.city = result.forecasts.get(0).city;
-                            tmp.report_time = result.forecasts.get(0).report_time;
-                            callback.onSuccess(tmp);
-                        } else {
-                            callback.onFailure("api error: " + result.info);
-                        }
-                    }
-                }
-        );
-    }
-    public boolean hasTool(String name) {
-        return name.equals("getWeatherForecast");
-    }
-    public String handleToolRequest(ToolExecutionRequest request) {
-        try {
-            JSONObject json = new JSONObject(request.arguments());
-            if (request.name().equals("getWeatherForecast")) {
-                return getWeatherForecast(json.getString("arg0"), json.getInt("arg1"));
-            } else {
-                return "无效的工具请求。";
+        httpClient.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(@NonNull Call call, @NonNull IOException e) {
+                callback.onFailure("http request failed: " + e.getMessage());
             }
-        } catch (JSONException e) {
-            return "无效的工具请求。";
-        }
+
+            @Override
+            public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
+                if (!response.isSuccessful()) {
+                    callback.onFailure("http server error: " + response.code());
+                    return;
+                }
+
+                String json = response.body().string();
+                Log.d(TAG, "raw response: " + json);
+                WeatherForecastResponse result = gson.fromJson(json, WeatherForecastResponse.class);
+                if ("1".equals(result.status) && result.forecasts != null
+                        && !result.forecasts.isEmpty()
+                        && result.forecasts.get(0).casts != null
+                        && result.forecasts.get(0).casts.size() >= DAY_MAX) {
+                    WeatherForecast tmp = result.forecasts.get(0).casts.get(day - 1);
+                    tmp.city = result.forecasts.get(0).city;
+                    tmp.reportTime = result.forecasts.get(0).reportTime;
+                    callback.onSuccess(tmp);
+                } else {
+                    callback.onFailure("api error: " + result.info);
+                }
+            }
+        });
     }
 
-    @Tool("获取中国各地区当天、明天、后天或者大后天的天气预报信息（温度、风向、风力信息），用户询问未来天气或需要获取未来天气预报时必须调用。")
-    public String getWeatherForecast(@P(value = "字符串，必须为中国境内地区。")String address,
-                                     @P(value = "整数，范围：1-4，分别对应当天天气，明天天气，后天天气，大后天天气。") int day) {
-        Log.d("ChatService", "invoked");
+    // ── 工具方法 ──
+
+    /**
+     * 查询中国各地区当天及未来三天的天气预报。
+     * 当用户询问天气、温度、风力等信息时必须调用此工具。
+     */
+    @Tool(name = "getWeatherForecast",
+          value = "获取中国各地区当天、明天、后天或大后天的天气预报（温度、风向、风力）。"
+                + "当用户询问未来天气时必须调用。")
+    public String getWeatherForecast(
+            @P("中国境内地区名称，如'北京'、'上海'、'深圳市'") String address,
+            @P("日期，1=当天、2=明天、3=后天、4=大后天") int day) {
+        Log.d(TAG, "getWeatherForecast invoked for: " + address);
+
         JSONObject json = new JSONObject();
         final CountDownLatch latch = new CountDownLatch(1);
-        String adcode = geo_utils.getCityCode(address);
+
+        String adcode = geoUtils.getCityCode(address);
         if (adcode.isEmpty()) {
             return "天气查询失败：无效的地址信息。";
         }
         Log.d(TAG, "adcode: " + adcode);
-        getWeatherForecast(adcode, day, new WeatherUtils.WeatherCallback<WeatherUtils.WeatherForecast>() {
+
+        getWeatherForecast(adcode, day, new WeatherCallback<WeatherForecast>() {
             @Override
-            public void onSuccess(WeatherUtils.WeatherForecast data) {
-                Log.d("ChatService", "succeed: " + data.toString());
+            public void onSuccess(WeatherForecast data) {
                 try {
                     json.put("城市", data.city);
                     json.put("白天天气", data.dayweather);
@@ -123,20 +124,22 @@ public class WeatherUtils {
                     json.put("白天风向", data.daywind + "," + data.daypower);
                     json.put("夜间天气", data.nightweather);
                     json.put("夜间温度", data.nighttemp);
-                    json.put("夜间风向", data.nightwind+","+data.nightpower);
-                    json.put("更新时间", data.report_time);
-                    latch.countDown();
+                    json.put("夜间风向", data.nightwind + "," + data.nightpower);
+                    json.put("更新时间", data.reportTime);
                 } catch (JSONException e) {
+                    // ignore
+                } finally {
                     latch.countDown();
                 }
             }
+
             @Override
             public void onFailure(String error) {
                 try {
                     json.put("天气查询失败", error);
-                    Log.d("ChatService", "failed: " + error);
-                    latch.countDown();
                 } catch (JSONException e) {
+                    // ignore
+                } finally {
                     latch.countDown();
                 }
             }
@@ -154,10 +157,13 @@ public class WeatherUtils {
         return json.toString();
     }
 
+    // ── 内部类型 ──
+
     public interface WeatherCallback<T> {
         void onSuccess(T data);
         void onFailure(String error);
     }
+
     private static class WeatherForecastResponse {
         String status;
         String info;
@@ -167,13 +173,16 @@ public class WeatherUtils {
 
     private static class WeatherForecasts {
         String city;
-        String report_time;
+        @SerializedName("report_time")
+        String reportTime;
         @SerializedName("casts")
         List<WeatherForecast> casts;
     }
+
     public static class WeatherForecast {
         public String city;
-        public String report_time;
+        @SerializedName("report_time")
+        public String reportTime;
         public String date;
         public String week;
         public String dayweather;
@@ -187,10 +196,9 @@ public class WeatherUtils {
 
         @Override
         public String toString() {
-            return city + " " + date + " 星期" + week + " " +
-                dayweather + " " + daytemp + "℃ " + daywind + " " + daypower + "级 " +
-                nightweather + " " + nighttemp + "℃ " + nightwind + " " + nightpower + "级";
+            return city + " " + date + " 星期" + week + " "
+                    + dayweather + " " + daytemp + "℃ " + daywind + " " + daypower + "级 "
+                    + nightweather + " " + nighttemp + "℃ " + nightwind + " " + nightpower + "级";
         }
-
     }
 }

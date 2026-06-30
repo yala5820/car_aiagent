@@ -5,6 +5,9 @@ import android.util.Log;
 
 import com.hirain.aiagent.BuildConfig;
 
+import com.hirain.aiagent.ai.langchain4j.tool.ToolRegistry;
+import com.hirain.aiagent.prompt.PromptConstants;
+import com.hirain.aiagent.prompt.PromptManager;
 import com.hirain.aiagent.tools.external.weather.WeatherUtils;
 import com.hirain.aiagent.tools.vehicle.ac.VehicleAcManager;
 import com.hirain.aiagent.tools.vehicle.chassis.VehicleChassisManager;
@@ -21,13 +24,11 @@ import org.json.JSONObject;
 
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.agent.tool.ToolSpecifications;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
@@ -64,8 +65,9 @@ public class MainAgentLoop {
     private final ChatMemory chatMemory;
     private final String systemPrompt;
 
-    private final Map<String, ToolExecutor> toolRegistry = new LinkedHashMap<>();
+    private final ToolRegistry toolRegistry = new ToolRegistry();
     private final List<ToolSpecification> toolSpecifications;
+    private final PromptManager promptManager;
 
     private final WeatherUtils weatherUtils;
     private final VehicleDoorManager doorManager;
@@ -78,12 +80,7 @@ public class MainAgentLoop {
     private final VehicleDMSManager dmsManager;
     private final VlManager vlManager;
 
-    @FunctionalInterface
-    private interface ToolExecutor {
-        String execute(ToolExecutionRequest request);
-    }
-
-    public MainAgentLoop(Context context) {
+    public MainAgentLoop(Context context, PromptManager promptManager) {
         // ── 模型初始化 ──
         OkHttpClientBuilder httpBuilder = OkHttpClient.builder()
                 .connectTimeout(Duration.ofSeconds(30))
@@ -103,7 +100,8 @@ public class MainAgentLoop {
                 .build();
 
         // ── 系统提示词 ──
-        systemPrompt = buildSystemPrompt();
+        this.promptManager = promptManager;
+        systemPrompt = promptManager.render(PromptConstants.SYSTEM_ASSISTANT_DEFAULT);
         chatMemory.add(SystemMessage.systemMessage(systemPrompt));
 
         // ── 工具管理器 ──
@@ -119,7 +117,12 @@ public class MainAgentLoop {
         vlManager = new VlManager(context);
 
         // ── 工具注册表 + 工具声明 ──
-        toolSpecifications = registerTools();
+        toolRegistry.registerAll(
+                weatherUtils, doorManager, windowManager, seatManager,
+                acManager, chassisManager, fragManager, speedManager,
+                dmsManager, vlManager
+        );
+        toolSpecifications = toolRegistry.getToolSpecifications();
     }
 
     // ──────────────────── 公开接口 ────────────────────
@@ -148,7 +151,9 @@ public class MainAgentLoop {
         for (int round = 0; round < MAX_ITERATIONS; round++) {
             // 注入车辆状态作为当前上下文
             List<ChatMessage> messages = new ArrayList<>();
-            messages.add(UserMessage.userMessage("车辆状态", getVehicleStatus()));
+            messages.add(UserMessage.userMessage(
+                    promptManager.render(PromptConstants.USER_VEHICLE_STATUS,
+                            Map.of("vehicle_status", getVehicleStatus()))));
             messages.addAll(chatMemory.messages());
 
             ChatRequest request = ChatRequest.builder()
@@ -179,44 +184,7 @@ public class MainAgentLoop {
     // ──────────────────── 工具调度 ────────────────────
 
     private String dispatchTool(ToolExecutionRequest request) {
-        ToolExecutor executor = toolRegistry.get(request.name());
-        if (executor != null) {
-            return executor.execute(request);
-        }
-        return "无效的工具调用: " + request.name();
-    }
-
-    private List<ToolSpecification> registerTools() {
-        List<Object> managers = List.of(
-                weatherUtils, doorManager, windowManager, seatManager,
-                acManager, chassisManager, fragManager, speedManager,
-                dmsManager, vlManager
-        );
-
-        List<ToolSpecification> specs = new ArrayList<>();
-        for (Object manager : managers) {
-            List<ToolSpecification> mgrSpecs = ToolSpecifications.toolSpecificationsFrom(manager.getClass());
-            specs.addAll(mgrSpecs);
-            for (ToolSpecification spec : mgrSpecs) {
-                ToolExecutor executor = req -> dispatchToManager(manager, req);
-                toolRegistry.put(spec.name(), executor);
-            }
-        }
-        return List.copyOf(specs);
-    }
-
-    private String dispatchToManager(Object manager, ToolExecutionRequest request) {
-        if (manager instanceof WeatherUtils) return ((WeatherUtils) manager).handleToolRequest(request);
-        if (manager instanceof VehicleDoorManager) return ((VehicleDoorManager) manager).handleToolRequest(request);
-        if (manager instanceof VehicleWindowManager) return ((VehicleWindowManager) manager).handleToolRequest(request);
-        if (manager instanceof VehicleSeatManager) return ((VehicleSeatManager) manager).handleToolRequest(request);
-        if (manager instanceof VehicleAcManager) return ((VehicleAcManager) manager).handleToolRequest(request);
-        if (manager instanceof VehicleChassisManager) return ((VehicleChassisManager) manager).handleToolRequest(request);
-        if (manager instanceof VehicleFragManager) return ((VehicleFragManager) manager).handleToolRequest(request);
-        if (manager instanceof VehicleSpeedManager) return ((VehicleSpeedManager) manager).handleToolRequest(request);
-        if (manager instanceof VehicleDMSManager) return ((VehicleDMSManager) manager).handleToolRequest(request);
-        if (manager instanceof VlManager) return ((VlManager) manager).handleToolRequest(request);
-        return "未知工具管理器";
+        return toolRegistry.dispatch(request);
     }
 
     // ──────────────────── 车辆状态采集 ────────────────────
@@ -239,29 +207,4 @@ public class MainAgentLoop {
         }
     }
 
-    // ──────────────────── 系统提示词 ────────────────────
-
-    private String buildSystemPrompt() {
-        return "角色定义：\n" +
-                "    你是一位专业、友好且高度智能的车载AI助手，专注于提供安全、高效、愉悦的驾驶体验。\n" +
-                "    你的核心使命是在保障驾驶安全的前提下，为用户提供全方位的智能座舱服务。\n" +
-                "核心原则\n" +
-                "    认知友好：使用简化易懂的表达，尽量避免专业术语。\n" +
-                "    上下文感知：结合当前驾驶状态、地理位置、时间等上下文提供个性化服务。\n" +
-                "    主动智能：能够预测用户需求，但不过度打扰。\n" +
-                "    严谨准确：无法完成的用户请求，以当前系统不支持为由礼貌拒绝。\n" +
-                "功能规范\n" +
-                "    通用对话：自然聊天、娱乐互动（单次不超过1分钟）、百科问答。\n" +
-                "    天气查询：使用对应工具查询天气。\n" +
-                "    推荐能力：音乐/影视、旅游景点、游玩建议。\n" +
-                "    前向视野互动：用户询问前方物体时，必须重新调用工具获取实时前向视野数据。\n" +
-                "    精准控车：支持自然语言的车辆控制，复杂指令拆解分步执行。\n" +
-                "    模糊控车：识别隐含需求（如\"有点冷\"自动调高空调温度），需二次确认。\n" +
-                "交互规范\n" +
-                "    保持简洁，单次语音输出不超过30秒。\n" +
-                "    模糊控车需要二次确认。\n" +
-                "能力边界\n" +
-                "    能够控制车辆功能、提供天气信息、娱乐和旅途建议。\n" +
-                "    上述功能之外的请求，以当前系统不支持为由礼貌拒绝。";
-    }
 }

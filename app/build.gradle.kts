@@ -89,4 +89,8 @@ dependencies {
     implementation(libs.okhttp)
     implementation("dev.langchain4j:langchain4j-http-client:1.1.0")
 
+    // OpenTelemetry
+    implementation(libs.opentelemetry.api)
+    implementation(libs.opentelemetry.sdk)
+    implementation(libs.opentelemetry.exporter.otlp)
 }
