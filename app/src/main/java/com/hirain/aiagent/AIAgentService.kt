@@ -225,11 +225,12 @@ class AIAgentService : Service() {
     }
 
     fun writeFile(path: String?, data: ByteArray): Long {
-        val file: File = File(path)
+        if (path == null) return 0
+        val file = File(path)
 
         var out: FileOutputStream? = null
         try {
-            val fileParent: File = file.getParentFile()
+            val fileParent = file.parentFile ?: return 0
             if (!fileParent.exists()) {
                 val isMkdirs: Boolean = fileParent.mkdirs()
                 val isNewFile: Boolean = file.createNewFile()

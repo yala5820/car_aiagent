@@ -38,6 +38,9 @@ public class TraceManager {
         this.config = config;
         this.enabled = config.enabled();
 
+        OpenTelemetry otel;
+        Tracer tr;
+
         if (enabled) {
             try {
                 Resource resource = Resource.getDefault().merge(
@@ -58,21 +61,24 @@ public class TraceManager {
                         .setResource(resource)
                         .build();
 
-                this.openTelemetry = OpenTelemetrySdk.builder()
+                otel = OpenTelemetrySdk.builder()
                         .setTracerProvider(tracerProvider)
                         .build();
-                this.tracer = openTelemetry.getTracer("com.hirain.aiagent");
+                tr = otel.getTracer("com.hirain.aiagent");
                 Log.d(TAG, "TraceManager initialized, endpoint=" + config.otlpEndpoint());
             } catch (Exception e) {
                 Log.e(TAG, "Failed to initialize OpenTelemetry, falling back to no-op", e);
-                this.openTelemetry = OpenTelemetry.noop();
-                this.tracer = openTelemetry.getTracer("noop");
+                otel = OpenTelemetry.noop();
+                tr = otel.getTracer("noop");
             }
         } else {
-            this.openTelemetry = OpenTelemetry.noop();
-            this.tracer = openTelemetry.getTracer("noop");
+            otel = OpenTelemetry.noop();
+            tr = otel.getTracer("noop");
             Log.d(TAG, "TraceManager disabled");
         }
+
+        this.openTelemetry = otel;
+        this.tracer = tr;
     }
 
     /**
