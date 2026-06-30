@@ -114,7 +114,7 @@ public class MainAgentLoop {
         fragManager = new VehicleFragManager();
         speedManager = new VehicleSpeedManager();
         dmsManager = new VehicleDMSManager();
-        vlManager = new VlManager(context);
+        vlManager = new VlManager(context, promptManager);
 
         // ── 工具注册表 + 工具声明 ──
         toolRegistry.registerAll(

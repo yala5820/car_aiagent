@@ -4,6 +4,7 @@ import android.util.Log;
 
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.exporter.otlp.http.trace.OtlpHttpSpanExporter;
 import io.opentelemetry.sdk.OpenTelemetrySdk;
@@ -110,7 +111,7 @@ public class TraceManager {
                 ((OpenTelemetrySdk) openTelemetry)
                         .getSdkTracerProvider()
                         .shutdown()
-                        .join(5000);
+                        .join(5, TimeUnit.SECONDS);
                 Log.d(TAG, "TraceManager shut down");
             } catch (Exception e) {
                 Log.w(TAG, "TraceManager shutdown failed", e);

@@ -28,11 +28,14 @@ android {
     }
 
     signingConfigs {
-        getByName("debug") {
-            storeFile = file(projectDir.toString() + "/../platform.jks")
-            storePassword = localProps.getProperty("signing.storePassword", "")
-            keyAlias = localProps.getProperty("signing.keyAlias", "")
-            keyPassword = localProps.getProperty("signing.keyPassword", "")
+        val debugKeyFile = file(projectDir.toString() + "/../platform.jks")
+        if (debugKeyFile.exists()) {
+            getByName("debug") {
+                storeFile = debugKeyFile
+                storePassword = localProps.getProperty("signing.storePassword", "")
+                keyAlias = localProps.getProperty("signing.keyAlias", "")
+                keyPassword = localProps.getProperty("signing.keyPassword", "")
+            }
         }
     }
     buildTypes {
@@ -44,7 +47,9 @@ android {
             )
         }
         getByName("debug") {
-            signingConfig = signingConfigs.getByName("debug")
+            if (signingConfigs.findByName("debug") != null) {
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
     }
     compileOptions {

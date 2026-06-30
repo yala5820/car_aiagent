@@ -88,6 +88,10 @@ public final class AgentConfig {
 
     // ── Builder ──
 
+    public static Builder builder(String personaId) {
+        return new Builder(personaId);
+    }
+
     public static class Builder {
         private final String personaId;
         private String systemPromptTemplateName;

@@ -122,7 +122,7 @@ public class MemoryOrchestrator {
 
     SessionMemoryStore sessionStore() { return sessionStore; }
     LongTermMemoryStore longTermStore() { return longTermStore; }
-    UserMemoryContext getUserContextDirect(String userId) {
+    public UserMemoryContext getUserContextDirect(String userId) {
         return userContexts.get(userId);
     }
 }

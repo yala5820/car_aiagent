@@ -5,6 +5,8 @@ import android.util.Log;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.Scope;
 
 /**
  * 单次用户请求的 trace 生命周期管理器（{@link AutoCloseable}）。
@@ -19,11 +21,13 @@ public class TraceSession implements AutoCloseable {
     private final Span rootSpan;
     private final String traceId;
     private final Tracer tracer;
+    private final Context parentContext;
 
     TraceSession(Span rootSpan, Tracer tracer) {
         this.rootSpan = rootSpan;
         this.traceId = rootSpan.getSpanContext().getTraceId();
         this.tracer = tracer;
+        this.parentContext = rootSpan.storeInContext(Context.current());
     }
 
     // ── 子 span 创建 ──
@@ -32,7 +36,7 @@ public class TraceSession implements AutoCloseable {
     public Span startLlmSpan(String modelName, int inputMessageCount) {
         Span span = tracer.spanBuilder("llm.call")
                 .setSpanKind(io.opentelemetry.api.trace.SpanKind.INTERNAL)
-                .setParent(rootSpan.getSpanContext())
+                .setParent(parentContext)
                 .startSpan();
         span.setAttribute("llm.model_name", modelName);
         span.setAttribute("llm.input_messages.count", inputMessageCount);
@@ -43,7 +47,7 @@ public class TraceSession implements AutoCloseable {
     public Span startToolSpan(String toolName, String arguments) {
         Span span = tracer.spanBuilder("tool.execute")
                 .setSpanKind(io.opentelemetry.api.trace.SpanKind.INTERNAL)
-                .setParent(rootSpan.getSpanContext())
+                .setParent(parentContext)
                 .startSpan();
         span.setAttribute("tool.name", toolName);
         if (arguments != null) {
