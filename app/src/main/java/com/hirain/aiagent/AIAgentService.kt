@@ -302,7 +302,7 @@ class AIAgentService : Service() {
         val speedManager = VehicleSpeedManager()
         val dmsManager = VehicleDMSManager()
         vl = VlManager(this, promptManager!!)
-        val weatherUtils = WeatherUtils("c9af807ed95f93b56855a928417586f9")
+        val weatherUtils = WeatherUtils(BuildConfig.WEATHER_API_KEY)
 
         toolRegistry = ToolRegistry().apply {
             registerAll(

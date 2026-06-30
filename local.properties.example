@@ -4,6 +4,9 @@
 # DashScope API key (required)
 # dashscope.api_key=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
+# Weather API key (高德/和风天气, required)
+# weather.api_key=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
 # Signing configuration (required for debug build)
 # signing.storePassword=123456789
 # signing.keyAlias=123456789

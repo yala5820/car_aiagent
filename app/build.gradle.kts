@@ -25,6 +25,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "DASHSCOPE_API_KEY", "\"${localProps.getProperty("dashscope.api_key", "")}\"")
+        buildConfigField("String", "WEATHER_API_KEY", "\"${localProps.getProperty("weather.api_key", "")}\"")
     }
 
     signingConfigs {

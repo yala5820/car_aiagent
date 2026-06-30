@@ -105,7 +105,7 @@ public class MainAgentLoop {
         chatMemory.add(SystemMessage.systemMessage(systemPrompt));
 
         // ── 工具管理器 ──
-        weatherUtils = new WeatherUtils("c9af807ed95f93b56855a928417586f9");
+        weatherUtils = new WeatherUtils(BuildConfig.WEATHER_API_KEY);
         doorManager = new VehicleDoorManager();
         windowManager = new VehicleWindowManager();
         seatManager = new VehicleSeatManager();
