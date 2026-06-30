@@ -18,15 +18,19 @@ public class AgentLoopState {
     private final AtomicLong endTimeMs = new AtomicLong(0);
     private final AtomicInteger currentIteration = new AtomicInteger(0);
 
-    /** 尝试启动。若当前为 IDLE 则设为 RUNNING 返回 true；否则返回 false。 */
+    /**
+     * 尝试启动。允许从任何非 RUNNING 状态启动（IDLE / COMPLETED / ERROR / TIMEOUT）。
+     * 只有真正并发运行时返回 false。
+     */
     public boolean tryStart() {
-        boolean started = state.compareAndSet(State.IDLE.ordinal(), State.RUNNING.ordinal());
-        if (started) {
-            startTimeMs.set(System.currentTimeMillis());
-            endTimeMs.set(0);
-            currentIteration.set(0);
+        if (state.get() == State.RUNNING.ordinal()) {
+            return false;
         }
-        return started;
+        state.set(State.RUNNING.ordinal());
+        startTimeMs.set(System.currentTimeMillis());
+        endTimeMs.set(0);
+        currentIteration.set(0);
+        return true;
     }
 
     public void markCompleted() {

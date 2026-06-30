@@ -80,7 +80,7 @@ public class AgentConfigFactory {
                         new SpeedBasedDoorLockGuard(() -> parseSpeed(speedManager.getSpeedStatus()))))
                 .postProcessors(List.of(
                         new NoOpPostProcessor(),
-                        new MemoryPostProcessor(memoryOrchestrator)))
+                        new MemoryPostProcessor()))
                 .terminator(new CompositeTerminator(
                         new NoToolCallTerminator(),
                         new SafetyVetoTerminator()))

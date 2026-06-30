@@ -41,13 +41,13 @@ import static com.hirain.aiagent.core.AgentResult.ErrorType;
  * 核心流程：
  * <pre>
  *   execute(userInput, extraContext)
- *     → 确保系统提示词（记忆为空时注入）
+ *     → 刷新 SystemPrompt（含长期记忆）
  *     → 写入用户消息到记忆
  *     → for i in 0..maxIterations:
  *         ① PreProcessor 链 → 生成临时上下文消息
  *         ② ModelCaller → LLM 调用
  *         ③ LLM 返回 ToolCall → SafetyGuard → ToolExecutor → 回填结果 → continue
- *         ④ LLM 返回文本 → PostProcessor → LoopTerminator → ResultCollector → return
+ *         ④ LLM 返回文本 → PostProcessor → 记忆提取 → LoopTerminator → ResultCollector → return
  *     → max iterations → AgentResult.error(MAX_ITERATIONS)
  * </pre>
  */
@@ -104,14 +104,8 @@ public class AgentLoopOrchestrator {
         Log.d(TAG, "execute: persona=" + config.personaId() + " maxIter=" + config.maxIterations());
 
         try {
-            // 确保系统提示词（含长期记忆注入）
-            if (chatMemory.messages().isEmpty()) {
-                String basePrompt = promptManager.render(config.systemPromptTemplateName());
-                String sysPrompt = memoryOrchestrator != null
-                        ? memoryOrchestrator.prepareSystemPrompt(userId, basePrompt)
-                        : basePrompt;
-                chatMemory.add(SystemMessage.from(sysPrompt));
-            }
+            // 注入 SystemPrompt（刷新长期记忆）
+            injectSystemPrompt(userId);
 
             // 写入用户消息到记忆
             if (userInput != null && !userInput.isEmpty()) {
@@ -151,8 +145,10 @@ public class AgentLoopOrchestrator {
 
                 // ③ LLM 请求了工具调用
                 if (aiMessage.hasToolExecutionRequests()) {
-                    boolean hadVeto = false;
-                    for (ToolExecutionRequest toolReq : aiMessage.toolExecutionRequests()) {
+                    List<ToolExecutionRequest> toolReqs = aiMessage.toolExecutionRequests();
+                    int vetoCount = 0;
+
+                    for (ToolExecutionRequest toolReq : toolReqs) {
                         // 安全审查
                         SafetyVerdict verdict = SafetyVerdict.allow();
                         for (SafetyGuard guard : config.safetyGuards()) {
@@ -164,7 +160,7 @@ public class AgentLoopOrchestrator {
                         if (verdict.isVetoed()) {
                             ctx.setLastSafetyVeto(verdict);
                             result = "[SAFETY VETO] " + verdict.reason();
-                            hadVeto = true;
+                            vetoCount++;
                         } else {
                             result = config.toolExecutor().execute(toolReq);
                         }
@@ -172,6 +168,26 @@ public class AgentLoopOrchestrator {
                         chatMemory.add(ToolExecutionResultMessage.from(toolReq, result));
                         Log.d(TAG, "Tool[" + toolReq.name() + "] -> " + result);
                     }
+
+                    // 所有工具都被安全否决 → 不再继续循环，直接返回
+                    if (vetoCount == toolReqs.size() && vetoCount > 0) {
+                        String output = "安全原因已阻止所有工具调用。";
+                        for (PostProcessor pp : config.postProcessors()) {
+                            output = pp.process(output, ctx);
+                        }
+                        if (memoryOrchestrator != null && userInput != null) {
+                            memoryOrchestrator.onTurnComplete(
+                                    userId, chatMemory.messages(),
+                                    estimateTokens(chatMemory.messages()),
+                                    userInput, output);
+                        }
+                        state.markCompleted();
+                        return config.resultCollector().collect(
+                                ChatResponse.builder()
+                                        .aiMessage(AiMessage.from(output))
+                                        .build(), ctx);
+                    }
+
                     continue; // 下一轮迭代
                 }
 
@@ -181,10 +197,12 @@ public class AgentLoopOrchestrator {
                     output = pp.process(output, ctx);
                 }
 
-                // ⑤ 记忆提取（后台异步）
+                // ⑤ 记忆提取 + 压缩检查（由 MemoryOrchestrator 统一处理）
                 if (memoryOrchestrator != null && userInput != null) {
                     memoryOrchestrator.onTurnComplete(
-                            userId, chatMemory.messages(), 0, userInput, output);
+                            userId, chatMemory.messages(),
+                            estimateTokens(chatMemory.messages()),
+                            userInput, output);
                 }
 
                 // ⑥ 终止判定
@@ -209,16 +227,71 @@ public class AgentLoopOrchestrator {
         }
     }
 
-    /** 清空记忆并重建系统提示词 */
+    /** 清空记忆，下次 execute() 时自动重建 SystemPrompt */
     public void cleanMemory() {
         chatMemory.clear();
-        String sysPrompt = promptManager.render(config.systemPromptTemplateName());
-        chatMemory.add(SystemMessage.from(sysPrompt));
     }
 
     /** 获取当前状态（供 Service 层并发控制使用） */
     public AgentLoopState getState() {
         return state;
+    }
+
+    // ── 内部方法 ──
+
+    /** 确保 ChatMemory 中的 SystemMessage 是最新的（含长期记忆） */
+    private void injectSystemPrompt(String userId) {
+        List<ChatMessage> existing = chatMemory.messages();
+        boolean hasSystemMessage = !existing.isEmpty()
+                && existing.get(0) instanceof SystemMessage;
+
+        if (!hasSystemMessage) {
+            // 无 SystemMessage → 直接写入
+            String basePrompt = promptManager.render(config.systemPromptTemplateName());
+            String sysPrompt = memoryOrchestrator != null
+                    ? memoryOrchestrator.prepareSystemPrompt(userId, basePrompt)
+                    : basePrompt;
+            chatMemory.add(SystemMessage.from(sysPrompt));
+            return;
+        }
+
+        // 已有 SystemMessage → 替换为含最新长期记忆的版本
+        String basePrompt = promptManager.render(config.systemPromptTemplateName());
+        String sysPrompt = memoryOrchestrator != null
+                ? memoryOrchestrator.prepareSystemPrompt(userId, basePrompt)
+                : basePrompt;
+
+        // 检查 SystemPrompt 是否需要更新（长期记忆可能已变化）
+        if (existing.get(0) instanceof SystemMessage
+                && sysPrompt.equals(((SystemMessage) existing.get(0)).text())) {
+            return; // 内容相同，无需替换
+        }
+
+        // 替换旧的 SystemMessage
+        List<ChatMessage> history = new ArrayList<>(existing);
+        chatMemory.clear();
+        chatMemory.add(SystemMessage.from(sysPrompt));
+        for (int i = 1; i < history.size(); i++) {
+            chatMemory.add(history.get(i));
+        }
+    }
+
+    /** 粗略估算消息列表的 Token 数（中英文混合约 2 chars/token） */
+    private int estimateTokens(List<ChatMessage> messages) {
+        int chars = 0;
+        for (ChatMessage msg : messages) {
+            if (msg instanceof UserMessage) {
+                chars += ((UserMessage) msg).singleText().length();
+            } else if (msg instanceof AiMessage) {
+                chars += ((AiMessage) msg).text() != null
+                        ? ((AiMessage) msg).text().length() : 0;
+            } else if (msg instanceof SystemMessage) {
+                chars += ((SystemMessage) msg).text().length();
+            } else if (msg instanceof ToolExecutionResultMessage) {
+                chars += ((ToolExecutionResultMessage) msg).text().length();
+            }
+        }
+        return chars / 2;
     }
 
     // ── 记忆工厂 ──
