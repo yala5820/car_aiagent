@@ -9,6 +9,7 @@ import com.hirain.aiagent.trace.TraceContext;
 import com.hirain.aiagent.trace.TraceSession;
 
 import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Scope;
 import com.hirain.aiagent.core.component.ModelCaller;
 import com.hirain.aiagent.core.component.PostProcessor;
 import com.hirain.aiagent.core.component.PreProcessor;
@@ -152,10 +153,12 @@ public class AgentLoopOrchestrator {
                 Span llmSpan = traceSession != null
                         ? traceSession.startLlmSpan("qwen", allMessages.size())
                         : null;
+                Scope llmScope = llmSpan != null ? llmSpan.makeCurrent() : null;
                 ChatResponse response;
                 try {
                     response = config.modelCaller().call(request);
                 } finally {
+                    if (llmScope != null) llmScope.close();
                     if (llmSpan != null) llmSpan.end();
                 }
 
@@ -172,6 +175,7 @@ public class AgentLoopOrchestrator {
                         Span toolSpan = traceSession != null
                                 ? traceSession.startToolSpan(toolReq.name(), toolReq.arguments())
                                 : null;
+                        Scope toolScope = toolSpan != null ? toolSpan.makeCurrent() : null;
 
                         try {
                             // 安全审查
@@ -193,6 +197,7 @@ public class AgentLoopOrchestrator {
                             chatMemory.add(ToolExecutionResultMessage.from(toolReq, result));
                             Log.d(TAG, "Tool[" + toolReq.name() + "] -> " + result);
                         } finally {
+                            if (toolScope != null) toolScope.close();
                             if (toolSpan != null) toolSpan.end();
                         }
                     }
