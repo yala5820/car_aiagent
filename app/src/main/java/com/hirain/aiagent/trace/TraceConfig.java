@@ -45,7 +45,7 @@ public final class TraceConfig {
                 .enabled(true)
                 .serviceName("aiagent-android")
                 .serviceVersion(version)
-                .otlpEndpoint("http://10.0.2.2:4318/v1/traces")
+                .otlpEndpoint("http://localhost:6006/v1/traces")
                 .batchSize(64)
                 .batchTimeout(Duration.ofSeconds(2))
                 .redactSensitive(true)
@@ -64,7 +64,7 @@ public final class TraceConfig {
         private boolean enabled = false;
         private String serviceName = "aiagent-android";
         private String serviceVersion = "";
-        private String otlpEndpoint = "http://10.0.2.2:4318/v1/traces";
+        private String otlpEndpoint = "http://10.0.2.2:6006/v1/traces";
         private int batchSize = 256;
         private Duration batchTimeout = Duration.ofSeconds(5);
         private boolean redactSensitive = true;
