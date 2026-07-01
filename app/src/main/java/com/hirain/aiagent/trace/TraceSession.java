@@ -5,7 +5,6 @@ import android.util.Log;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
-import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
 
 /**
@@ -21,13 +20,13 @@ public class TraceSession implements AutoCloseable {
     private final Span rootSpan;
     private final String traceId;
     private final Tracer tracer;
-    private final Context parentContext;
+    private final Scope scope;
 
     TraceSession(Span rootSpan, Tracer tracer) {
         this.rootSpan = rootSpan;
         this.traceId = rootSpan.getSpanContext().getTraceId();
         this.tracer = tracer;
-        this.parentContext = rootSpan.storeInContext(Context.current());
+        this.scope = rootSpan.makeCurrent();
     }
 
     // ── 子 span 创建 ──
@@ -36,7 +35,6 @@ public class TraceSession implements AutoCloseable {
     public Span startLlmSpan(String modelName, int inputMessageCount) {
         Span span = tracer.spanBuilder("llm.call")
                 .setSpanKind(io.opentelemetry.api.trace.SpanKind.INTERNAL)
-                .setParent(parentContext)
                 .startSpan();
         span.setAttribute("llm.model_name", modelName);
         span.setAttribute("llm.input_messages.count", inputMessageCount);
@@ -47,7 +45,6 @@ public class TraceSession implements AutoCloseable {
     public Span startToolSpan(String toolName, String arguments) {
         Span span = tracer.spanBuilder("tool.execute")
                 .setSpanKind(io.opentelemetry.api.trace.SpanKind.INTERNAL)
-                .setParent(parentContext)
                 .startSpan();
         span.setAttribute("tool.name", toolName);
         if (arguments != null) {
@@ -79,10 +76,11 @@ public class TraceSession implements AutoCloseable {
         rootSpan.setAttribute(key, value);
     }
 
-    /** 关闭 session（刷新 span） */
+    /** 关闭 session（释放 context 绑定 + 结束 span） */
     @Override
     public void close() {
         try {
+            scope.close();
             rootSpan.end();
         } catch (Exception e) {
             Log.w(TAG, "Failed to end trace span", e);
@@ -94,6 +92,6 @@ public class TraceSession implements AutoCloseable {
     public String traceId() { return traceId; }
 
     public TraceContext toTraceContext() {
-        return new TraceContext(traceId, rootSpan.getSpanContext().getSpanId());
+        return new TraceContext(traceId, rootSpan.getSpanContext().getSpanId(), this);
     }
 }

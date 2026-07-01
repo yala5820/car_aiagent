@@ -5,6 +5,10 @@ import android.util.Log;
 
 import com.hirain.aiagent.core.component.LoopTerminator;
 import com.hirain.aiagent.memory.MemoryOrchestrator;
+import com.hirain.aiagent.trace.TraceContext;
+import com.hirain.aiagent.trace.TraceSession;
+
+import io.opentelemetry.api.trace.Span;
 import com.hirain.aiagent.core.component.ModelCaller;
 import com.hirain.aiagent.core.component.PostProcessor;
 import com.hirain.aiagent.core.component.PreProcessor;
@@ -103,6 +107,11 @@ public class AgentLoopOrchestrator {
         AgentLoopContext ctx = new AgentLoopContext(userInput, config.personaId(), extraContext);
         Log.d(TAG, "execute: persona=" + config.personaId() + " maxIter=" + config.maxIterations());
 
+        // 提取 TraceSession（用于创建 LLM 和工具子 span）
+        TraceSession traceSession = extraContext != null
+                ? ((TraceContext) extraContext.get(TraceContext.TRACE_CONTEXT_KEY)).session()
+                : null;
+
         try {
             // 注入 SystemPrompt（刷新长期记忆）
             injectSystemPrompt(userId);
@@ -139,7 +148,17 @@ public class AgentLoopOrchestrator {
                         .messages(allMessages)
                         .toolSpecifications(effectiveToolSpecs)
                         .build();
-                ChatResponse response = config.modelCaller().call(request);
+
+                Span llmSpan = traceSession != null
+                        ? traceSession.startLlmSpan("qwen", allMessages.size())
+                        : null;
+                ChatResponse response;
+                try {
+                    response = config.modelCaller().call(request);
+                } finally {
+                    if (llmSpan != null) llmSpan.end();
+                }
+
                 AiMessage aiMessage = response.aiMessage();
                 chatMemory.add(aiMessage);
 
@@ -149,24 +168,33 @@ public class AgentLoopOrchestrator {
                     int vetoCount = 0;
 
                     for (ToolExecutionRequest toolReq : toolReqs) {
-                        // 安全审查
-                        SafetyVerdict verdict = SafetyVerdict.allow();
-                        for (SafetyGuard guard : config.safetyGuards()) {
-                            verdict = guard.evaluate(toolReq, ctx);
-                            if (verdict.isVetoed()) break;
-                        }
+                        // 工具执行子 span
+                        Span toolSpan = traceSession != null
+                                ? traceSession.startToolSpan(toolReq.name(), toolReq.arguments())
+                                : null;
 
-                        String result;
-                        if (verdict.isVetoed()) {
-                            ctx.setLastSafetyVeto(verdict);
-                            result = "[SAFETY VETO] " + verdict.reason();
-                            vetoCount++;
-                        } else {
-                            result = config.toolExecutor().execute(toolReq);
+                        try {
+                            // 安全审查
+                            SafetyVerdict verdict = SafetyVerdict.allow();
+                            for (SafetyGuard guard : config.safetyGuards()) {
+                                verdict = guard.evaluate(toolReq, ctx);
+                                if (verdict.isVetoed()) break;
+                            }
+
+                            String result;
+                            if (verdict.isVetoed()) {
+                                ctx.setLastSafetyVeto(verdict);
+                                result = "[SAFETY VETO] " + verdict.reason();
+                                vetoCount++;
+                            } else {
+                                result = config.toolExecutor().execute(toolReq);
+                            }
+                            ctx.addToolResult(toolReq.name(), toolReq.arguments(), result, verdict);
+                            chatMemory.add(ToolExecutionResultMessage.from(toolReq, result));
+                            Log.d(TAG, "Tool[" + toolReq.name() + "] -> " + result);
+                        } finally {
+                            if (toolSpan != null) toolSpan.end();
                         }
-                        ctx.addToolResult(toolReq.name(), toolReq.arguments(), result, verdict);
-                        chatMemory.add(ToolExecutionResultMessage.from(toolReq, result));
-                        Log.d(TAG, "Tool[" + toolReq.name() + "] -> " + result);
                     }
 
                     // 所有工具都被安全否决 → 不再继续循环，直接返回

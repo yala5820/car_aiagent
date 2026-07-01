@@ -15,14 +15,17 @@ public class TraceContext {
 
     private final String traceId;
     private final String sessionSpanId;
+    private final TraceSession session;
 
-    public TraceContext(String traceId, String sessionSpanId) {
+    public TraceContext(String traceId, String sessionSpanId, TraceSession session) {
         this.traceId = traceId;
         this.sessionSpanId = sessionSpanId;
+        this.session = session;
     }
 
     public String traceId() { return traceId; }
     public String sessionSpanId() { return sessionSpanId; }
+    public TraceSession session() { return session; }
 
     /** trace 是否活跃（traceId 非空） */
     public boolean isActive() {
