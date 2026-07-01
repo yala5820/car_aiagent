@@ -155,14 +155,20 @@ public class AgentLoopOrchestrator {
                         : null;
                 Scope llmScope = llmSpan != null ? llmSpan.makeCurrent() : null;
                 ChatResponse response;
+                AiMessage aiMessage;
                 try {
                     response = config.modelCaller().call(request);
+                    aiMessage = response.aiMessage();
+
+                    // 补充 LLM 输出属性到 span
+                    if (llmSpan != null) {
+                        enrichLlmSpan(llmSpan, aiMessage, response);
+                    }
                 } finally {
                     if (llmScope != null) llmScope.close();
                     if (llmSpan != null) llmSpan.end();
                 }
 
-                AiMessage aiMessage = response.aiMessage();
                 chatMemory.add(aiMessage);
 
                 // ③ LLM 请求了工具调用
@@ -192,6 +198,11 @@ public class AgentLoopOrchestrator {
                                 vetoCount++;
                             } else {
                                 result = config.toolExecutor().execute(toolReq);
+                            }
+                            // 补充工具输出到 span
+                            if (toolSpan != null && result != null) {
+                                toolSpan.setAttribute("tool.output",
+                                        result.length() > 300 ? result.substring(0, 300) + "…" : result);
                             }
                             ctx.addToolResult(toolReq.name(), toolReq.arguments(), result, verdict);
                             chatMemory.add(ToolExecutionResultMessage.from(toolReq, result));
@@ -325,6 +336,35 @@ public class AgentLoopOrchestrator {
             }
         }
         return chars / 2;
+    }
+
+    /** 为 LLM span 补充输出属性和 token 用量 */
+    private static void enrichLlmSpan(Span span, AiMessage aiMessage, ChatResponse response) {
+        // 输出文本
+        String text = aiMessage.text();
+        if (text != null && !text.isEmpty()) {
+            span.setAttribute("llm.output_messages.content",
+                    text.length() > 500 ? text.substring(0, 500) + "…" : text);
+        }
+        // 工具调用名
+        if (aiMessage.hasToolExecutionRequests()) {
+            StringBuilder toolNames = new StringBuilder();
+            for (ToolExecutionRequest req : aiMessage.toolExecutionRequests()) {
+                if (toolNames.length() > 0) toolNames.append(", ");
+                toolNames.append(req.name());
+            }
+            span.setAttribute("llm.output_messages.tool_calls", toolNames.toString());
+        }
+        // Token 用量
+        try {
+            dev.langchain4j.model.output.TokenUsage tu = response.tokenUsage();
+            if (tu != null) {
+                span.setAttribute("llm.token_count.prompt", tu.inputTokenCount());
+                span.setAttribute("llm.token_count.completion", tu.outputTokenCount());
+                span.setAttribute("llm.token_count.total", tu.totalTokenCount());
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     // ── 记忆工厂 ──

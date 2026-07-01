@@ -48,7 +48,7 @@ public final class TraceConfig {
                 .otlpEndpoint("http://localhost:6006/v1/traces")
                 .batchSize(64)
                 .batchTimeout(Duration.ofSeconds(2))
-                .redactSensitive(true)
+                .redactSensitive(false)
                 .build();
     }
 
