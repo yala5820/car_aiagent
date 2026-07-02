@@ -38,7 +38,10 @@ import com.hirain.aiagent.tools.vehicle.frag.VehicleFragManager
 import com.hirain.aiagent.tools.vehicle.seat.VehicleSeatManager
 import com.hirain.aiagent.tools.vehicle.speed.VehicleSpeedManager
 import com.hirain.aiagent.tools.vehicle.window.VehicleWindowManager
+import com.hirain.aiagent.VirtualStateMachine.VehicleStateMachine
 import com.hirain.aiagent.tools.vision.vl.VlManager
+import com.hirain.aiagent.AgentRequest
+import com.hirain.aiagent.AgentResponse
 import com.hirain.aiagent.prompt.PromptManager
 import com.hirain.camera.Camera
 import com.hirain.camera.CameraData
@@ -63,6 +66,7 @@ class AIAgentService : Service() {
     private var vl: VlManager? = null
     private lateinit var toolRegistry: ToolRegistry
     private lateinit var memoryOrchestrator: MemoryOrchestrator
+    private lateinit var vehicleStateMachine: VehicleStateMachine
     private lateinit var traceManager: TraceManager
     private lateinit var chatOrchestrator: AgentLoopOrchestrator
     private lateinit var statusProvider: VehicleStatusPreProcessor.VehicleStatusProvider
@@ -131,7 +135,7 @@ class AIAgentService : Service() {
 
                     val sceneConfig = AgentConfigFactory.createScenePersona(
                         this@AIAgentService, promptManager!!, toolRegistry,
-                        statusProvider, VehicleSpeedManager(), scene)
+                        statusProvider, VehicleSpeedManager(vehicleStateMachine), scene)
                     val sceneOrchestrator = AgentLoopOrchestrator(
                         sceneConfig, this@AIAgentService, promptManager!!,
                         memoryOrchestrator, toolRegistry.toolSpecifications)
@@ -292,15 +296,18 @@ class AIAgentService : Service() {
 
         promptManager = PromptManager(this)
 
+        // ── 虚拟车辆状态机 ──
+        vehicleStateMachine = VehicleStateMachine()
+
         // ── 工具管理器和注册表 ──
-        val doorManager = VehicleDoorManager()
-        val windowManager = VehicleWindowManager()
-        val seatManager = VehicleSeatManager()
-        val acManager = VehicleAcManager()
-        val chassisManager = VehicleChassisManager()
-        val fragManager = VehicleFragManager()
-        val speedManager = VehicleSpeedManager()
-        val dmsManager = VehicleDMSManager()
+        val doorManager = VehicleDoorManager(vehicleStateMachine)
+        val windowManager = VehicleWindowManager(vehicleStateMachine)
+        val seatManager = VehicleSeatManager(vehicleStateMachine)
+        val acManager = VehicleAcManager(vehicleStateMachine)
+        val chassisManager = VehicleChassisManager(vehicleStateMachine)
+        val fragManager = VehicleFragManager(vehicleStateMachine)
+        val speedManager = VehicleSpeedManager(vehicleStateMachine)
+        val dmsManager = VehicleDMSManager(vehicleStateMachine)
         vl = VlManager(this, promptManager!!)
         val weatherUtils = WeatherUtils(BuildConfig.WEATHER_API_KEY)
 
@@ -385,68 +392,17 @@ class AIAgentService : Service() {
     inner class AIAgentBinder :  IAIAgentAidlInterface.Stub() {
 
         @Throws(RemoteException::class)
-        override fun requestAI(arg: String?): Int {
-            Log.d("TAG","requestAI arg = " + arg)
+        override fun processAgentRequest(request: AgentRequest?) {
+            if (request == null) return
+            Log.d("TAG", "processAgentRequest: type=${request.inputType} id=${request.requestId}")
 
-            if (arg.equals("@#%^StartListen")) {
-                Log.d("TAG","requestAI arg = " + arg)
-
-                mainHandler.post {
-                    mRequestAIStr = ""
-                    mChating = true;
-                    stopTTS()
-                }
-
+            when (request.inputType) {
+                "TEXT" -> handleTextRequest(request)
+                "IMAGE" -> handleImageRequest(request)
+                "VOICE" -> handleVoiceRequest(request)
+                "CONTROL" -> handleControlRequest(request)
+                else -> Log.w("TAG", "Unknown inputType: ${request.inputType}")
             }
-            else if (arg.equals("@#%^StopListen")) {
-                mainHandler.post {
-
-                    Log.d("TAG", "requestAI arg = " + arg)
-
-                    var messgae = mRequestAIStr
-                    Log.d(
-                        "TAG",
-                        "requestAI stopListen!!!!!!!!!!!!!!!!! mRequestAIStr = " + mRequestAIStr + " mNagativeReqExecuting = " + mNagativeReqExecuting + " mNagativeTTSplaying = " + mNagativeTTSplaying
-                    )
-                    if (!mNagativeReqExecuting.get()&& mNagativeTTSplaying == false && mRequestAIStr != "") {
-                        mNagativeReqExecuting.set(true)
-                        mWorkHandler!!.post {
-                            processNagativeRequest(messgae)
-                        }
-                    } else if (mRequestAIStr == "" && !mNagativeReqExecuting.get() && mNagativeTTSplaying == false) {
-                        mainHandler.post {
-                            mChating = false
-                        }
-                    }
-                    mRequestAIStr = ""
-                }
-            }
-            else if (arg.equals("@#%^ClearChatMemory")) {
-
-                mainHandler.post {
-                    Log.d("TAG","requestAI arg = " + arg)
-
-                    memoryOrchestrator.startNewSession("default_user")
-                    chatOrchestrator.cleanMemory()
-                }
-            }
-
-
-
-            else  if (!mNagativeReqExecuting.get() && mNagativeTTSplaying == false){
-                mainHandler.post {
-                    Log.d("TAG","requestAI arg = " + arg)
-
-                    mRequestAIStr = arg!!
-                    appendToChat(arg)
-                }
-
-            }
-            else {
-
-            }
-
-            return 0
         }
 
         @Throws(RemoteException::class)
@@ -461,8 +417,6 @@ class AIAgentService : Service() {
                 }
                 mIAIAgentAidlListeners.put(listener!!, recp)
 
-
-                // 处理注册死亡监听的逻辑
                 try {
                     listener!!.asBinder().linkToDeath(recp, 0)
                 } catch (e: RemoteException) {
@@ -481,97 +435,6 @@ class AIAgentService : Service() {
 
         }
 
-        @Throws(RemoteException::class)
-        override fun sendMessage(text: String?) {
-            Log.d("TAG", "sendMessage text = " + text)
-            val message = text ?: ""
-
-            val timeoutRunnable = Runnable {
-                Log.e("TAG", "sendMessage timeout after 15s")
-                val errorData = AIAgentData().apply {
-                    value = "系统: 请求超时".toByteArray(Charsets.UTF_8)
-                }
-                notifyAIAgentListeners(0, 0, errorData)
-            }
-            mainHandler.postDelayed(timeoutRunnable, SENDMESSAGE_TIMEOUT_MS)
-
-            mWorkHandler?.post {
-                val session = traceManager.startSession("chat", "default_user", message)
-                try {
-                    Log.d("TAG", "sendMessage begin chat")
-                    val ctx = mapOf("user_id" to "default_user") + session.toTraceContext().toContextData()
-                    val result = chatOrchestrator.execute(message, ctx)
-                    mainHandler.removeCallbacks(timeoutRunnable)
-                    session.setStatus(result.isSuccess, result.errorDetail())
-                    if (result.isSuccess) {
-                        Log.d("TAG", "sendMessage chat result = " + result.output())
-                        val resultData = AIAgentData().apply {
-                            value = result.output().toByteArray(Charsets.UTF_8)
-                        }
-                        notifyAIAgentListeners(0, 0, resultData)
-                    } else {
-                        throw Exception(result.errorDetail() ?: "请求失败")
-                    }
-                } catch (e: Exception) {
-                    mainHandler.removeCallbacks(timeoutRunnable)
-                    Log.e("TAG", "sendMessage chat failed", e)
-                    session.setStatus(false, e.message)
-                    val errorData = AIAgentData().apply {
-                        value = ("系统: 请求失败 - " + e.message).toByteArray(Charsets.UTF_8)
-                    }
-                    notifyAIAgentListeners(0, 0, errorData)
-                } finally {
-                    session.close()
-                }
-            }
-        }
-
-        @Throws(RemoteException::class)
-        override fun sendMessageWithImage(text: String?, imageBase64: String?) {
-            Log.d("TAG", "sendMessageWithImage text = " + text)
-            val message = text ?: ""
-            val imgB64 = imageBase64 ?: ""
-
-            val timeoutRunnable = Runnable {
-                Log.e("TAG", "sendMessageWithImage timeout after 15s")
-                val errorData = AIAgentData().apply {
-                    value = "系统: 请求超时".toByteArray(Charsets.UTF_8)
-                }
-                notifyAIAgentListeners(0, 0, errorData)
-            }
-            mainHandler.postDelayed(timeoutRunnable, SENDMESSAGE_TIMEOUT_MS)
-
-            mWorkHandler?.post {
-                try {
-                    Log.d("TAG", "sendMessageWithImage begin vl chat")
-                    val imageBytes = Base64.decode(imgB64, Base64.DEFAULT)
-                    if (vl != null) {
-                        val res = vl!!.frontCameraInteractionPositive(message, imageBytes)
-                        mainHandler.removeCallbacks(timeoutRunnable)
-                        Log.d("TAG", "sendMessageWithImage vl result = " + res)
-                        val resultData = AIAgentData().apply {
-                            value = res.toByteArray(Charsets.UTF_8)
-                        }
-                        notifyAIAgentListeners(0, 0, resultData)
-                    } else {
-                        mainHandler.removeCallbacks(timeoutRunnable)
-                        Log.e("TAG", "sendMessageWithImage vl is null")
-                        val errorData = AIAgentData().apply {
-                            value = "系统: 多模态模型未初始化".toByteArray(Charsets.UTF_8)
-                        }
-                        notifyAIAgentListeners(0, 0, errorData)
-                    }
-                } catch (e: Exception) {
-                    mainHandler.removeCallbacks(timeoutRunnable)
-                    Log.e("TAG", "sendMessageWithImage failed", e)
-                    val errorData = AIAgentData().apply {
-                        value = ("系统: 请求失败 - " + e.message).toByteArray(Charsets.UTF_8)
-                    }
-                    notifyAIAgentListeners(0, 0, errorData)
-                }
-            }
-        }
-
     }
     override fun onBind(intent: Intent?): IBinder? {
         Log.d("TAG", "onBind")
@@ -581,40 +444,203 @@ class AIAgentService : Service() {
 
 
 
-    private fun notifyAIAgentListeners(seqId: Int, captureMode: Int, data: AIAgentData) {
+    // ── 统一请求路由 ──
+
+    private fun handleTextRequest(request: AgentRequest) {
+        val message = request.text ?: ""
+        val timeoutRunnable = Runnable {
+            Log.e("TAG", "processAgentRequest TEXT timeout")
+            notifyAIAgentListeners(AgentResponse().apply {
+                requestId = request.requestId
+                sessionId = request.sessionId
+                setSuccess(false)
+                text = "系统: 请求超时"
+                errorType = "TIMEOUT"
+                timestamp = System.currentTimeMillis()
+            })
+        }
+        mainHandler.postDelayed(timeoutRunnable, SENDMESSAGE_TIMEOUT_MS)
+
+        mWorkHandler?.post {
+            val session = traceManager.startSession("chat", request.sessionId ?: "default_user", message)
+            try {
+                Log.d("TAG", "handleTextRequest begin")
+                val ctx = mapOf("user_id" to (request.sessionId ?: "default_user")) + session.toTraceContext().toContextData()
+                val result = chatOrchestrator.execute(message, ctx)
+                mainHandler.removeCallbacks(timeoutRunnable)
+                session.setStatus(result.isSuccess, result.errorDetail())
+                notifyAIAgentListeners(AgentResponse().apply {
+                    requestId = request.requestId
+                    sessionId = request.sessionId
+                    setSuccess(result.isSuccess)
+                    text = if (result.isSuccess) result.output() else (result.errorDetail() ?: "请求失败")
+                    errorType = if (!result.isSuccess) result.errorType()?.name else null
+                    timestamp = System.currentTimeMillis()
+                })
+            } catch (e: Exception) {
+                mainHandler.removeCallbacks(timeoutRunnable)
+                Log.e("TAG", "handleTextRequest failed", e)
+                session.setStatus(false, e.message)
+                notifyAIAgentListeners(AgentResponse().apply {
+                    requestId = request.requestId
+                    sessionId = request.sessionId
+                    setSuccess(false)
+                    text = "系统: 请求失败 - ${e.message}"
+                    errorType = "EXCEPTION"
+                    timestamp = System.currentTimeMillis()
+                })
+            } finally {
+                session.close()
+            }
+        }
+    }
+
+    private fun handleImageRequest(request: AgentRequest) {
+        val timeoutRunnable = Runnable {
+            Log.e("TAG", "processAgentRequest IMAGE timeout")
+            notifyAIAgentListeners(AgentResponse().apply {
+                requestId = request.requestId
+                sessionId = request.sessionId
+                setSuccess(false)
+                text = "系统: 请求超时"
+                errorType = "TIMEOUT"
+                timestamp = System.currentTimeMillis()
+            })
+        }
+        mainHandler.postDelayed(timeoutRunnable, SENDMESSAGE_TIMEOUT_MS)
+
+        mWorkHandler?.post {
+            try {
+                Log.d("TAG", "handleImageRequest begin")
+                if (vl == null) {
+                    mainHandler.removeCallbacks(timeoutRunnable)
+                    notifyAIAgentListeners(AgentResponse().apply {
+                        requestId = request.requestId
+                        sessionId = request.sessionId
+                        setSuccess(false)
+                        text = "系统: 多模态模型未初始化"
+                        errorType = "VL_NOT_INITIALIZED"
+                        timestamp = System.currentTimeMillis()
+                    })
+                    return@post
+                }
+                val imageBytes = if (request.imagePath != null) {
+                    val file = java.io.File(request.imagePath)
+                    if (file.exists()) file.readBytes() else throw Exception("图片文件不存在: ${request.imagePath}")
+                } else {
+                    throw Exception("IMAGE 请求缺少 imagePath")
+                }
+                val res = vl!!.frontCameraInteractionPositive(request.text ?: "", imageBytes)
+                mainHandler.removeCallbacks(timeoutRunnable)
+                notifyAIAgentListeners(AgentResponse().apply {
+                    requestId = request.requestId
+                    sessionId = request.sessionId
+                    setSuccess(true)
+                    text = res
+                    timestamp = System.currentTimeMillis()
+                })
+            } catch (e: Exception) {
+                mainHandler.removeCallbacks(timeoutRunnable)
+                Log.e("TAG", "handleImageRequest failed", e)
+                notifyAIAgentListeners(AgentResponse().apply {
+                    requestId = request.requestId
+                    sessionId = request.sessionId
+                    setSuccess(false)
+                    text = "系统: 请求失败 - ${e.message}"
+                    errorType = "EXCEPTION"
+                    timestamp = System.currentTimeMillis()
+                })
+            }
+        }
+    }
+
+    private fun handleVoiceRequest(request: AgentRequest) {
+        mNagativeReqExecuting.set(true)
+        stopTTS()
+
+        val session = traceManager.startSession("chat", request.sessionId ?: "default_user", request.text ?: "")
+        mWorkHandler?.post {
+            try {
+                Log.d("TAG", "handleVoiceRequest begin text=${request.text}")
+                val ctx = mapOf("user_id" to (request.sessionId ?: "default_user")) + session.toTraceContext().toContextData()
+                val result = chatOrchestrator.execute(request.text ?: "", ctx)
+                session.setStatus(result.isSuccess, result.errorDetail())
+                val res = if (result.isSuccess) result.output()
+                          else "系统: 请求失败 - ${result.errorDetail() ?: "未知错误"}"
+                notifyAIAgentListeners(AgentResponse().apply {
+                    requestId = request.requestId
+                    sessionId = request.sessionId
+                    setSuccess(result.isSuccess)
+                    text = res
+                    errorType = if (!result.isSuccess) result.errorType()?.name else null
+                    timestamp = System.currentTimeMillis()
+                })
+                mNagativeTTSplaying = true
+                mainHandler.post {
+                    stopTTS()
+                    mManager?.speak(res)
+                    mChating = false
+                    mNagativeReqExecuting.set(false)
+                }
+            } catch (e: Exception) {
+                session.setStatus(false, e.message)
+                notifyAIAgentListeners(AgentResponse().apply {
+                    requestId = request.requestId
+                    sessionId = request.sessionId
+                    setSuccess(false)
+                    text = "系统: 请求失败 - ${e.message}"
+                    errorType = "EXCEPTION"
+                    timestamp = System.currentTimeMillis()
+                })
+                mNagativeTTSplaying = true
+                mainHandler.post {
+                    stopTTS()
+                    mManager?.speak("系统: 请求失败")
+                    mChating = false
+                    mNagativeReqExecuting.set(false)
+                }
+            } finally {
+                session.close()
+            }
+        }
+    }
+
+    private fun handleControlRequest(request: AgentRequest) {
+        val command = request.text ?: ""
+        Log.d("TAG", "handleControlRequest command=$command")
+        when (command) {
+            "StartListen", "@#%^StartListen" -> {
+                mainHandler.post {
+                    mRequestAIStr = ""
+                    mChating = true
+                    stopTTS()
+                }
+            }
+            "StopListen", "@#%^StopListen" -> {
+                mainHandler.post {
+                    mChating = false
+                }
+            }
+            "ClearChatMemory", "@#%^ClearChatMemory" -> {
+                mainHandler.post {
+                    memoryOrchestrator.startNewSession(request.sessionId ?: "default_user")
+                    chatOrchestrator.cleanMemory()
+                }
+            }
+            else -> Log.w("TAG", "Unknown control command: $command")
+        }
+    }
+
+    private fun notifyAIAgentListeners(response: AgentResponse) {
         mainHandler.post {
             for ((listener) in mIAIAgentAidlListeners) {
                 try {
-                    listener.onAIResponse(seqId, captureMode, data)
+                    listener.onAIResponse(response)
                 } catch (e: RemoteException) {
                     Log.e("TAG", "notify listener failed", e)
                 }
             }
         }
-    }
-
-    private fun processNagativeRequest(userMessage: String) {
-
-        val session = traceManager.startSession("chat", "default_user", userMessage)
-        try {
-            Log.d("TAG", "processNagativeRequest begin userMessage =" + userMessage);
-            val ctx = mapOf("user_id" to "default_user") + session.toTraceContext().toContextData()
-            val result = chatOrchestrator.execute(userMessage, ctx)
-            session.setStatus(result.isSuccess, result.errorDetail())
-            val res = if (result.isSuccess) result.output()
-                      else "系统: 请求失败 - " + (result.errorDetail() ?: "未知错误")
-            appendNagativeResponse("AI:", res)
-
-            Log.d("TAG", "processNagativeRequest end" );
-
-        } catch (e: java.lang.Exception) {
-            session.setStatus(false, e.message)
-            appendNagativeResponse("系统: 请求失败 - ", e.message + "")
-        } finally {
-            session.close()
-        }
-
-
     }
 
 

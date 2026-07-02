@@ -8,6 +8,7 @@ import com.hirain.aiagent.BuildConfig;
 import com.hirain.aiagent.ai.langchain4j.tool.ToolRegistry;
 import com.hirain.aiagent.prompt.PromptConstants;
 import com.hirain.aiagent.prompt.PromptManager;
+import com.hirain.aiagent.VirtualStateMachine.VehicleStateMachine;
 import com.hirain.aiagent.tools.external.weather.WeatherUtils;
 import com.hirain.aiagent.tools.vehicle.ac.VehicleAcManager;
 import com.hirain.aiagent.tools.vehicle.chassis.VehicleChassisManager;
@@ -78,6 +79,7 @@ public class MainAgentLoop {
     private final VehicleFragManager fragManager;
     private final VehicleSpeedManager speedManager;
     private final VehicleDMSManager dmsManager;
+    private final VehicleStateMachine vehicleStateMachine;
     private final VlManager vlManager;
 
     public MainAgentLoop(Context context, PromptManager promptManager) {
@@ -104,16 +106,19 @@ public class MainAgentLoop {
         systemPrompt = promptManager.render(PromptConstants.SYSTEM_ASSISTANT_DEFAULT);
         chatMemory.add(SystemMessage.systemMessage(systemPrompt));
 
+        // ── 虚拟车辆状态机 ──
+        vehicleStateMachine = new VehicleStateMachine();
+
         // ── 工具管理器 ──
         weatherUtils = new WeatherUtils(BuildConfig.WEATHER_API_KEY);
-        doorManager = new VehicleDoorManager();
-        windowManager = new VehicleWindowManager();
-        seatManager = new VehicleSeatManager();
-        acManager = new VehicleAcManager();
-        chassisManager = new VehicleChassisManager();
-        fragManager = new VehicleFragManager();
-        speedManager = new VehicleSpeedManager();
-        dmsManager = new VehicleDMSManager();
+        doorManager = new VehicleDoorManager(vehicleStateMachine);
+        windowManager = new VehicleWindowManager(vehicleStateMachine);
+        seatManager = new VehicleSeatManager(vehicleStateMachine);
+        acManager = new VehicleAcManager(vehicleStateMachine);
+        chassisManager = new VehicleChassisManager(vehicleStateMachine);
+        fragManager = new VehicleFragManager(vehicleStateMachine);
+        speedManager = new VehicleSpeedManager(vehicleStateMachine);
+        dmsManager = new VehicleDMSManager(vehicleStateMachine);
         vlManager = new VlManager(context, promptManager);
 
         // ── 工具注册表 + 工具声明 ──

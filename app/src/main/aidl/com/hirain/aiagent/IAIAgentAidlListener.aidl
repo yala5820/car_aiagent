@@ -1,7 +1,7 @@
 package com.hirain.aiagent;
 
-import com.hirain.aiagent.AIAgentData;
+import com.hirain.aiagent.AgentResponse;
 
 interface IAIAgentAidlListener {
-    void onAIResponse(int seqId, int captureMode, in AIAgentData data);
+    void onAIResponse(in AgentResponse response);
 }

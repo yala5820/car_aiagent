@@ -17,6 +17,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.hirain.aiagent.AgentRequest;
+import com.hirain.aiagent.AgentResponse;
+
 public class AIAgent {
     private static final String TAG = "AIAgent";
     private static final int MSG_REBIND = 0;
@@ -102,43 +105,16 @@ public class AIAgent {
         releaseThreadHandle();
     }
 
-    public int requestAI(String query) {
+    public int processAgentRequest(AgentRequest request) {
         if (m_service == null) {
-            Log.w(TAG, "requestAI: service not connected");
+            Log.w(TAG, "processAgentRequest: service not connected");
             return -1;
         }
         try {
-            return m_service.requestAI(query != null ? query : "");
-        } catch (RemoteException e) {
-            Log.e(TAG, "requestAI failed", e);
-            return -1;
-        }
-    }
-
-    public int sendMessage(String text) {
-        if (m_service == null) {
-            Log.w(TAG, "sendMessage: service not connected");
-            return -1;
-        }
-        try {
-            m_service.sendMessage(text != null ? text : "");
+            m_service.processAgentRequest(request);
             return 0;
         } catch (RemoteException e) {
-            Log.e(TAG, "sendMessage failed", e);
-            return -1;
-        }
-    }
-
-    public int sendMessageWithImage(String text, String imageBase64) {
-        if (m_service == null) {
-            Log.w(TAG, "sendMessageWithImage: service not connected");
-            return -1;
-        }
-        try {
-            m_service.sendMessageWithImage(text != null ? text : "", imageBase64 != null ? imageBase64 : "");
-            return 0;
-        } catch (RemoteException e) {
-            Log.e(TAG, "sendMessageWithImage failed", e);
+            Log.e(TAG, "processAgentRequest failed", e);
             return -1;
         }
     }
@@ -258,11 +234,12 @@ public class AIAgent {
         }
     }
 
-    private void notifyAIResponse(int seqId, int captureMode, AIAgentData data) {
-        Log.d(TAG, "enter onAIResponse.");
+    private void notifyAIResponse(AgentResponse response) {
+        Log.d(TAG, "enter onAIResponse. requestId=" + response.getRequestId()
+                + " success=" + response.isSuccess());
         for (IAIAgentServiceListener listener : mIAIAgentServiceListeners) {
             if (listener != null) {
-                listener.onAIResponse(seqId, captureMode, data);
+                listener.onAIResponse(response);
             }
         }
     }
@@ -271,12 +248,10 @@ public class AIAgent {
 
     private class AIAgentAidlCallback extends IAIAgentAidlListener.Stub {
         @Override
-        public void onAIResponse(int seqId, int captureMode, AIAgentData data)
-                throws RemoteException {
-            String log = "onAIResponse  seqid = " + seqId + " mode = " + captureMode
-                    + " aiagentdata size= " + (data != null ? data.toString() : "null");
-            Log.d(TAG, log);
-            notifyAIResponse(seqId, captureMode, data);
+        public void onAIResponse(AgentResponse response) throws RemoteException {
+            Log.d(TAG, "onAIResponse requestId=" + response.getRequestId()
+                    + " success=" + response.isSuccess());
+            notifyAIResponse(response);
         }
     }
 
