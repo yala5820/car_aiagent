@@ -5,6 +5,7 @@ import android.util.Log;
 
 import com.hirain.aiagent.core.component.LoopTerminator;
 import com.hirain.aiagent.memory.MemoryOrchestrator;
+import com.hirain.aiagent.trace.AgentTraceRecorder;
 import com.hirain.aiagent.trace.TraceContext;
 import com.hirain.aiagent.trace.TraceSession;
 
@@ -109,8 +110,9 @@ public class AgentLoopOrchestrator {
         Log.d(TAG, "execute: persona=" + config.personaId() + " maxIter=" + config.maxIterations());
 
         // 提取 TraceSession（用于创建 LLM 和工具子 span）
-        TraceSession traceSession = extraContext != null
-                ? ((TraceContext) extraContext.get(TraceContext.TRACE_CONTEXT_KEY)).session()
+        TraceSession traceSession = extractTraceSession(extraContext);
+        AgentTraceRecorder trace = traceSession != null
+                ? new AgentTraceRecorder(traceSession)
                 : null;
 
         try {
@@ -144,14 +146,25 @@ public class AgentLoopOrchestrator {
                 allMessages.addAll(transientMessages);
                 allMessages.addAll(chatMemory.messages());
 
+                Span promptSpan = trace != null
+                        ? trace.startPromptAssembly(
+                                config.personaId(),
+                                i,
+                                transientMessages,
+                                chatMemory.messages(),
+                                allMessages.size(),
+                                effectiveToolSpecs)
+                        : null;
+                if (promptSpan != null) promptSpan.end();
+
                 // ② ModelCaller → LLM 调用
                 ChatRequest request = ChatRequest.builder()
                         .messages(allMessages)
                         .toolSpecifications(effectiveToolSpecs)
                         .build();
 
-                Span llmSpan = traceSession != null
-                        ? traceSession.startLlmSpan("qwen", allMessages.size())
+                Span llmSpan = trace != null
+                        ? trace.startLlmCall(config.modelName(), i, allMessages.size())
                         : null;
                 Scope llmScope = llmSpan != null ? llmSpan.makeCurrent() : null;
                 ChatResponse response;
@@ -162,8 +175,11 @@ public class AgentLoopOrchestrator {
 
                     // 补充 LLM 输出属性到 span
                     if (llmSpan != null) {
-                        enrichLlmSpan(llmSpan, aiMessage, response);
+                        trace.enrichLlmResponse(llmSpan, response);
                     }
+                } catch (Exception e) {
+                    if (trace != null) trace.recordException(llmSpan, e);
+                    throw e;
                 } finally {
                     if (llmScope != null) llmScope.close();
                     if (llmSpan != null) llmSpan.end();
@@ -178,20 +194,20 @@ public class AgentLoopOrchestrator {
 
                     for (ToolExecutionRequest toolReq : toolReqs) {
                         // 工具执行子 span
-                        Span toolSpan = traceSession != null
-                                ? traceSession.startToolSpan(toolReq.name(), toolReq.arguments())
+                        Span toolSpan = trace != null
+                                ? trace.startTool(toolReq, i)
                                 : null;
                         Scope toolScope = toolSpan != null ? toolSpan.makeCurrent() : null;
 
+                        SafetyVerdict verdict = SafetyVerdict.allow();
+                        String result = null;
                         try {
                             // 安全审查
-                            SafetyVerdict verdict = SafetyVerdict.allow();
                             for (SafetyGuard guard : config.safetyGuards()) {
                                 verdict = guard.evaluate(toolReq, ctx);
                                 if (verdict.isVetoed()) break;
                             }
 
-                            String result;
                             if (verdict.isVetoed()) {
                                 ctx.setLastSafetyVeto(verdict);
                                 result = "[SAFETY VETO] " + verdict.reason();
@@ -199,14 +215,13 @@ public class AgentLoopOrchestrator {
                             } else {
                                 result = config.toolExecutor().execute(toolReq);
                             }
-                            // 补充工具输出到 span
-                            if (toolSpan != null && result != null) {
-                                toolSpan.setAttribute("tool.output",
-                                        result.length() > 300 ? result.substring(0, 300) + "…" : result);
-                            }
+                            if (trace != null) trace.finishTool(toolSpan, result, verdict);
                             ctx.addToolResult(toolReq.name(), toolReq.arguments(), result, verdict);
                             chatMemory.add(ToolExecutionResultMessage.from(toolReq, result));
                             Log.d(TAG, "Tool[" + toolReq.name() + "] -> " + result);
+                        } catch (Exception e) {
+                            if (trace != null) trace.recordException(toolSpan, e);
+                            throw e;
                         } finally {
                             if (toolScope != null) toolScope.close();
                             if (toolSpan != null) toolSpan.end();
@@ -223,7 +238,7 @@ public class AgentLoopOrchestrator {
                             memoryOrchestrator.onTurnComplete(
                                     userId, chatMemory.messages(),
                                     estimateTokens(chatMemory.messages()),
-                                    userInput, output);
+                                    userInput, output, trace);
                         }
                         state.markCompleted();
                         return config.resultCollector().collect(
@@ -246,7 +261,7 @@ public class AgentLoopOrchestrator {
                     memoryOrchestrator.onTurnComplete(
                             userId, chatMemory.messages(),
                             estimateTokens(chatMemory.messages()),
-                            userInput, output);
+                            userInput, output, trace);
                 }
 
                 // ⑥ 终止判定
@@ -279,6 +294,14 @@ public class AgentLoopOrchestrator {
     /** 获取当前状态（供 Service 层并发控制使用） */
     public AgentLoopState getState() {
         return state;
+    }
+
+    static TraceSession extractTraceSession(Map<String, Object> extraContext) {
+        if (extraContext == null) return null;
+        Object value = extraContext.get(TraceContext.TRACE_CONTEXT_KEY);
+        if (!(value instanceof TraceContext traceContext)) return null;
+        if (!traceContext.isActive()) return null;
+        return traceContext.session();
     }
 
     // ── 内部方法 ──
@@ -336,35 +359,6 @@ public class AgentLoopOrchestrator {
             }
         }
         return chars / 2;
-    }
-
-    /** 为 LLM span 补充输出属性和 token 用量 */
-    private static void enrichLlmSpan(Span span, AiMessage aiMessage, ChatResponse response) {
-        // 输出文本
-        String text = aiMessage.text();
-        if (text != null && !text.isEmpty()) {
-            span.setAttribute("llm.output_messages.content",
-                    text.length() > 500 ? text.substring(0, 500) + "…" : text);
-        }
-        // 工具调用名
-        if (aiMessage.hasToolExecutionRequests()) {
-            StringBuilder toolNames = new StringBuilder();
-            for (ToolExecutionRequest req : aiMessage.toolExecutionRequests()) {
-                if (toolNames.length() > 0) toolNames.append(", ");
-                toolNames.append(req.name());
-            }
-            span.setAttribute("llm.output_messages.tool_calls", toolNames.toString());
-        }
-        // Token 用量
-        try {
-            dev.langchain4j.model.output.TokenUsage tu = response.tokenUsage();
-            if (tu != null) {
-                span.setAttribute("llm.token_count.prompt", tu.inputTokenCount());
-                span.setAttribute("llm.token_count.completion", tu.outputTokenCount());
-                span.setAttribute("llm.token_count.total", tu.totalTokenCount());
-            }
-        } catch (Exception ignored) {
-        }
     }
 
     // ── 记忆工厂 ──

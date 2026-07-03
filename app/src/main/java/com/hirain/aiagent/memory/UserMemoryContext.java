@@ -2,6 +2,8 @@ package com.hirain.aiagent.memory;
 
 import android.util.Log;
 
+import com.hirain.aiagent.trace.AgentTraceRecorder;
+
 import java.util.List;
 
 import dev.langchain4j.data.message.ChatMessage;
@@ -63,7 +65,12 @@ public class UserMemoryContext {
 
     /** 提取并存储长期记忆 */
     public void extractAndStore(String userMessage, String aiResponse) {
-        List<MemoryCandidate> candidates = extractor.extract(userMessage, aiResponse);
+        extractAndStore(userMessage, aiResponse, null);
+    }
+
+    /** 提取并存储长期记忆，同时把提取过程挂到当前 Agent trace。 */
+    public void extractAndStore(String userMessage, String aiResponse, AgentTraceRecorder trace) {
+        List<MemoryCandidate> candidates = extractor.extract(userMessage, aiResponse, trace);
         for (MemoryCandidate c : candidates) {
             longTermStore.upsertMemory(userId, c.category(), c.key(), c.value(), c.confidence());
         }
@@ -76,7 +83,13 @@ public class UserMemoryContext {
 
     /** 检查并压缩消息列表 */
     public List<ChatMessage> compressIfNeeded(List<ChatMessage> messages, int currentTokens) {
-        List<ChatMessage> compressed = compressor.compress(messages, currentTokens);
+        return compressIfNeeded(messages, currentTokens, null);
+    }
+
+    /** 检查并压缩消息列表，同时把压缩决策挂到当前 Agent trace。 */
+    public List<ChatMessage> compressIfNeeded(List<ChatMessage> messages, int currentTokens,
+                                              AgentTraceRecorder trace) {
+        List<ChatMessage> compressed = compressor.compress(messages, currentTokens, trace);
         if (compressed != messages) { // 发生了压缩
             compressionCount++;
         }

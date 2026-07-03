@@ -3,6 +3,8 @@ package com.hirain.aiagent.memory;
 import android.content.Context;
 import android.util.Log;
 
+import com.hirain.aiagent.trace.AgentTraceRecorder;
+
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -68,13 +70,22 @@ public class MemoryOrchestrator {
      */
     public void onTurnComplete(String userId, List<ChatMessage> currentMessages,
                                 int tokenEstimate, String userMessage, String aiResponse) {
+        onTurnComplete(userId, currentMessages, tokenEstimate, userMessage, aiResponse, null);
+    }
+
+    /**
+     * 每轮对话完成后调用：提取长期记忆、检查压缩，并在 TEXT 主 Agent trace 中记录记忆链路。
+     */
+    public void onTurnComplete(String userId, List<ChatMessage> currentMessages,
+                                int tokenEstimate, String userMessage, String aiResponse,
+                                AgentTraceRecorder trace) {
         UserMemoryContext ctx = getUserContext(userId);
 
         // 1. 提取长期记忆
-        ctx.extractAndStore(userMessage, aiResponse);
+        ctx.extractAndStore(userMessage, aiResponse, trace);
 
         // 2. 检查压缩
-        List<ChatMessage> compressed = ctx.compressIfNeeded(currentMessages, tokenEstimate);
+        List<ChatMessage> compressed = ctx.compressIfNeeded(currentMessages, tokenEstimate, trace);
         if (compressed != currentMessages) {
             // 发生了压缩，持久化
             String memoryId = ctx.currentMemoryId();

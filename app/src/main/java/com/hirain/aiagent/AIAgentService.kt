@@ -28,6 +28,7 @@ import com.hirain.aiagent.core.preprocessor.VehicleStatusPreProcessor
 import com.hirain.aiagent.memory.MemoryOrchestrator
 import com.hirain.aiagent.trace.TraceConfig
 import com.hirain.aiagent.trace.TraceManager
+import com.hirain.aiagent.trace.TraceResponseDispatcher
 import com.hirain.aiagent.engines.scenematch.SceneMatch
 import com.hirain.aiagent.tools.external.weather.WeatherUtils
 import com.hirain.aiagent.tools.vehicle.ac.VehicleAcManager
@@ -448,48 +449,66 @@ class AIAgentService : Service() {
 
     private fun handleTextRequest(request: AgentRequest) {
         val message = request.text ?: ""
+        val session = traceManager.startAgentRequest(
+            "chat",
+            request.sessionId ?: "default_user",
+            request.requestId,
+            request.sessionId,
+            request.sourceApp,
+            request.inputType,
+            message
+        )
+        val responseDispatcher = TraceResponseDispatcher(session)
         val timeoutRunnable = Runnable {
             Log.e("TAG", "processAgentRequest TEXT timeout")
-            notifyAIAgentListeners(AgentResponse().apply {
-                requestId = request.requestId
-                sessionId = request.sessionId
-                setSuccess(false)
-                text = "系统: 请求超时"
-                errorType = "TIMEOUT"
-                timestamp = System.currentTimeMillis()
-            })
+            responseDispatcher.dispatchAndClose(
+                AgentResponse().apply {
+                    requestId = request.requestId
+                    sessionId = request.sessionId
+                    setSuccess(false)
+                    text = "系统: 请求超时"
+                    errorType = "TIMEOUT"
+                    timestamp = System.currentTimeMillis()
+                },
+                "TIMEOUT"
+            ) { response -> notifyAIAgentListeners(response) }
         }
         mainHandler.postDelayed(timeoutRunnable, SENDMESSAGE_TIMEOUT_MS)
 
         mWorkHandler?.post {
-            val session = traceManager.startSession("chat", request.sessionId ?: "default_user", message)
+            val traceScope = session.makeCurrent()
             try {
                 Log.d("TAG", "handleTextRequest begin")
                 val ctx = mapOf("user_id" to (request.sessionId ?: "default_user")) + session.toTraceContext().toContextData()
                 val result = chatOrchestrator.execute(message, ctx)
                 mainHandler.removeCallbacks(timeoutRunnable)
-                session.setStatus(result.isSuccess, result.errorDetail())
-                notifyAIAgentListeners(AgentResponse().apply {
-                    requestId = request.requestId
-                    sessionId = request.sessionId
-                    setSuccess(result.isSuccess)
-                    text = if (result.isSuccess) result.output() else (result.errorDetail() ?: "请求失败")
-                    errorType = if (!result.isSuccess) result.errorType()?.name else null
-                    timestamp = System.currentTimeMillis()
-                })
+                responseDispatcher.dispatch(
+                    AgentResponse().apply {
+                        requestId = request.requestId
+                        sessionId = request.sessionId
+                        setSuccess(result.isSuccess)
+                        text = if (result.isSuccess) result.output() else (result.errorDetail() ?: "请求失败")
+                        errorType = if (!result.isSuccess) result.errorType()?.name else null
+                        timestamp = System.currentTimeMillis()
+                    },
+                    result.errorDetail()
+                ) { response -> notifyAIAgentListeners(response) }
             } catch (e: Exception) {
                 mainHandler.removeCallbacks(timeoutRunnable)
                 Log.e("TAG", "handleTextRequest failed", e)
-                session.setStatus(false, e.message)
-                notifyAIAgentListeners(AgentResponse().apply {
-                    requestId = request.requestId
-                    sessionId = request.sessionId
-                    setSuccess(false)
-                    text = "系统: 请求失败 - ${e.message}"
-                    errorType = "EXCEPTION"
-                    timestamp = System.currentTimeMillis()
-                })
+                responseDispatcher.dispatch(
+                    AgentResponse().apply {
+                        requestId = request.requestId
+                        sessionId = request.sessionId
+                        setSuccess(false)
+                        text = "系统: 请求失败 - ${e.message}"
+                        errorType = "EXCEPTION"
+                        timestamp = System.currentTimeMillis()
+                    },
+                    e.message
+                ) { response -> notifyAIAgentListeners(response) }
             } finally {
+                traceScope.close()
                 session.close()
             }
         }
@@ -642,7 +661,6 @@ class AIAgentService : Service() {
             }
         }
     }
-
 
     private fun appendToChat(message: String) {
         val timeMillis = System.currentTimeMillis()

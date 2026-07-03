@@ -2,6 +2,8 @@ package com.hirain.aiagent.memory;
 
 import android.util.Log;
 
+import com.hirain.aiagent.trace.AgentTraceRecorder;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -13,6 +15,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import io.opentelemetry.api.trace.Span;
 
 /**
  * 记忆压缩器 — Token 额度超限时自动调用 LLM 将旧消息压缩为摘要。
@@ -48,7 +51,25 @@ public class MemoryCompressor {
      * @return 压缩后的消息列表（压缩过则新列表，否则原样返回）
      */
     public List<ChatMessage> compress(List<ChatMessage> messages, int currentTokens) {
+        return compress(messages, currentTokens, null);
+    }
+
+    /**
+     * 检查并执行压缩，同时记录压缩决策 trace。
+     *
+     * @param messages       当前消息列表
+     * @param currentTokens  当前 Token 估算值
+     * @param trace          当前 Agent trace recorder；为 null 时保持原有无 trace 行为
+     * @return 压缩后的消息列表（压缩过则新列表，否则原样返回）
+     */
+    public List<ChatMessage> compress(List<ChatMessage> messages, int currentTokens,
+                                      AgentTraceRecorder trace) {
+        Span span = trace != null
+                ? trace.startMemory("compress", inputChars(messages))
+                : null;
+        try {
         if (currentTokens < MAX_TOKENS || messages.size() <= COMPRESS_KEEP_LAST + 2) {
+            finishCompress(trace, span, false, "", "");
             return messages; // 无需压缩
         }
 
@@ -71,36 +92,52 @@ public class MemoryCompressor {
                 0, dialogMessages.size() - keepCount);
 
         if (compressMessages.isEmpty()) {
+            finishCompress(trace, span, false, "", "");
             return messages;
         }
 
         // 检查压缩区域是否有未完成的工具调用
         if (hasPendingToolCall(compressMessages)) {
-            Log.d(TAG, "Deferring compression: pending tool calls in target region");
+            safeLogD("Deferring compression: pending tool calls in target region");
+            finishCompress(trace, span, false, "", "");
             return messages;
         }
 
         // 执行 LLM 摘要
-        String summary = summarize(compressMessages);
-        if (summary.isEmpty()) {
-            Log.w(TAG, "Compression returned empty summary, skipping");
+        SummaryResult summaryResult = summarize(compressMessages);
+        if (summaryResult.error != null) {
+            if (trace != null) {
+                trace.recordException(span, summaryResult.error);
+            }
+            finishCompress(trace, span, false, summaryResult.prompt, "");
+            return messages;
+        }
+        if (summaryResult.summary.isEmpty()) {
+            safeLogW("Compression returned empty summary, skipping", null);
+            finishCompress(trace, span, false, summaryResult.prompt, summaryResult.summary);
             return messages;
         }
 
         // 组装新消息列表: SystemMessage + 摘要 + 保留的最近消息
         List<ChatMessage> result = new ArrayList<>();
         if (systemMsg != null) result.add(systemMsg);
-        result.add(UserMessage.from(SUMMARY_PREFIX + summary));
+        result.add(UserMessage.from(SUMMARY_PREFIX + summaryResult.summary));
         result.addAll(keepMessages);
 
-        Log.d(TAG, String.format("Compressed %d messages to summary + %d recent messages (tokens: %d→~%d)",
+        finishCompress(trace, span, true, summaryResult.prompt, summaryResult.summary);
+        safeLogD(String.format("Compressed %d messages to summary + %d recent messages (tokens: %d→~%d)",
                 compressMessages.size(), keepCount, currentTokens, TARGET_TOKENS));
         return result;
+        } finally {
+            if (span != null) {
+                span.end();
+            }
+        }
     }
 
     // ── 内部方法 ──
 
-    private String summarize(List<ChatMessage> messages) {
+    private SummaryResult summarize(List<ChatMessage> messages) {
         StringBuilder dialogText = new StringBuilder();
         for (ChatMessage msg : messages) {
             if (msg instanceof UserMessage) {
@@ -128,10 +165,15 @@ public class MemoryCompressor {
                 .build();
         try {
             ChatResponse response = summaryModel.chat(request);
-            return response.aiMessage().text().trim();
+            String summary = response != null
+                    && response.aiMessage() != null
+                    && response.aiMessage().text() != null
+                    ? response.aiMessage().text().trim()
+                    : "";
+            return new SummaryResult(prompt, summary, null);
         } catch (Exception e) {
-            Log.e(TAG, "Compression LLM call failed", e);
-            return "";
+            safeLogE("Compression LLM call failed", e);
+            return new SummaryResult(prompt, "", e);
         }
     }
 
@@ -143,6 +185,72 @@ public class MemoryCompressor {
             }
         }
         return false;
+    }
+
+    private static void finishCompress(AgentTraceRecorder trace, Span span, boolean compressed,
+                                       String prompt, String summary) {
+        if (trace != null) {
+            trace.finishMemoryCompress(span, compressed, prompt, summary);
+        }
+    }
+
+    private static int inputChars(List<ChatMessage> messages) {
+        if (messages == null) return 0;
+        int total = 0;
+        for (ChatMessage msg : messages) {
+            if (msg instanceof SystemMessage sm) {
+                total += sm.text() != null ? sm.text().length() : 0;
+            } else if (msg instanceof UserMessage um && um.hasSingleText()) {
+                total += um.singleText() != null ? um.singleText().length() : 0;
+            } else if (msg instanceof AiMessage am) {
+                total += am.text() != null ? am.text().length() : 0;
+            } else if (msg instanceof ToolExecutionResultMessage tr && tr.hasSingleText()) {
+                total += tr.text() != null ? tr.text().length() : 0;
+            } else if (msg != null) {
+                total += msg.toString().length();
+            }
+        }
+        return total;
+    }
+
+    private static void safeLogD(String message) {
+        try {
+            Log.d(TAG, message);
+        } catch (RuntimeException ignored) {
+            // JVM 单测环境没有 Android Log 实现，日志失败不能影响记忆主流程和 trace 断言。
+        }
+    }
+
+    private static void safeLogW(String message, Throwable throwable) {
+        try {
+            if (throwable != null) {
+                Log.w(TAG, message, throwable);
+            } else {
+                Log.w(TAG, message);
+            }
+        } catch (RuntimeException ignored) {
+            // JVM 单测环境没有 Android Log 实现，日志失败不能影响记忆主流程和 trace 断言。
+        }
+    }
+
+    private static void safeLogE(String message, Throwable throwable) {
+        try {
+            Log.e(TAG, message, throwable);
+        } catch (RuntimeException ignored) {
+            // JVM 单测环境没有 Android Log 实现，日志失败不能影响记忆主流程和 trace 断言。
+        }
+    }
+
+    private static final class SummaryResult {
+        private final String prompt;
+        private final String summary;
+        private final Exception error;
+
+        private SummaryResult(String prompt, String summary, Exception error) {
+            this.prompt = prompt != null ? prompt : "";
+            this.summary = summary != null ? summary : "";
+            this.error = error;
+        }
     }
 
     private static String buildCompressionPrompt() {

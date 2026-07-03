@@ -1,5 +1,3 @@
-# AIAgent — AI 智能座舱后台服务引擎
-
 ## 1. 项目概述
 
 AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎**。它是一个持续运行在后台的**前台 Service**，本身**无任何 UI**，对外通过 AIDL（`IAIAgentAidlInterface`）暴露 LLM 对话能力，供 Launcher 或其他 App 调用。
@@ -17,20 +15,6 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 - 四层记忆系统（Session / 长期记忆 / 压缩 / 提取）
 - 全链路追踪（OpenTelemetry + Phoenix）
 - **虚拟车辆状态机（VehicleStateMachine）**：Demo 阶段车控 tool 的状态托管中心，参数校验 + 状态收敛
-
-### 改造历史
-
-| 阶段 | 说明 |
-|------|------|
-| **Phase 1** | 16 个 Gradle 模块合并为单一 `app/` 模块，移除 UI 悬浮窗组件 |
-| **Phase 2** | 工具系统重构：ToolDispatcher + ToolRegistry，消除 450 行样板代码，修复 5 个 Bug |
-| **Phase 3** | Prompt 规范化：9 个 `.txt` 模板文件替代 150 行硬编码，PromptManager + PromptSelector |
-| **Phase 4** | Agent 主循环统一：AgentLoopOrchestrator + 7 组件接口 + SafetyGuard |
-| **Phase 5** | 记忆系统：四层架构（Session/长期记忆/压缩/提取），3 张 SQLite 表 |
-| **Phase 6** | Trace 系统：OpenTelemetry + Phoenix 全链路追踪 |
-| **Phase 7** | AgentLoop Bug 修复：状态机重置、长期记忆刷新、onTurnComplete 去重 |
-| **Phase 8** | **统一入口改造**：`sendMessage/sendMessageWithImage/requestAI` → `processAgentRequest(AgentRequest)`，`AgentResponse` 统一回调 |
-| **Phase 9** | **虚拟车辆状态机**：VehicleStateMachine + 8 个子系统 State POJO，替换 SoaService 调用，参数校验 |
 
 ---
 
@@ -215,191 +199,60 @@ AIAgent/
     └── testresult/                          # 测试结果
 ```
 
----
+## 4. Working Rules
 
-## 4. 核心组件
+本准则规定了在当前代码仓库中的执行规范。
 
-### 4.1 AIAgentService（主控中枢 - AIDL 服务端）
+### Think Before Coding
+- 任务需求模糊时，切勿直接修改文件。
+- 先查阅相关文件，说明现有代码实现逻辑。
+- 正式编码前，明确列出所有预设前提。
+- 若需求存在多种解读方向，列出全部可选方案，不擅自选定其中一种。
+- 拿不准时优先简洁提问确认需求，而非贸然做出有风险的猜测。
 
-**文件：** `AIAgentService.kt`
+### Simplicity First for simple problems
+- 对于小问题采用能解决需求的最小改动方案。
+- 不新增预判性功能、抽象层、配置层或多余扩展能力。
+- 若无充分合理说明，不引入新依赖包。
+- 若解决方案代码量持续膨胀，暂停操作并给出更轻量化的替代方案。
 
-前台 Service，职责包括：
+### Surgical Changes
+- 仅改动和任务直接相关的文件。
+- 不重构无关业务代码。
+- 不格式化本次修改无关的文件。
+- 遵循项目现有代码风格，即便其他编码风格更优也保持统一。
+- 若发现无关的废弃代码或可疑代码，仅在总结中备注，不擅自修改。
 
-- **AIDL Binder 实现**：`processAgentRequest(AgentRequest)` / `registerListener`
-  - 内部按 `AgentRequest.inputType` 路由：`TEXT` → chatOrchestrator / `IMAGE` → VlManager / `VOICE` → AI + TTS / `CONTROL` → StartListen/StopListen
-- **Camera 接入**：每 1 秒请求一次前向摄像头抓拍
-- **场景识别循环**：抓拍 → SceneMatch 识别 → 场景变化 → AgentLoopOrchestrator 主动响应
-- **Listener 回调推送**：`onAIResponse(AgentResponse)` 统一回调
-- **15 秒超时保护**
+### Goal-Driven Execution
 
-### 4.2 AgentLoopOrchestrator（统一 Agent 循环引擎）
+所有复杂任务均遵循以下步骤：
 
-**文件：** `core/AgentLoopOrchestrator.java`
+1. 定位需要改动的相关文件
+2. 说明代码当前运行逻辑
+3. 提出最小化实现方案
+4. 方案确认清晰后再执行编码修改
+5. 使用适配的命令或人工核验，验证修改效果
+6. 汇总改动文件、验证结果与尚存风险
 
-唯一的 Agent 执行入口。通过 `AgentConfig` 配置驱动不同"人格"（chat / scene / vision_qa）：
+### 禁止操作
 
-```
-execute(userInput, extraContext)
-  → 注入 SystemPrompt（+长期记忆）
-  → for i in 0..maxIterations:
-      ① PreProcessor 链 → 瞬时上下文（车辆状态、时间、场景、长期记忆）
-      ② ModelCaller → LLM 调用（含子 span 追踪）
-      ③ LLM 返回 ToolCall → SafetyGuard → ToolExecutor → 回填 → continue
-      ④ LLM 返回文本 → PostProcessor → LoopTerminator → ResultCollector → return
-  → max iterations → AgentResult.error()
-```
+无用户明确指令时，严禁执行以下操作：
 
-**7 个组件接口**全部可插拔替换，`AgentConfigFactory` 提供三个预设人格。
+- 不执行 `rm -rf` 等具有破坏性的文件操作
+- 不修改 `.env`、密钥、凭证及本地机器配置文件
+- 未经许可，不改动依赖版本与构建脚本
+- 未经许可，不进行大规模架构重写
 
-### 4.3 ToolRegistry + ToolDispatcher（集中式工具调度）
+## 5. 用户偏好设定
 
-**文件：** `ai/langchain4j/tool/`
+### 代码注释要求
 
-替代了原 10 个 Manager 中 450 行重复的 `hasTool`/`handleToolRequest` 样板代码：
+所有新增代码注释、文档字符串统一使用详尽中文编写。代码需做到自解释，注释重点说明**设计原因**，而非单纯复述代码功能；简单逻辑使用简短单行注释；仅当函数逻辑晦涩难懂时，才编写多行文档字符串。
 
-- `ToolDispatcher`：构造时反射扫描目标对象的所有 `@Tool` 方法，建立 工具名→Method 映射
-- `ToolRegistry`：管理多个 Dispatcher，`registerAll()` 注册，`dispatch()` 路由
-- 工具名直接来自 `@Tool(name=...)` 注解，不在源码中手写字符串匹配
+### 代码修改后的回复格式
 
-### 4.4 PromptManager（外部化 Prompt 管理）
+完成代码改动后，输出结构化总结，包含三部分内容：
 
-**文件：** `prompt/PromptManager.java` + `assets/prompts/`
-
-所有 Prompt 文本外置为 `.txt` 模板文件，使用 LangChain4j `{{variable}}` 语法：
-- 9 个模板文件，按 system / task / user / messages 分类
-- `PromptManager` 懒加载 + 缓存 + 渲染
-- `PromptSelector` 预留动态切换接口
-
-### 4.5 MemoryOrchestrator（四层记忆系统）
-
-**文件：** `memory/`
-
-| 层 | 组件 | 职责 |
-|----|------|------|
-| Session 管理 | SessionManager + SessionMemoryStore | 程序启闭 = 一次会话，主动指令 = 新会话 |
-| 长期记忆 | LongTermMemoryStore + MemoryExtractor | 跨 Session 持久化用户偏好/事实（SQLite） |
-| 自动压缩 | MemoryCompressor | Token > 4000 时 LLM 摘要旧消息 |
-| 用户隔离 | UserMemoryContext | userId 维度隔离，多用户支持 |
-
-### 4.6 TraceManager（全链路追踪）
-
-**文件：** `trace/`
-
-基于 OpenTelemetry + Phoenix 的追踪系统：
-- 一次请求一个完整 Trace，含 `llm.call` + `tool.execute` 子 span
-- Span 携带：模型名、输入/输出、Token 用量、HTTP 状态码、工具参数/结果
-- 开发环境通过 `adb reverse tcp:6006 tcp:6006` 连接 PC 端 Phoenix
-- `TraceConfig.production()` 一键关闭（全局 no-op）
-
-### 4.7 Vehicle*Manager 系列（车控工具）
-
-8 个模块，共约 **40+ 个 @Tool 方法**，全部使用 `ToolRegistry` 统一调度。
-每个 Manager 的 `@Tool` 方法**委托给 `VehicleStateMachine`** 执行状态变更和参数校验。
-
-| 模块 | 工具数 | 覆盖功能 |
-|------|-------|---------|
-| VehicleDoorManager | 1 | 车门闭锁/解锁 |
-| VehicleWindowManager | 11 | 车窗、天窗、遮阳帘、除霜、后视镜加热 |
-| VehicleSeatManager | 11 | 座椅加热、通风、按摩、方向盘加热 |
-| VehicleAcManager | 15 | 空调开关、温度、风量、ECO、负离子、内外循环 |
-| VehicleChassisManager | 1 | 底盘模式（普通/越野/雪地） |
-| VehicleFragManager | 2 | 香氛类型、浓度 |
-| VehicleSpeedManager | 1 | 巡航车速 |
-| VehicleDMSManager | 3 | 驾驶员疲劳、分心、情绪 |
-
-### 4.8 VehicleStateMachine（虚拟车辆状态机）
-
-**文件：** `VirtualStateMachine/`
-
-Demo 阶段引入的状态托管中心，替换原有的 `SoaService` 外部调用 + 分散的本地状态：
-
-- 持有 8 个子系统 State POJO（AcState / DoorState / WindowState / SeatState / SpeedState / ChassisState / FragState / DmsState）
-- 每个 `@Tool` 方法在 VehicleStateMachine 中有对应实现：**参数校验 + 状态变更**，返回 `String`
-- Vehicle*Manager 删除本地状态字段和 `formalfunc` 标志，@Tool 方法直接委托给 VehicleStateMachine
-- 状态查询（`getXxxStatus()`）统一从状态机读取，形成整车状态快照
-
-### 4.9 SoaService（SOA 总线封装）
-
-**文件：** `infra/soa/SoaService.kt`
-
-**所有与硬件通信的方法体均为空**（仅 `Log.d` 日志输出），这是当前最大的功能性断点。
-
----
-
-## 5. 初始化流程与运行流程
-
-### 5.1 启动入口
-
-```
-Launcher 点击图标 / 系统开机广播
-    │
-    ▼
-MainActivity.onCreate()
-    → startForegroundService(AIAgentService::class.java)
-    → finish()
-    │
-    ▼
-AIAgentService.onCreate()
-    ├─ 前台服务通知渠道
-    ├─ createWorkThreadHandle()            ← LLM 调用的后台线程
-    ├─ Camera.getInstance().init()         ← 连接 CameraService
-    ├─ 启动 1 秒定时器：requestCapture()
-    ├─ PromptManager(this)                 ← Prompt 模板管理器
-    ├─ vehicleStateMachine = VehicleStateMachine() ← 虚拟车辆状态机
-    ├─ vl = VlManager(this, promptManager)
-    ├─ toolRegistry.registerAll(10 managers) ← 注册所有工具（Manager 注入 vehicleStateMachine）
-    ├─ memoryOrchestrator(...)             ← 记忆系统初始化
-    ├─ traceManager = TraceManager(...)    ← Trace 系统初始化
-    ├─ chatOrchestrator = AgentLoopOrchestrator(...) ← 对话引擎
-    ├─ sceneMatcher = SceneMatch(...)
-    └─ VRServiceManager.initCallback()     ← VR/TTS 初始化
-```
-
-### 5.2 对话流程（processAgentRequest）
-
-```
-Launcher/AIAgentTestApp → AIDL processAgentRequest(AgentRequest)
-    │  inputType=TEXT / IMAGE / VOICE / CONTROL
-    ▼
-AIAgentService 按 inputType 路由 → handleTextRequest/handleImageRequest/...
-    │
-    ▼
-创建 TraceSession (root span → makeCurrent)
-    │
-    ▼
-AgentLoopOrchestrator.execute(text, extraContext)
-    │
-    ├→ ① injectSystemPrompt() → 含长期记忆
-    ├→ ② MemoryPreProcessor → 注入【用户记忆参考】
-    ├→ ③ VehicleStatusPreProcessor → 车辆状态 JSON
-    ├→ ④ TimeContextPreProcessor → 当前时间
-    ├→ ⑤ LLM 调用 → llm.call 子 span（makeCurrent → http 属性归此 span）
-    │       ├─ LLM 返回 ToolCall → tool.execute 子 span → continue
-    │       └─ LLM 返回文本 → PostProcessor → Terminator → ResultCollector
-    │
-    ▼
-AIAgentService session.close() → scope.close() + rootSpan.end()
-    OTLP/HTTP → Phoenix (localhost:6006)
-```
-
----
-
-## 6. 功能开发进度评估
-
-| 层次 | 完成度 | 关键瓶颈 |
-|------|--------|---------|
-| 对外 AIDL 接口 | 100% | **已统一为 `processAgentRequest(AgentRequest)`**，4 种 inputType 路由 |
-| Agent 主循环（Orchestrator） | 95% | 组件化管道完整，角色前缀问题需上游兼容 |
-| 工具调度（ToolRegistry） | 95% | 反射调度 + 安全审查，SceneServer 已删除 |
-| Prompt 管理 | 95% | 9 个模板文件，长期记忆注入 |
-| 对话记忆 | 90% | SQLite 持久化，Session 管理，自动压缩 |
-| 长期记忆 | 70% | 提取+存储完成，置信度衰减待实现 |
-| Trace 追踪 | 90% | OpenTelemetry + Phoenix 完整链路 |
-| 车控工具定义（@Tool） | 95% | 40+ 方法，参数描述详尽 |
-| **虚拟车辆状态机** | **100%** | **替换 SoaService 调用，8 个子系统状态，参数校验完整** |
-| 硬件通信（SoaService） | 5% | **所有方法为空——最大断点**（已被 VehicleStateMachine 替代） |
-| 场景识别 | 85% | 真实模型推理，特异性操作为模拟 |
-| UI | 0% | 已移除（纯后台服务） |
-| 构建 | 100% | 单模块，Version Catalog，AIDL 预存错误 |
-
-**一句话：** LLM 推理链路、工具调度、Prompt/记忆/Trace 等基础设施已完整。AIDL 接口已统一为 `processAgentRequest(AgentRequest)`。硬件通信层（SoaService）为空，但虚拟车辆状态机（VehicleStateMachine）已接管车控 tool 的状态管理，Demo 阶段可直接使用。
+1. **工作目标**：本轮工作要完成什么，或者要解决什么问题。
+1. **修改内容与逻辑**：汇总每项改动，包括位置、设计思路或原因、具体做了什么。
+2. **工作总结**：首先总结本轮执行任务情况，然后总结当前项目验证状态及遗留风险等

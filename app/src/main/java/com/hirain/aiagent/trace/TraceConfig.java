@@ -17,6 +17,7 @@ public final class TraceConfig {
     private final int batchSize;
     private final Duration batchTimeout;
     private final boolean redactSensitive;
+    private final ContentCaptureMode contentCaptureMode;
 
     private TraceConfig(Builder b) {
         this.enabled = b.enabled;
@@ -26,6 +27,7 @@ public final class TraceConfig {
         this.batchSize = b.batchSize;
         this.batchTimeout = b.batchTimeout;
         this.redactSensitive = b.redactSensitive;
+        this.contentCaptureMode = b.contentCaptureMode;
     }
 
     // ── 读取器 ──
@@ -37,6 +39,13 @@ public final class TraceConfig {
     public int batchSize() { return batchSize; }
     public Duration batchTimeout() { return batchTimeout; }
     public boolean redactSensitive() { return redactSensitive; }
+    public ContentCaptureMode contentCaptureMode() { return contentCaptureMode; }
+
+    public enum ContentCaptureMode {
+        OFF,
+        REDACTED,
+        FULL_DEBUG
+    }
 
     // ── 预设 ──
 
@@ -48,12 +57,17 @@ public final class TraceConfig {
                 .otlpEndpoint("http://localhost:6006/v1/traces")
                 .batchSize(64)
                 .batchTimeout(Duration.ofSeconds(2))
-                .redactSensitive(false)
+                .redactSensitive(true)
+                .contentCaptureMode(ContentCaptureMode.REDACTED)
                 .build();
     }
 
     public static TraceConfig production() {
-        return builder().enabled(false).build();
+        return builder()
+                .enabled(false)
+                .redactSensitive(true)
+                .contentCaptureMode(ContentCaptureMode.OFF)
+                .build();
     }
 
     // ── Builder ──
@@ -68,6 +82,7 @@ public final class TraceConfig {
         private int batchSize = 256;
         private Duration batchTimeout = Duration.ofSeconds(5);
         private boolean redactSensitive = true;
+        private ContentCaptureMode contentCaptureMode = ContentCaptureMode.OFF;
 
         public Builder enabled(boolean v) { this.enabled = v; return this; }
         public Builder serviceName(String v) { this.serviceName = v; return this; }
@@ -76,6 +91,10 @@ public final class TraceConfig {
         public Builder batchSize(int v) { this.batchSize = v; return this; }
         public Builder batchTimeout(Duration v) { this.batchTimeout = v; return this; }
         public Builder redactSensitive(boolean v) { this.redactSensitive = v; return this; }
+        public Builder contentCaptureMode(ContentCaptureMode v) {
+            this.contentCaptureMode = v != null ? v : ContentCaptureMode.OFF;
+            return this;
+        }
         public TraceConfig build() { return new TraceConfig(this); }
     }
 }

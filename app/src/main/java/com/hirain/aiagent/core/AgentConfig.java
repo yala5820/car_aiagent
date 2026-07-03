@@ -32,6 +32,7 @@ public final class AgentConfig {
     }
 
     private final String personaId;
+    private final String modelName;
     private final String systemPromptTemplateName;
     private final int maxIterations;
     private final int maxMemoryMessages;
@@ -51,6 +52,7 @@ public final class AgentConfig {
 
     private AgentConfig(Builder b) {
         this.personaId = b.personaId;
+        this.modelName = b.modelName;
         this.systemPromptTemplateName = b.systemPromptTemplateName;
         this.maxIterations = b.maxIterations;
         this.maxMemoryMessages = b.maxMemoryMessages;
@@ -71,6 +73,7 @@ public final class AgentConfig {
     // ── 读取器 ──
 
     public String personaId() { return personaId; }
+    public String modelName() { return modelName; }
     public String systemPromptTemplateName() { return systemPromptTemplateName; }
     public int maxIterations() { return maxIterations; }
     public int maxMemoryMessages() { return maxMemoryMessages; }
@@ -94,6 +97,7 @@ public final class AgentConfig {
 
     public static class Builder {
         private final String personaId;
+        private String modelName = "unknown";
         private String systemPromptTemplateName;
         private int maxIterations = 10;
         private int maxMemoryMessages = 50;
@@ -114,6 +118,10 @@ public final class AgentConfig {
         }
 
         public Builder systemPromptTemplateName(String v) { this.systemPromptTemplateName = v; return this; }
+        public Builder modelName(String v) {
+            this.modelName = v != null && !v.isEmpty() ? v : "unknown";
+            return this;
+        }
         public Builder maxIterations(int v) { this.maxIterations = v; return this; }
         public Builder maxMemoryMessages(int v) { this.maxMemoryMessages = v; return this; }
         public Builder memoryPolicy(MemoryPolicy v) { this.memoryPolicy = v; return this; }

@@ -64,6 +64,7 @@ public class AgentConfigFactory {
                                                  VehicleStatusPreProcessor.VehicleStatusProvider statusProvider,
                                                  VehicleSpeedManager speedManager) {
         return AgentConfig.builder("chat")
+                .modelName("qwen-turbo")
                 .systemPromptTemplateName(PromptConstants.SYSTEM_ASSISTANT_DEFAULT)
                 .maxIterations(10)
                 .maxMemoryMessages(50)
@@ -100,6 +101,7 @@ public class AgentConfigFactory {
                                                   VehicleSpeedManager speedManager,
                                                   SceneMatch.Scene scene) {
         return AgentConfig.builder("scene")
+                .modelName("qwen-flash")
                 .systemPromptTemplateName(PromptConstants.SYSTEM_ASSISTANT_SCENE)
                 .maxIterations(2)
                 .maxMemoryMessages(50)
@@ -131,6 +133,7 @@ public class AgentConfigFactory {
                                                      PromptManager promptManager,
                                                      ToolRegistry toolRegistry) {
         return AgentConfig.builder("vision_qa")
+                .modelName("qwen-vl-max")
                 .systemPromptTemplateName(PromptConstants.TASK_FRONT_VIEW_QA)
                 .maxIterations(1)
                 .maxMemoryMessages(2)

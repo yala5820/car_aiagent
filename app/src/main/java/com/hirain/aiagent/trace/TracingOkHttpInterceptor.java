@@ -5,6 +5,7 @@ import android.util.Log;
 import java.io.IOException;
 
 import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.StatusCode;
 import okhttp3.Interceptor;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -37,23 +38,49 @@ public class TracingOkHttpInterceptor implements Interceptor {
             response = chain.proceed(request);
         } catch (IOException e) {
             if (hasSpan) {
+                long durationMs = durationMsSince(startNs);
+                recordRequestAttributes(currentSpan, request, durationMs);
                 currentSpan.recordException(e);
-                currentSpan.setAttribute("http.status_code", 0);
+                currentSpan.setStatus(StatusCode.ERROR, e.getMessage());
+                currentSpan.setAttribute(TraceAttributeKeys.ERROR_TYPE, e.getClass().getName());
+                currentSpan.setAttribute(TraceAttributeKeys.ERROR_MESSAGE, e.getMessage());
             }
             throw e;
         }
 
-        long durationMs = (System.nanoTime() - startNs) / 1_000_000;
+        long durationMs = durationMsSince(startNs);
 
         if (hasSpan) {
-            currentSpan.setAttribute("http.status_code", response.code());
-            currentSpan.setAttribute("http.duration_ms", durationMs);
-            currentSpan.setAttribute("http.url", request.url().toString());
-            currentSpan.setAttribute("http.method", request.method());
+            recordRequestAttributes(currentSpan, request, durationMs);
+            currentSpan.setAttribute(TraceAttributeKeys.HTTP_RESPONSE_STATUS_CODE, response.code());
+            if (response.code() >= 400) {
+                currentSpan.setStatus(StatusCode.ERROR, response.message());
+                currentSpan.setAttribute(TraceAttributeKeys.ERROR_TYPE, String.valueOf(response.code()));
+                currentSpan.setAttribute(TraceAttributeKeys.ERROR_MESSAGE, response.message());
+            }
         }
 
-        Log.d(TAG, request.url().encodedPath() + " -> " + response.code()
+        safeLogD(request.url().encodedPath() + " -> " + response.code()
                 + " (" + durationMs + "ms)");
         return response;
+    }
+
+    private static void recordRequestAttributes(Span span, Request request, long durationMs) {
+        span.setAttribute(TraceAttributeKeys.HTTP_DURATION_MS, durationMs);
+        span.setAttribute(TraceAttributeKeys.URL_FULL, request.url().toString());
+        span.setAttribute(TraceAttributeKeys.SERVER_ADDRESS, request.url().host());
+        span.setAttribute(TraceAttributeKeys.HTTP_REQUEST_METHOD, request.method());
+    }
+
+    private static long durationMsSince(long startNs) {
+        return (System.nanoTime() - startNs) / 1_000_000;
+    }
+
+    private static void safeLogD(String message) {
+        try {
+            Log.d(TAG, message);
+        } catch (RuntimeException ignored) {
+            // JVM 单测环境没有 Android Log 实现，日志失败不能影响 HTTP trace 主流程。
+        }
     }
 }

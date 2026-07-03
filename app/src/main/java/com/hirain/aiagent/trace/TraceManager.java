@@ -33,10 +33,12 @@ public class TraceManager {
     private final OpenTelemetry openTelemetry;
     private final Tracer tracer;
     private final boolean enabled;
+    private final TraceAttributeWriter writer;
 
     public TraceManager(TraceConfig config) {
         this.config = config;
         this.enabled = config.enabled();
+        this.writer = new TraceAttributeWriter(config, new TraceRedactor());
 
         OpenTelemetry otel;
         Tracer tr;
@@ -104,9 +106,39 @@ public class TraceManager {
             rootSpan.setAttribute("user.input", input);
         }
 
-        TraceSession session = new TraceSession(rootSpan, tracer);
+        TraceSession session = new TraceSession(rootSpan, tracer, writer);
         Log.d(TAG, "Session started: traceId=" + session.traceId()
                 + " persona=" + personaId);
+        return session;
+    }
+
+    /**
+     * 创建 text 主 Agent 请求 root trace，并写入低敏请求元数据。
+     */
+    public TraceSession startAgentRequest(String personaId,
+                                          String userId,
+                                          String requestId,
+                                          String sessionId,
+                                          String sourceApp,
+                                          String inputType,
+                                          String userInput) {
+        Span rootSpan = tracer.spanBuilder(TraceSpanNames.AGENT_REQUEST)
+                .setSpanKind(io.opentelemetry.api.trace.SpanKind.SERVER)
+                .startSpan();
+
+        writer.putString(rootSpan, TraceAttributeKeys.AGENT_PERSONA, personaId);
+        writer.putString(rootSpan, "user.id", userId);
+        writer.putString(rootSpan, TraceAttributeKeys.REQUEST_ID, requestId);
+        writer.putString(rootSpan, TraceAttributeKeys.SESSION_ID, sessionId);
+        writer.putString(rootSpan, TraceAttributeKeys.SOURCE_APP, sourceApp);
+        writer.putString(rootSpan, TraceAttributeKeys.INPUT_TYPE, inputType);
+        writer.putLong(rootSpan, TraceAttributeKeys.USER_INPUT_LENGTH,
+                userInput != null ? userInput.length() : 0);
+        writer.putText(rootSpan, TraceAttributeKeys.USER_INPUT, userInput);
+
+        TraceSession session = new TraceSession(rootSpan, tracer, writer);
+        Log.d(TAG, "Agent request session started: traceId=" + session.traceId()
+                + " requestId=" + requestId);
         return session;
     }
 

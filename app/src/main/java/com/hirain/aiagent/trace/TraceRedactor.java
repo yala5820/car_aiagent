@@ -19,10 +19,11 @@ public class TraceRedactor {
     /** 脱敏用户输入文本 */
     public String redactUserInput(String text) {
         if (text == null || text.isEmpty()) return text;
-        if (text.length() > INPUT_MAX_LENGTH) {
-            return text.substring(0, INPUT_MAX_LENGTH) + "… (truncated)";
+        String redacted = redactPhone(text);
+        if (redacted.length() > INPUT_MAX_LENGTH) {
+            return redacted.substring(0, INPUT_MAX_LENGTH) + "… (truncated)";
         }
-        return redactPhone(text);
+        return redacted;
     }
 
     /** 脱敏工具参数 JSON */
@@ -34,19 +35,21 @@ public class TraceRedactor {
                 || jsonArgs.contains("base64") || jsonArgs.contains("Base64"))) {
             return jsonArgs.substring(0, 100) + "… (base64 truncated)";
         }
-        if (jsonArgs.length() > ARG_MAX_LENGTH) {
-            return jsonArgs.substring(0, ARG_MAX_LENGTH) + "… (truncated)";
+        String redacted = redactPhone(jsonArgs);
+        if (redacted.length() > ARG_MAX_LENGTH) {
+            return redacted.substring(0, ARG_MAX_LENGTH) + "… (truncated)";
         }
-        return redactPhone(jsonArgs);
+        return redacted;
     }
 
     /** 脱敏工具执行结果 */
     public String redactResult(String result) {
         if (result == null || result.isEmpty()) return result;
-        if (result.length() > ARG_MAX_LENGTH) {
-            return result.substring(0, ARG_MAX_LENGTH) + "… (truncated)";
+        String redacted = redactPhone(result);
+        if (redacted.length() > ARG_MAX_LENGTH) {
+            return redacted.substring(0, ARG_MAX_LENGTH) + "… (truncated)";
         }
-        return result;
+        return redacted;
     }
 
     // ── 内部 ──
@@ -54,7 +57,7 @@ public class TraceRedactor {
     private String redactPhone(String text) {
         // 匹配中国大陆手机号（11 位数字，可能前面有 +86）
         return text.replaceAll(
-                "(?:(?:\\+86)?1[3-9]\\d)\\d{4}(\\d{4})",
+                "((?:\\+86)?1[3-9]\\d)\\d{4}(\\d{4})",
                 "$1****$2");
     }
 }
