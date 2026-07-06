@@ -1,6 +1,7 @@
 package com.hirain.aiagent.runtime;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
@@ -12,6 +13,9 @@ import com.hirain.aiagent.intentrouter.IntentConfidence;
 import com.hirain.aiagent.intentrouter.IntentResult;
 import com.hirain.aiagent.intentrouter.IntentRouter;
 import com.hirain.aiagent.intentrouter.IntentTag;
+import com.hirain.aiagent.toolgroup.ToolGroupId;
+import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
+import com.hirain.aiagent.toolgroup.ToolGroupSelector;
 import com.hirain.aiagent.trace.TraceContext;
 import com.hirain.aiagent.trace.TestTraceSupport;
 
@@ -152,6 +156,65 @@ public class AgentRuntimeTest {
                 .get(AttributeKey.stringKey("agent.intent.source_input_type")));
         assertEquals("matched:WEATHER", rootSpan.getAttributes()
                 .get(AttributeKey.stringKey("agent.intent.debug_reason")));
+    }
+
+    @Test
+    public void startSession_selectsToolGroupsAndExecuteStillUsesOriginalExecutor() {
+        IntentRouter router = (text, sourceInputType) ->
+                IntentResult.of(IntentTag.VEHICLE_AC, IntentConfidence.HIGH,
+                        List.of("空调"), text, sourceInputType, "matched:VEHICLE_AC");
+        ToolGroupSelector selector = (intentResult, userInput) -> ToolGroupSelectionResult.of(
+                List.of(ToolGroupId.AC_GROUP, ToolGroupId.BASIC_STATUS_GROUP),
+                List.of("set_ac_status"),
+                "intent:VEHICLE_AC",
+                IntentConfidence.HIGH,
+                false);
+        AtomicReference<Map<String, Object>> context = new AtomicReference<>();
+        AgentRuntime runtime = new AgentRuntime(
+                (userInput, ctx) -> {
+                    context.set(ctx);
+                    return AgentResult.success("完成", 1, 10L, List.of());
+                },
+                router,
+                selector,
+                () -> "req-fixed",
+                () -> 3000L);
+        AgentRequest request = new AgentRequest();
+        request.setInputType("TEXT");
+        request.setText("打开空调");
+
+        RequestSession session = runtime.startSession(request, null);
+        RuntimeResult result = runtime.execute(session);
+
+        assertEquals(List.of(ToolGroupId.AC_GROUP, ToolGroupId.BASIC_STATUS_GROUP),
+                session.toolGroupSelectionResult().selectedGroupIds());
+        assertTrue(result.success());
+        assertFalse(context.get().containsKey("selected_tool_groups"));
+        assertFalse(context.get().containsKey("selected_tool_names"));
+    }
+
+    @Test
+    public void startSession_toolGroupSelectorExceptionFallsBackAndExecuteContinues() {
+        ToolGroupSelector failingSelector = (intentResult, userInput) -> {
+            throw new IllegalStateException("selector failed");
+        };
+        AgentRuntime runtime = new AgentRuntime(
+                (userInput, ctx) -> AgentResult.success("继续执行", 1, 10L, List.of()),
+                (text, sourceInputType) -> IntentResult.of(IntentTag.CHAT, IntentConfidence.LOW,
+                        List.of(), text, sourceInputType, "fallback_chat"),
+                failingSelector,
+                () -> "req-fixed",
+                () -> 3000L);
+
+        RequestSession session = runtime.startSession(new AgentRequest(), null);
+        RuntimeResult result = runtime.execute(session);
+
+        assertEquals(List.of(ToolGroupId.CHAT_ONLY_GROUP),
+                session.toolGroupSelectionResult().selectedGroupIds());
+        assertEquals("tool_group_selector_exception",
+                session.toolGroupSelectionResult().selectionReason());
+        assertTrue(session.toolGroupSelectionResult().fallbackUsed());
+        assertTrue(result.success());
     }
 
     // ── Test helpers ──

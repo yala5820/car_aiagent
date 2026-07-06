@@ -2,6 +2,7 @@ package com.hirain.aiagent.runtime;
 
 import com.hirain.aiagent.AgentRequest;
 import com.hirain.aiagent.intentrouter.IntentResult;
+import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
 import com.hirain.aiagent.trace.TraceContext;
 
 import java.util.HashMap;
@@ -24,12 +25,18 @@ public class RequestSessionFactory {
     }
 
     public RequestSession create(AgentRequest request, String personaId,
-                                 TraceContext traceContext, IntentResult intentResult) {
+                                 TraceContext traceContext, IntentResult intentResult,
+                                 ToolGroupSelectionResult toolGroupSelectionResult) {
         // ── intentResult 空值降级（request 可能为 null） ──
         if (intentResult == null) {
             String safeText = request != null ? nonEmpty(request.getText(), "") : "";
             String safeInputType = request != null ? nonEmpty(request.getInputType(), "TEXT") : "TEXT";
             intentResult = IntentResult.unknown(safeText, safeInputType, "missing_intent_result");
+        }
+
+        // ── toolGroupSelectionResult 空值降级 ──
+        if (toolGroupSelectionResult == null) {
+            toolGroupSelectionResult = ToolGroupSelectionResult.fallback("missing_tool_group_selection");
         }
 
         // ── request 空值时创建最小可用 RequestSession ──
@@ -38,7 +45,7 @@ public class RequestSessionFactory {
             String safePersona = nonEmpty(personaId, "chat");
             return new RequestSession(null, idGenerator.newRequestId(), null, "default_user",
                     "unknown", "TEXT", safePersona, "",
-                    now, traceContext, intentResult, new HashMap<>());
+                    now, traceContext, intentResult, toolGroupSelectionResult, new HashMap<>());
         }
 
         // ── 规范化 requestId ──
@@ -70,7 +77,7 @@ public class RequestSessionFactory {
 
         return new RequestSession(request, requestId, sessionId, userId,
                 sourceApp, inputType, normalizedPersonaId, userInput,
-                now, traceContext, intentResult, context);
+                now, traceContext, intentResult, toolGroupSelectionResult, context);
     }
 
     private static String nonEmpty(String value, String fallback) {

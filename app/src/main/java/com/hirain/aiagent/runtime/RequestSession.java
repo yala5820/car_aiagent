@@ -2,6 +2,7 @@ package com.hirain.aiagent.runtime;
 
 import com.hirain.aiagent.AgentRequest;
 import com.hirain.aiagent.intentrouter.IntentResult;
+import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
 import com.hirain.aiagent.trace.TraceContext;
 
 import java.util.Collections;
@@ -28,12 +29,14 @@ public final class RequestSession {
     private final long startedAtMs;
     private final TraceContext traceContext;
     private final IntentResult intentResult;
+    private final ToolGroupSelectionResult toolGroupSelectionResult;
     private final Map<String, Object> orchestratorContext;
 
     RequestSession(AgentRequest request, String requestId, String sessionId,
                    String userId, String sourceApp, String inputType,
                    String personaId, String userInput, long startedAtMs,
                    TraceContext traceContext, IntentResult intentResult,
+                   ToolGroupSelectionResult toolGroupSelectionResult,
                    Map<String, Object> orchestratorContext) {
         this.request = request;
         this.requestId = requestId;
@@ -46,6 +49,7 @@ public final class RequestSession {
         this.startedAtMs = startedAtMs;
         this.traceContext = traceContext;
         this.intentResult = intentResult;
+        this.toolGroupSelectionResult = toolGroupSelectionResult;
         this.orchestratorContext = Collections.unmodifiableMap(
                 new HashMap<>(orchestratorContext));
     }
@@ -61,5 +65,6 @@ public final class RequestSession {
     public long startedAtMs() { return startedAtMs; }
     public TraceContext traceContext() { return traceContext; }
     public IntentResult intentResult() { return intentResult; }
+    public ToolGroupSelectionResult toolGroupSelectionResult() { return toolGroupSelectionResult; }
     public Map<String, Object> orchestratorContext() { return orchestratorContext; }
 }
