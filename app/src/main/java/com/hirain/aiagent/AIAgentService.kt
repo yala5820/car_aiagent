@@ -23,6 +23,9 @@ import com.hirain.adapter.vr.VRServiceManager
 import com.hirain.aiagent.ai.langchain4j.tool.ToolRegistry
 import com.hirain.aiagent.core.AgentResult
 import com.hirain.aiagent.core.AgentLoopOrchestrator
+import com.hirain.aiagent.runtime.AgentExecutor
+import com.hirain.aiagent.runtime.AgentRuntime
+import com.hirain.aiagent.runtime.RuntimeResponseMapper
 import com.hirain.aiagent.core.factory.AgentConfigFactory
 import com.hirain.aiagent.core.preprocessor.VehicleStatusPreProcessor
 import com.hirain.aiagent.memory.MemoryOrchestrator
@@ -70,6 +73,8 @@ class AIAgentService : Service() {
     private lateinit var vehicleStateMachine: VehicleStateMachine
     private lateinit var traceManager: TraceManager
     private lateinit var chatOrchestrator: AgentLoopOrchestrator
+    private lateinit var agentRuntime: AgentRuntime
+    private lateinit var runtimeResponseMapper: RuntimeResponseMapper
     private lateinit var statusProvider: VehicleStatusPreProcessor.VehicleStatusProvider
     private var mWorkHandlerThread: HandlerThread? = null
     private var mWorkHandler: Handler? = null
@@ -350,6 +355,14 @@ class AIAgentService : Service() {
                 statusProvider, speedManager),
             this, promptManager!!, memoryOrchestrator, toolRegistry.toolSpecifications)
 
+        // ── AgentRuntime 初始化 ──
+        agentRuntime = AgentRuntime(
+            AgentExecutor { userInput, context ->
+                chatOrchestrator.execute(userInput, context)
+            }
+        )
+        runtimeResponseMapper = RuntimeResponseMapper()
+
         // ── 场景识别 ──
         sceneMatcher = SceneMatch(promptManager!!)
 
@@ -459,19 +472,14 @@ class AIAgentService : Service() {
             message
         )
         val responseDispatcher = TraceResponseDispatcher(session)
+        val runtimeSession = agentRuntime.startSession(request, session.toTraceContext())
+
         val timeoutRunnable = Runnable {
             Log.e("TAG", "processAgentRequest TEXT timeout")
-            responseDispatcher.dispatchAndClose(
-                AgentResponse().apply {
-                    requestId = request.requestId
-                    sessionId = request.sessionId
-                    setSuccess(false)
-                    text = "系统: 请求超时"
-                    errorType = "TIMEOUT"
-                    timestamp = System.currentTimeMillis()
-                },
-                "TIMEOUT"
-            ) { response -> notifyAIAgentListeners(response) }
+            val timeoutResponse = runtimeResponseMapper.toAgentResponse(agentRuntime.timeoutResult(runtimeSession))
+            responseDispatcher.dispatchAndClose(timeoutResponse, "TIMEOUT") { response ->
+                notifyAIAgentListeners(response)
+            }
         }
         mainHandler.postDelayed(timeoutRunnable, SENDMESSAGE_TIMEOUT_MS)
 
@@ -479,34 +487,22 @@ class AIAgentService : Service() {
             val traceScope = session.makeCurrent()
             try {
                 Log.d("TAG", "handleTextRequest begin")
-                val ctx = mapOf("user_id" to (request.sessionId ?: "default_user")) + session.toTraceContext().toContextData()
-                val result = chatOrchestrator.execute(message, ctx)
+                val runtimeResult = agentRuntime.execute(runtimeSession)
+                val response = runtimeResponseMapper.toAgentResponse(runtimeResult)
                 mainHandler.removeCallbacks(timeoutRunnable)
                 responseDispatcher.dispatch(
-                    AgentResponse().apply {
-                        requestId = request.requestId
-                        sessionId = request.sessionId
-                        setSuccess(result.isSuccess)
-                        text = if (result.isSuccess) result.output() else (result.errorDetail() ?: "请求失败")
-                        errorType = if (!result.isSuccess) result.errorType()?.name else null
-                        timestamp = System.currentTimeMillis()
-                    },
-                    result.errorDetail()
-                ) { response -> notifyAIAgentListeners(response) }
+                    response,
+                    runtimeResult.errorDetail() ?: runtimeResult.errorType()
+                ) { sent -> notifyAIAgentListeners(sent) }
             } catch (e: Exception) {
                 mainHandler.removeCallbacks(timeoutRunnable)
-                Log.e("TAG", "handleTextRequest failed", e)
+                Log.e("TAG", "handleTextRequest service-level failure", e)
+                val runtimeResult = agentRuntime.errorResult(runtimeSession, e)
+                val response = runtimeResponseMapper.toAgentResponse(runtimeResult)
                 responseDispatcher.dispatch(
-                    AgentResponse().apply {
-                        requestId = request.requestId
-                        sessionId = request.sessionId
-                        setSuccess(false)
-                        text = "系统: 请求失败 - ${e.message}"
-                        errorType = "EXCEPTION"
-                        timestamp = System.currentTimeMillis()
-                    },
-                    e.message
-                ) { response -> notifyAIAgentListeners(response) }
+                    response,
+                    runtimeResult.errorDetail() ?: runtimeResult.errorType()
+                ) { sent -> notifyAIAgentListeners(sent) }
             } finally {
                 traceScope.close()
                 session.close()
