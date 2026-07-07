@@ -13,6 +13,9 @@ public final class RuntimeResult {
 
     private final String requestId;
     private final String sessionId;
+    private final String userId;
+    private final String personaId;
+    private final String clientMessageId;
     private final boolean success;
     private final String output;
     private final String errorType;
@@ -21,11 +24,16 @@ public final class RuntimeResult {
     private final int iterationsUsed;
     private final long durationMs;
 
-    private RuntimeResult(String requestId, String sessionId, boolean success,
-                          String output, String errorType, String errorDetail,
-                          long timestampMs, int iterationsUsed, long durationMs) {
+    private RuntimeResult(String requestId, String sessionId,
+                          String userId, String personaId, String clientMessageId,
+                          boolean success, String output, String errorType,
+                          String errorDetail, long timestampMs,
+                          int iterationsUsed, long durationMs) {
         this.requestId = requestId;
         this.sessionId = sessionId;
+        this.userId = userId;
+        this.personaId = personaId;
+        this.clientMessageId = clientMessageId;
         this.success = success;
         this.output = output;
         this.errorType = errorType;
@@ -38,46 +46,68 @@ public final class RuntimeResult {
     // ── 工厂方法 ──
 
     public static RuntimeResult success(String requestId, String sessionId,
+                                        String userId, String personaId, String clientMessageId,
                                         String output, long timestampMs,
                                         int iterationsUsed, long durationMs) {
-        return new RuntimeResult(requestId, sessionId, true, output, null, null,
-                timestampMs, iterationsUsed, durationMs);
+        return new RuntimeResult(requestId, sessionId, userId, personaId, clientMessageId,
+                true, output, null, null, timestampMs, iterationsUsed, durationMs);
     }
 
     public static RuntimeResult failure(String requestId, String sessionId,
+                                        String userId, String personaId, String clientMessageId,
                                         String errorType, String errorDetail,
                                         long timestampMs) {
-        return new RuntimeResult(requestId, sessionId, false, null,
-                errorType, errorDetail, timestampMs, 0, 0);
+        return new RuntimeResult(requestId, sessionId, userId, personaId, clientMessageId,
+                false, null, errorType, errorDetail, timestampMs, 0, 0);
     }
 
-    public static RuntimeResult timeout(String requestId, String sessionId, long timestampMs) {
-        return new RuntimeResult(requestId, sessionId, false, null,
-                "TIMEOUT", "请求超时", timestampMs, 0, 0);
+    public static RuntimeResult timeout(String requestId, String sessionId,
+                                        String userId, String personaId, String clientMessageId,
+                                        long timestampMs) {
+        return new RuntimeResult(requestId, sessionId, userId, personaId, clientMessageId,
+                false, null, "TIMEOUT", "请求超时", timestampMs, 0, 0);
+    }
+
+    public static RuntimeResult cancelled(String requestId, String sessionId,
+                                          String userId, String personaId,
+                                          String clientMessageId,
+                                          String reason, long timestampMs) {
+        return new RuntimeResult(requestId, sessionId, userId, personaId, clientMessageId,
+                false, null, "CANCELLED",
+                reason != null ? reason : "请求已取消", timestampMs, 0, 0);
     }
 
     public static RuntimeResult fromAgentResult(String requestId, String sessionId,
+                                                String userId, String personaId,
+                                                String clientMessageId,
                                                 AgentResult agentResult, long timestampMs) {
         if (agentResult.isSuccess()) {
-            return success(requestId, sessionId, agentResult.output(), timestampMs,
+            return success(requestId, sessionId, userId, personaId, clientMessageId,
+                    agentResult.output(), timestampMs,
                     agentResult.iterationsUsed(), agentResult.durationMs());
         }
         String errorType = agentResult.errorType() != null
                 ? agentResult.errorType().name() : "UNKNOWN";
-        return failure(requestId, sessionId, errorType, agentResult.errorDetail(), timestampMs);
+        return failure(requestId, sessionId, userId, personaId, clientMessageId,
+                errorType, agentResult.errorDetail(), timestampMs);
     }
 
     public static RuntimeResult fromException(String requestId, String sessionId,
+                                              String userId, String personaId,
+                                              String clientMessageId,
                                               Exception exception, long timestampMs) {
         String detail = exception.getMessage() != null ? exception.getMessage() : "未知错误";
-        return new RuntimeResult(requestId, sessionId, false, null,
-                "EXCEPTION", detail, timestampMs, 0, 0);
+        return new RuntimeResult(requestId, sessionId, userId, personaId, clientMessageId,
+                false, null, "EXCEPTION", detail, timestampMs, 0, 0);
     }
 
     // ── 读取器 ──
 
     public String requestId() { return requestId; }
     public String sessionId() { return sessionId; }
+    public String userId() { return userId; }
+    public String personaId() { return personaId; }
+    public String clientMessageId() { return clientMessageId; }
     public boolean success() { return success; }
     public String output() { return output; }
     public String errorType() { return errorType; }

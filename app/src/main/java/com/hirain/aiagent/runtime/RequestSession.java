@@ -25,6 +25,7 @@ public final class RequestSession {
     private final String sourceApp;
     private final String inputType;
     private final String personaId;
+    private final String clientMessageId;
     private final String userInput;
     private final long startedAtMs;
     private final TraceContext traceContext;
@@ -34,8 +35,9 @@ public final class RequestSession {
 
     RequestSession(AgentRequest request, String requestId, String sessionId,
                    String userId, String sourceApp, String inputType,
-                   String personaId, String userInput, long startedAtMs,
-                   TraceContext traceContext, IntentResult intentResult,
+                   String personaId, String clientMessageId, String userInput,
+                   long startedAtMs, TraceContext traceContext,
+                   IntentResult intentResult,
                    ToolGroupSelectionResult toolGroupSelectionResult,
                    Map<String, Object> orchestratorContext) {
         this.request = request;
@@ -45,6 +47,7 @@ public final class RequestSession {
         this.sourceApp = sourceApp;
         this.inputType = inputType;
         this.personaId = personaId;
+        this.clientMessageId = clientMessageId;
         this.userInput = userInput;
         this.startedAtMs = startedAtMs;
         this.traceContext = traceContext;
@@ -61,6 +64,7 @@ public final class RequestSession {
     public String sourceApp() { return sourceApp; }
     public String inputType() { return inputType; }
     public String personaId() { return personaId; }
+    public String clientMessageId() { return clientMessageId; }
     public String userInput() { return userInput; }
     public long startedAtMs() { return startedAtMs; }
     public TraceContext traceContext() { return traceContext; }

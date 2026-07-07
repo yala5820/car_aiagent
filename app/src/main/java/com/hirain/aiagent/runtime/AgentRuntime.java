@@ -9,6 +9,7 @@ import com.hirain.aiagent.toolgroup.DefaultToolGroupSelector;
 import com.hirain.aiagent.toolgroup.ToolGroupRegistry;
 import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
 import com.hirain.aiagent.toolgroup.ToolGroupSelector;
+import com.hirain.aiagent.trace.TraceAttributeKeys;
 import com.hirain.aiagent.trace.TraceContext;
 
 /**
@@ -85,8 +86,10 @@ public class AgentRuntime {
         ToolGroupSelectionResult toolGroupSelectionResult = selectToolGroupsSafely(intentResult, request);
         writeIntentToTrace(traceContext, intentResult);
         writeToolGroupsToTrace(traceContext, toolGroupSelectionResult);
-        return sessionFactory.create(request, CHAT_PERSONA, traceContext,
+        RequestSession session = sessionFactory.create(request, traceContext,
                 intentResult, toolGroupSelectionResult);
+        writeRequestMetaToTrace(traceContext, session);
+        return session;
     }
 
     /**
@@ -98,10 +101,12 @@ public class AgentRuntime {
                     session.userInput(), session.orchestratorContext());
             return RuntimeResult.fromAgentResult(
                     session.requestId(), session.sessionId(),
+                    session.userId(), session.personaId(), session.clientMessageId(),
                     result, timeProvider.nowMillis());
         } catch (Exception e) {
             return RuntimeResult.fromException(
                     session.requestId(), session.sessionId(),
+                    session.userId(), session.personaId(), session.clientMessageId(),
                     e, timeProvider.nowMillis());
         }
     }
@@ -111,7 +116,9 @@ public class AgentRuntime {
      */
     public RuntimeResult timeoutResult(RequestSession session) {
         return RuntimeResult.timeout(
-                session.requestId(), session.sessionId(), timeProvider.nowMillis());
+                session.requestId(), session.sessionId(),
+                session.userId(), session.personaId(), session.clientMessageId(),
+                timeProvider.nowMillis());
     }
 
     /**
@@ -120,7 +127,18 @@ public class AgentRuntime {
     public RuntimeResult errorResult(RequestSession session, Exception exception) {
         return RuntimeResult.fromException(
                 session.requestId(), session.sessionId(),
+                session.userId(), session.personaId(), session.clientMessageId(),
                 exception, timeProvider.nowMillis());
+    }
+
+    /**
+     * 生成取消结果。
+     */
+    public RuntimeResult cancelledResult(RequestSession session, String reason) {
+        return RuntimeResult.cancelled(
+                session.requestId(), session.sessionId(),
+                session.userId(), session.personaId(), session.clientMessageId(),
+                reason, timeProvider.nowMillis());
     }
 
     // ── Intent 路由 ──
@@ -175,6 +193,20 @@ public class AgentRuntime {
                 result.confidence().name());
         traceContext.session().setAttribute("agent.tool_group.fallback_used",
                 result.fallbackUsed());
+    }
+
+    /**
+     * 将 RequestSession 元信息写入 Trace。
+     * 不重复写 TraceManager 已有的 request.id/session.id/user.id/agent.persona。
+     * 只补充外部 App 对账所需的 clientMessageId。
+     */
+    private void writeRequestMetaToTrace(TraceContext traceContext, RequestSession session) {
+        if (traceContext == null || traceContext.session() == null || session == null) return;
+        if (session.clientMessageId() != null) {
+            traceContext.session().setAttribute(
+                    TraceAttributeKeys.CLIENT_MESSAGE_ID,
+                    session.clientMessageId());
+        }
     }
 
     private void writeIntentToTrace(TraceContext traceContext, IntentResult intentResult) {

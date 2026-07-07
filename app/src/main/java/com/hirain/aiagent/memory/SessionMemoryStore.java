@@ -27,7 +27,7 @@ import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 public class SessionMemoryStore implements ChatMemoryStore {
 
     private static final String TAG = "SessionMemoryStore";
-    private static final int DB_VERSION = 1;
+    private static final int DB_VERSION = 2;
 
     private final SessionDbHelper dbHelper;
 
@@ -100,7 +100,8 @@ public class SessionMemoryStore implements ChatMemoryStore {
         SQLiteDatabase db = dbHelper.getReadableDatabase();
         try (Cursor cursor = db.rawQuery(
                 "SELECT user_id, session_id, created_at, ended_at, message_count, " +
-                        "token_estimate, compression_count FROM sessions " +
+                        "token_estimate, compression_count, title, persona_id, source_app, " +
+                        "updated_at, is_active FROM sessions " +
                         "WHERE user_id = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1",
                 new String[]{userId})) {
             if (cursor.moveToFirst()) {
@@ -116,7 +117,8 @@ public class SessionMemoryStore implements ChatMemoryStore {
         SQLiteDatabase db = dbHelper.getReadableDatabase();
         try (Cursor cursor = db.rawQuery(
                 "SELECT user_id, session_id, created_at, ended_at, message_count, " +
-                        "token_estimate, compression_count FROM sessions " +
+                        "token_estimate, compression_count, title, persona_id, source_app, " +
+                        "updated_at, is_active FROM sessions " +
                         "WHERE user_id = ? ORDER BY created_at DESC LIMIT 50",
                 new String[]{userId})) {
             while (cursor.moveToNext()) {
@@ -124,6 +126,89 @@ public class SessionMemoryStore implements ChatMemoryStore {
             }
         }
         return result;
+    }
+
+    /** 按 sessionId 查询单条 Session */
+    public SessionInfo getSession(String userId, String sessionId) {
+        SQLiteDatabase db = dbHelper.getReadableDatabase();
+        try (Cursor cursor = db.rawQuery(
+                "SELECT user_id, session_id, created_at, ended_at, message_count, " +
+                        "token_estimate, compression_count, title, persona_id, source_app, " +
+                        "updated_at, is_active FROM sessions " +
+                        "WHERE user_id = ? AND session_id = ? LIMIT 1",
+                new String[]{userId, sessionId})) {
+            if (cursor.moveToFirst()) {
+                return readSessionInfo(cursor);
+            }
+        }
+        return null;
+    }
+
+    /** 创建新活跃 Session（将同用户其他会话置为 inactive，不写 ended_at） */
+    public boolean createActiveSession(String userId, String sessionId,
+                                       String title, String personaId, String sourceApp) {
+        SQLiteDatabase db = dbHelper.getWritableDatabase();
+        db.beginTransaction();
+        try {
+            db.execSQL("UPDATE sessions SET is_active = 0 WHERE user_id = ? AND is_active = 1",
+                    new Object[]{userId});
+            long now = System.currentTimeMillis();
+            db.execSQL(
+                    "INSERT INTO sessions (user_id, session_id, created_at, ended_at, title, " +
+                            "persona_id, source_app, updated_at, is_active) " +
+                            "VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 1)",
+                    new Object[]{userId, sessionId, now, title, personaId, sourceApp, now});
+            db.setTransactionSuccessful();
+            return true;
+        } catch (Exception e) {
+            Log.w(TAG, "createActiveSession failed", e);
+            return false;
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    /** 激活指定 Session（将同用户其他会话置为 inactive） */
+    public boolean activateSession(String userId, String sessionId) {
+        SessionInfo existing = getSession(userId, sessionId);
+        if (existing == null) {
+            return false;
+        }
+        SQLiteDatabase db = dbHelper.getWritableDatabase();
+        db.beginTransaction();
+        try {
+            long now = System.currentTimeMillis();
+            db.execSQL("UPDATE sessions SET is_active = 0 WHERE user_id = ? AND is_active = 1",
+                    new Object[]{userId});
+            db.execSQL("UPDATE sessions SET is_active = 1, ended_at = NULL, updated_at = ? " +
+                            "WHERE user_id = ? AND session_id = ?",
+                    new Object[]{now, userId, sessionId});
+            db.setTransactionSuccessful();
+            return true;
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    /** 删除指定 Session（消息+记录） */
+    public boolean deleteSession(String userId, String sessionId) {
+        SessionInfo existing = getSession(userId, sessionId);
+        if (existing == null) {
+            return false;
+        }
+        String memoryIdPrefix = SessionMemoryIds.buildPrefix(userId, sessionId);
+        SQLiteDatabase db = dbHelper.getWritableDatabase();
+        db.beginTransaction();
+        try {
+            db.execSQL("DELETE FROM session_messages WHERE memory_id LIKE ?",
+                    new Object[]{memoryIdPrefix + "%"});
+            db.execSQL("DELETE FROM sessions WHERE user_id = ? AND session_id = ?",
+                    new Object[]{userId, sessionId});
+            db.setTransactionSuccessful();
+            return true;
+        } finally {
+            db.endTransaction();
+        }
     }
 
     /** 更新 Session 统计信息 */
@@ -156,7 +241,12 @@ public class SessionMemoryStore implements ChatMemoryStore {
                 cursor.isNull(3) ? null : cursor.getLong(3),  // endedAt
                 cursor.getInt(4),      // messageCount
                 cursor.getInt(5),      // tokenEstimate
-                cursor.getInt(6)       // compressionCount
+                cursor.getInt(6),      // compressionCount
+                cursor.isNull(7) ? null : cursor.getString(7),  // title
+                cursor.isNull(8) ? null : cursor.getString(8),  // personaId
+                cursor.isNull(9) ? null : cursor.getString(9),  // sourceApp
+                cursor.isNull(10) ? 0 : cursor.getLong(10),     // updatedAt
+                cursor.getInt(11) == 1                          // is_active
         );
     }
 
@@ -181,6 +271,10 @@ public class SessionMemoryStore implements ChatMemoryStore {
                             "message_count INTEGER DEFAULT 0, " +
                             "token_estimate INTEGER DEFAULT 0, " +
                             "compression_count INTEGER DEFAULT 0, " +
+                            "title TEXT DEFAULT '新对话', " +
+                            "persona_id TEXT DEFAULT 'chat', " +
+                            "source_app TEXT, " +
+                            "updated_at INTEGER, " +
                             "is_active INTEGER DEFAULT 1, " +
                             "PRIMARY KEY (user_id, session_id))");
 
@@ -192,9 +286,12 @@ public class SessionMemoryStore implements ChatMemoryStore {
 
         @Override
         public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-            db.execSQL("DROP TABLE IF EXISTS session_messages");
-            db.execSQL("DROP TABLE IF EXISTS sessions");
-            onCreate(db);
+            if (oldVersion < 2) {
+                db.execSQL("ALTER TABLE sessions ADD COLUMN title TEXT DEFAULT '新对话'");
+                db.execSQL("ALTER TABLE sessions ADD COLUMN persona_id TEXT DEFAULT 'chat'");
+                db.execSQL("ALTER TABLE sessions ADD COLUMN source_app TEXT");
+                db.execSQL("ALTER TABLE sessions ADD COLUMN updated_at INTEGER");
+            }
         }
     }
 
@@ -208,9 +305,16 @@ public class SessionMemoryStore implements ChatMemoryStore {
         public final int messageCount;
         public final int tokenEstimate;
         public final int compressionCount;
+        public final String title;
+        public final String personaId;
+        public final String sourceApp;
+        public final long updatedAt;
+        public final boolean active;
 
         public SessionInfo(String userId, String sessionId, long createdAt, Long endedAt,
-                           int messageCount, int tokenEstimate, int compressionCount) {
+                           int messageCount, int tokenEstimate, int compressionCount,
+                           String title, String personaId, String sourceApp,
+                           long updatedAt, boolean active) {
             this.userId = userId;
             this.sessionId = sessionId;
             this.createdAt = createdAt;
@@ -218,6 +322,11 @@ public class SessionMemoryStore implements ChatMemoryStore {
             this.messageCount = messageCount;
             this.tokenEstimate = tokenEstimate;
             this.compressionCount = compressionCount;
+            this.title = title;
+            this.personaId = personaId;
+            this.sourceApp = sourceApp;
+            this.updatedAt = updatedAt;
+            this.active = active;
         }
     }
 }

@@ -11,7 +11,7 @@ import java.util.Map;
 /**
  * 从 AgentRequest 和 TraceContext 创建 RequestSession。
  * <p>
- * 设计原因：将 requestId/sessionId/userId 的规范化逻辑集中在此，
+ * 设计原因：将 requestId/sessionId/userId/personaId 的规范化逻辑集中在此，
  * 避免在 AgentRuntime 或 AIAgentService 中重复校验。
  */
 public class RequestSessionFactory {
@@ -24,7 +24,7 @@ public class RequestSessionFactory {
         this.timeProvider = timeProvider;
     }
 
-    public RequestSession create(AgentRequest request, String personaId,
+    public RequestSession create(AgentRequest request,
                                  TraceContext traceContext, IntentResult intentResult,
                                  ToolGroupSelectionResult toolGroupSelectionResult) {
         // ── intentResult 空值降级（request 可能为 null） ──
@@ -42,9 +42,8 @@ public class RequestSessionFactory {
         // ── request 空值时创建最小可用 RequestSession ──
         if (request == null) {
             long now = timeProvider.nowMillis();
-            String safePersona = nonEmpty(personaId, "chat");
             return new RequestSession(null, idGenerator.newRequestId(), null, "default_user",
-                    "unknown", "TEXT", safePersona, "",
+                    "unknown", "TEXT", "chat", null, "",
                     now, traceContext, intentResult, toolGroupSelectionResult, new HashMap<>());
         }
 
@@ -54,18 +53,26 @@ public class RequestSessionFactory {
         // ── sessionId：缺失时不创建新的业务 sessionId ──
         String sessionId = emptyToNull(request.getSessionId());
 
-        // ── userId：有 sessionId 时使用该值，否则使用 default_user ──
-        String userId = nonEmpty(sessionId, "default_user");
+        // ── userId：从请求中读取，缺失时为 default_user ──
+        String userId = nonEmpty(request.getUserId(), "default_user");
 
         // ── 其余字段 ──
         String sourceApp = nonEmpty(request.getSourceApp(), "unknown");
         String inputType = nonEmpty(request.getInputType(), "TEXT");
-        String normalizedPersonaId = nonEmpty(personaId, "chat");
+        String normalizedPersonaId = nonEmpty(request.getPersonaId(), "chat");
+        String clientMessageId = emptyToNull(request.getClientMessageId());
         String userInput = nonEmpty(request.getText(), "");
 
-        // ── 构建 orchestratorContext（不包含 intentResult） ──
+        // ── 构建 orchestratorContext（不包含 intentResult / toolGroupSelectionResult） ──
         Map<String, Object> context = new HashMap<>();
         context.put("user_id", userId);
+        if (sessionId != null) {
+            context.put("session_id", sessionId);
+        }
+        context.put("persona_id", normalizedPersonaId);
+        if (clientMessageId != null) {
+            context.put("client_message_id", clientMessageId);
+        }
         if (request.getExtraContext() != null) {
             context.putAll(request.getExtraContext());
         }
@@ -76,7 +83,7 @@ public class RequestSessionFactory {
         long now = timeProvider.nowMillis();
 
         return new RequestSession(request, requestId, sessionId, userId,
-                sourceApp, inputType, normalizedPersonaId, userInput,
+                sourceApp, inputType, normalizedPersonaId, clientMessageId, userInput,
                 now, traceContext, intentResult, toolGroupSelectionResult, context);
     }
 

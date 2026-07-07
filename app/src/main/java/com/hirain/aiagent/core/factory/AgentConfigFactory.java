@@ -126,6 +126,59 @@ public class AgentConfigFactory {
     }
 
     /**
+     * TEXT 人格统一入口 — 根据 personaId 选择系统提示词和记忆存储 ID。
+     * <p>
+     * 支持 chat / friendly / concise 三种人格，不开放 scene / vision_qa。
+     */
+    public static AgentConfig createTextPersona(Context context,
+                                                 PromptManager promptManager,
+                                                 MemoryOrchestrator memoryOrchestrator,
+                                                 ToolRegistry toolRegistry,
+                                                 VehicleStatusPreProcessor.VehicleStatusProvider statusProvider,
+                                                 VehicleSpeedManager speedManager,
+                                                 String personaId) {
+        String template = switchPersonaTemplate(personaId);
+        String memoryId = "ChatMemory_" + normalizeTextPersona(personaId);
+        return AgentConfig.builder(normalizeTextPersona(personaId))
+                .modelName("qwen-turbo")
+                .systemPromptTemplateName(template)
+                .maxIterations(10)
+                .maxMemoryMessages(50)
+                .memoryPolicy(AgentConfig.MemoryPolicy.PERSISTENT)
+                .chatMemoryStoreId(memoryId)
+                .preProcessors(List.of(
+                        new MemoryPreProcessor(memoryOrchestrator),
+                        new VehicleStatusPreProcessor(promptManager, statusProvider),
+                        new TimeContextPreProcessor()))
+                .modelCaller(new Lc4jModelCaller(buildQwenTurbo()))
+                .toolExecutor(toolRegistry::dispatch)
+                .toolSubset(null)
+                .safetyGuards(List.of(
+                        new SpeedBasedDoorLockGuard(() -> parseSpeed(speedManager.getSpeedStatus()))))
+                .postProcessors(List.of(
+                        new NoOpPostProcessor(),
+                        new MemoryPostProcessor()))
+                .terminator(new CompositeTerminator(
+                        new NoToolCallTerminator(),
+                        new SafetyVetoTerminator()))
+                .resultCollector(new DirectTextCollector())
+                .timeout(Duration.ofSeconds(30))
+                .build();
+    }
+
+    private static String switchPersonaTemplate(String personaId) {
+        if ("friendly".equals(personaId)) return PromptConstants.SYSTEM_ASSISTANT_FRIENDLY;
+        if ("concise".equals(personaId)) return PromptConstants.SYSTEM_ASSISTANT_CONCISE;
+        return PromptConstants.SYSTEM_ASSISTANT_DEFAULT;
+    }
+
+    private static String normalizeTextPersona(String personaId) {
+        if (personaId == null) return "chat";
+        if ("friendly".equals(personaId) || "concise".equals(personaId)) return personaId;
+        return "chat";
+    }
+
+    /**
      * 视觉问答人格：VL 模型、无记忆、单轮输出、追加 VL 警告。
      * 对应 VlManager.frontCameraInteractionPositive 的功能。
      */

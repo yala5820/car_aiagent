@@ -15,12 +15,15 @@ public class RuntimeResultTest {
     @Test
     public void fromAgentResult_mapsSuccess() {
         RuntimeResult result = RuntimeResult.fromAgentResult(
-                "req-1", "session-1",
+                "req-1", "session-1", "user-A", "chat", "client-1",
                 AgentResult.success("好的", 2, 30L, List.of()),
                 2000L);
 
         assertTrue(result.success());
         assertEquals("好的", result.output());
+        assertEquals("user-A", result.userId());
+        assertEquals("chat", result.personaId());
+        assertEquals("client-1", result.clientMessageId());
         assertEquals(2, result.iterationsUsed());
         assertEquals(30L, result.durationMs());
         assertEquals(2000L, result.timestampMs());
@@ -29,7 +32,7 @@ public class RuntimeResultTest {
     @Test
     public void fromAgentResult_mapsError() {
         RuntimeResult result = RuntimeResult.fromAgentResult(
-                "req-1", null,
+                "req-1", null, null, null, null,
                 AgentResult.error(AgentResult.ErrorType.MODEL_CALL_FAILED, "模型失败"),
                 2000L);
 
@@ -42,19 +45,26 @@ public class RuntimeResultTest {
     @Test
     public void fromException_mapsToExceptionType() {
         RuntimeResult result = RuntimeResult.fromException(
-                "req-1", "session-1", new IllegalStateException("boom"), 2000L);
+                "req-1", "session-1", "user-A", "chat", "client-1",
+                new IllegalStateException("boom"), 2000L);
 
         assertEquals("EXCEPTION", result.errorType());
         assertEquals("boom", result.errorDetail());
+        assertEquals("user-A", result.userId());
+        assertEquals("chat", result.personaId());
+        assertEquals("client-1", result.clientMessageId());
         assertEquals(2000L, result.timestampMs());
     }
 
     @Test
     public void timeout_createsTimeoutResult() {
-        RuntimeResult result = RuntimeResult.timeout("req-1", "session-1", 2000L);
+        RuntimeResult result = RuntimeResult.timeout("req-1", "session-1", "user-A", "friendly", "client-2", 2000L);
 
         assertEquals("TIMEOUT", result.errorType());
         assertEquals("请求超时", result.errorDetail());
+        assertEquals("user-A", result.userId());
+        assertEquals("friendly", result.personaId());
+        assertEquals("client-2", result.clientMessageId());
         assertEquals(2000L, result.timestampMs());
     }
 }

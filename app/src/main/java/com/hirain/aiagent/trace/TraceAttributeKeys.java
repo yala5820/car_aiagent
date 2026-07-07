@@ -49,6 +49,8 @@ public final class TraceAttributeKeys {
     public static final String MEMORY_PROMPT = "memory.prompt";
     public static final String MEMORY_OUTPUT = "memory.output";
 
+    public static final String CLIENT_MESSAGE_ID = "client_message.id";
+
     public static final String RESPONSE_SUCCESS = "response.success";
     public static final String RESPONSE_ERROR_TYPE = "response.error_type";
     public static final String RESPONSE_TEXT_LENGTH = "response.text.length";

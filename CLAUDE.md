@@ -37,7 +37,23 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 │  │  IAIAgentAidlInterface.Stub (AIDL Binder)   │            │
 │  │  ├─ processAgentRequest(AgentRequest)        │            │
 │  │  │   输入类型: TEXT / IMAGE / VOICE / CONTROL│            │
+│  │  ├─ createConversation                       │            │
+│  │  ├─ listConversations                        │            │
+│  │  ├─ deleteConversation                       │            │
+│  │  ├─ switchConversation                       │            │
+│  │  ├─ getActiveConversation                    │            │
+│  │  ├─ cancelAgentRequest                       │            │
 │  │  └─ registerListener / unregisterListener    │            │
+│  └──────────────────┬──────────────────────────┘            │
+│                     │                                       │
+│                     ▼                                       │
+│  ┌─────────────────────────────────────────────┐            │
+│  │              AgentRuntime                    │            │
+│  │  运行时协调层（Service 与 Orchestrator 之间） │            │
+│  │  IntentRouter → ToolGroupSelector → 观测元信息│          │
+│  │  ├─ TEXT → textOrchestrators[personaId]     │            │
+│  │  ├─ ActiveRequestRegistry（终态抢占）       │            │
+│  │  └─ RequestSession（userId/sessionId/personaId/clientMsgId/intent/toolgroup）│
 │  └──────────────────┬──────────────────────────┘            │
 │                     │                                       │
 │                     ▼                                       │
@@ -59,7 +75,9 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 │  │  PromptSelector (动态切换策略)                │            │
 │  ├─────────────────────────────────────────────┤            │
 │  │           记忆系统（四层架构）                  │            │
-│  │  SessionManager → 会话生命周期                │            │
+│  │  SessionManager → 会话生命周期（多用户隔离）    │            │
+│  │  SessionMemoryStore → SQLite 持久化（含元数据） │            │
+│  │  SessionChatMemoryProvider → 按 userId+sessionId+personaId 选择 ChatMemory  │
 │  │  LongTermMemory → 用户偏好持久化              │            │
 │  │  MemoryCompressor → Token 超限自动摘要        │            │
 │  │  MemoryExtractor → 对话中提取可记忆信息        │            │
@@ -79,7 +97,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 | AI 框架 | LangChain4j 1.16.3 |
 | LLM 模型 | qwen-turbo（对话）、qwen-flash（场景）、qwen-vl-max（视觉问答） |
 | LLM API | 阿里云 DashScope（OpenAI 兼容接口） |
-| 通信 | AIDL（Launcher ↔ AIAgent、SOA 总线、Camera） |
+| 通信 | AIDL（Launcher ↔ AIAgent：主对话 + 会话 CRUD + 取消 + Listener、SOA 总线、Camera） |
 | UI | **无**（纯后台 Service） |
 | 持久化 | SQLite（ChatMemory 持久化 + 长期记忆 + Session 管理） |
 | 网络 | OkHttp 4.12 |
@@ -104,8 +122,13 @@ AIAgent/
 │   │   ├── java/com/hirain/aiagent/
 │   │   │   ├── AIAgentService.kt           # 前台 Service，AIDL Binder 实现
 │   │   │   ├── AIAgent.java                # Facade 单例（客户端使用，JAR 中）
-│   │   │   ├── AgentRequest.java           # 统一请求体 Parcelable
-│   │   │   ├── AgentResponse.java          # 统一响应体 Parcelable
+│   │   │   ├── AgentRequest.java           # 统一请求体 Parcelable（含 userId/personaId/clientMessageId）
+│   │   │   ├── AgentResponse.java          # 统一响应体 Parcelable（含 userId/personaId/status/errorDetail/clientMessageId）
+│   │   │   ├── ConversationRequest.java    # 创建会话请求 Parcelable
+│   │   │   ├── ConversationInfo.java       # 会话信息 Parcelable（12 字段）
+│   │   │   ├── ConversationListResponse.java # 会话列表响应 Parcelable
+│   │   │   ├── ConversationOperationResult.java # 会话操作结果 Parcelable
+│   │   │   ├── CancelRequestResult.java    # 取消请求结果 Parcelable
 │   │   │   ├── IAIAgentServiceListener.java # 本地回调接口
 │   │   │   ├── MainActivity.kt             # Launcher Activity（仅用于调试启动）
 │   │   │   ├── BootCompleteReceiver.kt     # 开机广播 → 启动 Service
@@ -122,6 +145,40 @@ AIAgent/
 │   │   │   │       ├── FragState.java
 │   │   │   │       └── DmsState.java
 │   │   │   │
+│   │   │   ├── runtime/                     # 运行时协调层
+│   │   │   │   ├── AgentRuntime.java          # Runtime 主入口（Service ↔ Orchestrator 中间层）
+│   │   │   │   ├── AgentExecutor.java         # 执行器接口
+│   │   │   │   ├── RequestSession.java        # 单次请求快照（含 intent / toolgroup 选择结果）
+│   │   │   │   ├── RequestSessionFactory.java # 请求快照工厂
+│   │   │   │   ├── RuntimeResult.java         # 统一执行结果
+│   │   │   │   ├── RuntimeResponseMapper.java # RuntimeResult → AgentResponse 映射（含 status/errorDetail 等元信息）
+│   │   │   │   ├── ActiveRequest.java            # 运行中请求 + CAS 终态抢占
+│   │   │   │   ├── ActiveRequestRegistry.java    # 请求注册 + 取消 + finished 60s 缓存
+│   │   │   │   ├── IdGenerator.java / UuidIdGenerator.java
+│   │   │   │   └── TimeProvider.java / SystemTimeProvider.java
+│   │   │   │
+│   │   │   ├── intentrouter/                # 轻量意图标签器
+│   │   │   │   ├── IntentRouter.java           # 意图路由接口
+│   │   │   │   ├── KeywordIntentRouter.java    # 关键词 + 正则匹配实现
+│   │   │   │   ├── IntentTag.java              # 11 种粗粒度意图枚举
+│   │   │   │   ├── IntentConfidence.java       # 置信度枚举
+│   │   │   │   └── IntentResult.java           # 单次意图识别结果
+│   │   │   │
+│   │   │   ├── toolgroup/                    # 工具分组与选择
+│   │   │   │   ├── ToolGroupId.java             # 13 个工具组枚举
+│   │   │   │   ├── ToolGroup.java               # 不可变工具组元数据
+│   │   │   │   ├── ToolGroupRegistry.java       # 注册表（defaultRegistry 全量 47 个 toolName 注册）
+│   │   │   │   ├── ToolGroupSelector.java       # 选择器接口
+│   │   │   │   ├── DefaultToolGroupSelector.java # 基于 IntentResult + 弱车载关键词的选择
+│   │   │   │   └── ToolGroupSelectionResult.java # 选择结果
+│   │   │   │
+│   │   │   ├── conversation/                  # 会话管理门面
+│   │   │   │   ├── ConversationManager.java        # 面向 AIDL 的会话 CRUD 门面
+│   │   │   │   ├── ConversationConstants.java      # 统一常量
+│   │   │   │   ├── ConversationSessionGateway.java # 可测试抽象接口
+│   │   │   │   └── MemoryConversationSessionGateway.java # 生产实现（委托 MemoryOrchestrator）
+│   │   │   │
+│   │   │   ├── runtime/                       # 运行时协调层（续）
 │   │   │   ├── ai/langchain4j/tool/        # 工具调度系统
 │   │   │   │   ├── ToolDispatcher.java     # 反射工具执行器
 │   │   │   │   └── ToolRegistry.java       # 注册中心
@@ -144,9 +201,11 @@ AIAgent/
 │   │   │   │   └── factory/                    # 人格工厂
 │   │   │   │
 │   │   │   ├── memory/                     # 记忆系统
-│   │   │   │   ├── MemoryOrchestrator.java  # 协调器
-│   │   │   │   ├── SessionManager.java      # Session 生命周期
-│   │   │   │   ├── SessionMemoryStore.java  # Session 持久化
+│   │   │   │   ├── MemoryOrchestrator.java  # 协调器（含会话管理门面）
+│   │   │   │   ├── SessionManager.java      # Session 生命周期（多用户隔离）
+│   │   │   │   ├── SessionMemoryStore.java  # Session 持久化（含元数据字段）
+│   │   │   │   ├── SessionMemoryIds.java    # memoryId 统一生成工具
+│   │   │   │   ├── SessionChatMemoryProvider.java # 按 userId+sessionId+personaId 选择 ChatMemory
 │   │   │   │   ├── UserMemoryContext.java   # 用户记忆聚合
 │   │   │   │   ├── LongTermMemoryStore.java # 长期记忆
 │   │   │   │   ├── MemoryEntry.java         # 记忆条目

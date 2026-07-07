@@ -11,6 +11,11 @@ public class AgentResponse implements Parcelable {
     private String text;
     private String errorType;
     private long timestamp;
+    private String userId;
+    private String personaId;
+    private String status;
+    private String errorDetail;
+    private String clientMessageId;
 
     public AgentResponse() {}
 
@@ -21,6 +26,11 @@ public class AgentResponse implements Parcelable {
         text = in.readString();
         errorType = in.readString();
         timestamp = in.readLong();
+        userId = in.readString();
+        personaId = in.readString();
+        status = in.readString();
+        errorDetail = in.readString();
+        clientMessageId = in.readString();
     }
 
     public static final Creator<AgentResponse> CREATOR = new Creator<AgentResponse>() {
@@ -46,6 +56,11 @@ public class AgentResponse implements Parcelable {
         dest.writeString(text);
         dest.writeString(errorType);
         dest.writeLong(timestamp);
+        dest.writeString(userId);
+        dest.writeString(personaId);
+        dest.writeString(status);
+        dest.writeString(errorDetail);
+        dest.writeString(clientMessageId);
     }
 
     public String getRequestId() { return requestId; }
@@ -60,4 +75,15 @@ public class AgentResponse implements Parcelable {
     public void setErrorType(String v) { this.errorType = v; }
     public long getTimestamp() { return timestamp; }
     public void setTimestamp(long v) { this.timestamp = v; }
+
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
+    public String getPersonaId() { return personaId; }
+    public void setPersonaId(String personaId) { this.personaId = personaId; }
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+    public String getErrorDetail() { return errorDetail; }
+    public void setErrorDetail(String errorDetail) { this.errorDetail = errorDetail; }
+    public String getClientMessageId() { return clientMessageId; }
+    public void setClientMessageId(String clientMessageId) { this.clientMessageId = clientMessageId; }
 }

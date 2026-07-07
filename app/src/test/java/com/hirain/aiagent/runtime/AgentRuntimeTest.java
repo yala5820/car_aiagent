@@ -217,6 +217,23 @@ public class AgentRuntimeTest {
         assertTrue(result.success());
     }
 
+    @Test
+    public void startSession_preservesPersonaIdFromRequest() {
+        AgentRequest request = new AgentRequest();
+        request.setInputType("TEXT");
+        request.setText("你好");
+        request.setPersonaId("warm");
+        AgentRuntime runtime = new AgentRuntime(
+                (input, context) -> AgentResult.success("ok", 1, 10L, List.of()),
+                () -> "req-1",
+                () -> 1000L);
+
+        RequestSession session = runtime.startSession(request, null);
+
+        assertEquals("warm", session.personaId());
+        assertEquals("warm", session.orchestratorContext().get("persona_id"));
+    }
+
     // ── Test helpers ──
 
     private static SpanData findSpan(List<SpanData> spans, String name) {

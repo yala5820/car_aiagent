@@ -13,6 +13,12 @@ public final class PromptConstants {
     /** 默认车载 AI 助手系统提示词 */
     public static final String SYSTEM_ASSISTANT_DEFAULT = "system/assistant_default";
 
+    /** 友好风格系统提示词 */
+    public static final String SYSTEM_ASSISTANT_FRIENDLY = "system/assistant_friendly";
+
+    /** 简洁风格系统提示词 */
+    public static final String SYSTEM_ASSISTANT_CONCISE = "system/assistant_concise";
+
     /** 场景服务专用系统提示词 */
     public static final String SYSTEM_ASSISTANT_SCENE = "system/assistant_scene";
 

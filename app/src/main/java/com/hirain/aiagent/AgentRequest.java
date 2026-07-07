@@ -17,6 +17,9 @@ public class AgentRequest implements Parcelable {
     private String imagePath;
     private Map<String, String> extraContext;
     private long timestamp;
+    private String userId;
+    private String personaId;
+    private String clientMessageId;
 
     public AgentRequest() {}
 
@@ -29,6 +32,9 @@ public class AgentRequest implements Parcelable {
         sceneType = in.readString();
         imagePath = in.readString();
         timestamp = in.readLong();
+        userId = in.readString();
+        personaId = in.readString();
+        clientMessageId = in.readString();
         int mapSize = in.readInt();
         if (mapSize > 0) {
             extraContext = new HashMap<>(mapSize);
@@ -63,6 +69,9 @@ public class AgentRequest implements Parcelable {
         dest.writeString(sceneType);
         dest.writeString(imagePath);
         dest.writeLong(timestamp);
+        dest.writeString(userId);
+        dest.writeString(personaId);
+        dest.writeString(clientMessageId);
         if (extraContext != null && !extraContext.isEmpty()) {
             dest.writeInt(extraContext.size());
             for (Map.Entry<String, String> entry : extraContext.entrySet()) {
@@ -92,4 +101,11 @@ public class AgentRequest implements Parcelable {
     public void setExtraContext(Map<String, String> v) { this.extraContext = v; }
     public long getTimestamp() { return timestamp; }
     public void setTimestamp(long v) { this.timestamp = v; }
+
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
+    public String getPersonaId() { return personaId; }
+    public void setPersonaId(String personaId) { this.personaId = personaId; }
+    public String getClientMessageId() { return clientMessageId; }
+    public void setClientMessageId(String clientMessageId) { this.clientMessageId = clientMessageId; }
 }

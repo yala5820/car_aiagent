@@ -28,7 +28,7 @@ public class RequestSessionFactoryTest {
         TraceContext traceContext = new TraceContext("trace-1", "span-1", null);
         RequestSessionFactory factory = new RequestSessionFactory(() -> "req-fixed", () -> 1234L);
 
-        RequestSession session = factory.create(request, "chat", traceContext, null,
+        RequestSession session = factory.create(request, traceContext, null,
                 ToolGroupSelectionResult.fallback("test_default"));
 
         assertEquals("req-fixed", session.requestId());
@@ -53,15 +53,15 @@ public class RequestSessionFactoryTest {
         request.setText("打开车窗");
         RequestSessionFactory factory = new RequestSessionFactory(() -> "req-fixed", () -> 1234L);
 
-        RequestSession session = factory.create(request, "chat", null, null,
+        RequestSession session = factory.create(request, null, null,
                 ToolGroupSelectionResult.fallback("test_default"));
 
         assertEquals("req-existing", session.requestId());
         assertEquals("session-123", session.sessionId());
-        assertEquals("session-123", session.userId());
+        assertEquals("default_user", session.userId());
         assertEquals("launcher", session.sourceApp());
         assertEquals("打开车窗", session.userInput());
-        assertEquals("session-123", session.orchestratorContext().get("user_id"));
+        assertEquals("default_user", session.orchestratorContext().get("user_id"));
     }
 
     @Test
@@ -73,7 +73,7 @@ public class RequestSessionFactoryTest {
                 List.of("空调"), "打开空调", "TEXT", "matched:VEHICLE_AC");
         RequestSessionFactory factory = new RequestSessionFactory(() -> "req-fixed", () -> 1234L);
 
-        RequestSession session = factory.create(request, "chat", null, intentResult,
+        RequestSession session = factory.create(request, null, intentResult,
                 ToolGroupSelectionResult.fallback("test_default"));
 
         assertEquals(IntentTag.VEHICLE_AC, session.intentResult().intentTag());
@@ -94,12 +94,36 @@ public class RequestSessionFactoryTest {
                 false);
         RequestSessionFactory factory = new RequestSessionFactory(() -> "req-fixed", () -> 1234L);
 
-        RequestSession session = factory.create(request, "chat", null, intentResult, toolGroups);
+        RequestSession session = factory.create(request, null, intentResult, toolGroups);
 
         assertEquals(List.of(ToolGroupId.AC_GROUP, ToolGroupId.BASIC_STATUS_GROUP),
                 session.toolGroupSelectionResult().selectedGroupIds());
         assertEquals("intent:VEHICLE_AC", session.toolGroupSelectionResult().selectionReason());
         assertFalse(session.orchestratorContext().containsKey("selected_tool_groups"));
         assertFalse(session.orchestratorContext().containsKey("selected_tool_names"));
+    }
+
+    @Test
+    public void create_usesRequestUserIdInsteadOfSessionId() {
+        AgentRequest request = new AgentRequest();
+        request.setRequestId("req-1");
+        request.setSessionId("session-123");
+        request.setUserId("user-A");
+        request.setPersonaId("warm");
+        request.setClientMessageId("client-9");
+        request.setInputType("TEXT");
+        request.setText("你好");
+        RequestSessionFactory factory = new RequestSessionFactory(() -> "generated", () -> 1000L);
+
+        RequestSession session = factory.create(request, null, null,
+                ToolGroupSelectionResult.fallback("test_default"));
+
+        assertEquals("user-A", session.userId());
+        assertEquals("session-123", session.sessionId());
+        assertEquals("warm", session.personaId());
+        assertEquals("client-9", session.clientMessageId());
+        assertEquals("user-A", session.orchestratorContext().get("user_id"));
+        assertEquals("warm", session.orchestratorContext().get("persona_id"));
+        assertEquals("client-9", session.orchestratorContext().get("client_message_id"));
     }
 }

@@ -5,18 +5,14 @@ import android.util.Log;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Session 生命周期管理器。
+ * Session 生命周期管理器 — 多用户隔离版本。
  * <p>
- * 规则：
- * <ul>
- *   <li>程序启动时自动创建/恢复活跃 Session</li>
- *   <li>同一 Session 内暂停/唤醒不丢失上下文</li>
- *   <li>用户主动请求"新对话"时创建新 Session</li>
- *   <li>程序关闭时 Session 自动结束（数据保留）</li>
- * </ul>
+ * 每个 userId 独立维护 active session 状态，互不干扰。
  */
 public class SessionManager {
 
@@ -24,78 +20,124 @@ public class SessionManager {
 
     private final SessionMemoryStore store;
     private final AtomicReference<String> currentUserId = new AtomicReference<>("default_user");
-    private volatile String currentSessionId;
-    private volatile long sessionStartTimeMs;
+
+    private static final class ActiveSessionState {
+        final String sessionId;
+        final long sessionStartTimeMs;
+        ActiveSessionState(String sessionId, long sessionStartTimeMs) {
+            this.sessionId = sessionId;
+            this.sessionStartTimeMs = sessionStartTimeMs;
+        }
+    }
+
+    private final ConcurrentHashMap<String, ActiveSessionState> activeSessions = new ConcurrentHashMap<>();
 
     public SessionManager(SessionMemoryStore store) {
         this.store = store;
     }
 
-    /**
-     * 获取或创建当前 Session（启动时调用）。
-     * 如有活跃 Session 则恢复，否则创建新 Session。
-     */
-    public String getOrCreateSession(String userId) {
-        currentUserId.set(userId);
+    // ── 按用户读取 ──
 
-        // 尝试恢复活跃 Session
-        SessionMemoryStore.SessionInfo active = store.getActiveSession(userId);
-        if (active != null) {
-            currentSessionId = active.sessionId;
-            sessionStartTimeMs = active.createdAt;
-            Log.d(TAG, "Resumed session " + currentSessionId + " for user " + userId);
-            return currentSessionId;
-        }
-
-        // 创建新 Session
-        return createNewSession(userId);
+    public String currentSessionId(String userId) {
+        ActiveSessionState state = activeSessions.get(userId);
+        return state != null ? state.sessionId : null;
     }
 
-    /** 主动开启新 Session（用户指令触发） */
-    public String startNewSession(String userId) {
-        // 结束旧 Session
-        if (currentSessionId != null) {
-            store.endSession(userId, currentSessionId);
-            Log.d(TAG, "Ended session " + currentSessionId);
+    public boolean hasActiveSession(String userId) {
+        return currentSessionId(userId) != null;
+    }
+
+    public String currentMemoryId(String userId) {
+        String sessionId = currentSessionId(userId);
+        return sessionId != null ? SessionMemoryStore.buildMemoryId(userId, sessionId) : null;
+    }
+
+    /** 获取或创建当前 Session（启动时调用）。 */
+    public String getOrCreateSession(String userId) {
+        currentUserId.set(userId);
+        ActiveSessionState cached = activeSessions.get(userId);
+        if (cached != null) {
+            return cached.sessionId;
         }
-        return createNewSession(userId);
+        SessionMemoryStore.SessionInfo active = store.getActiveSession(userId);
+        if (active != null) {
+            activeSessions.put(userId, new ActiveSessionState(active.sessionId, active.createdAt));
+            return active.sessionId;
+        }
+        return createConversationSession(userId, "新对话", "chat", "system");
+    }
+
+    /** 主动开启新 Session — 结束旧会话（保留 end_at） */
+    public String startNewSession(String userId) {
+        String oldSessionId = currentSessionId(userId);
+        if (oldSessionId != null) {
+            store.endSession(userId, oldSessionId);
+        }
+        return createConversationSession(userId, "新对话", "chat", "system");
     }
 
     /** 结束当前 Session（程序关闭时调用） */
-    public void endSession() {
-        String userId = currentUserId.get();
-        if (currentSessionId != null && userId != null) {
-            store.endSession(userId, currentSessionId);
-            Log.d(TAG, "Ended session " + currentSessionId + " on shutdown");
+    public void endSession(String userId) {
+        String sessionId = currentSessionId(userId);
+        if (sessionId != null) {
+            store.endSession(userId, sessionId);
+            activeSessions.remove(userId);
         }
-        currentSessionId = null;
     }
 
-    // ── 读取器 ──
+    /** 兼容旧版无参调用（通过 currentUserId 指向的默认用户） */
+    @Deprecated
+    public void endSession() {
+        endSession(currentUserId.get());
+    }
 
-    public String currentSessionId() { return currentSessionId; }
+    // ── 会话管理（不结束旧会话） ──
+
+    /**
+     * 创建新对话会话 — 不结束旧会话。
+     * 幂等重试 sessionId 碰撞。
+     */
+    public String createConversationSession(String userId, String title,
+                                            String personaId, String sourceApp) {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.getDefault())
+                    .format(new Date());
+            String suffix = UUID.randomUUID().toString().substring(0, 8);
+            String sessionId = "S_" + timestamp + "_" + suffix;
+            boolean created = store.createActiveSession(userId, sessionId, title, personaId, sourceApp);
+            if (created) {
+                activeSessions.put(userId, new ActiveSessionState(sessionId, System.currentTimeMillis()));
+                Log.d(TAG, "Created conversation session " + sessionId + " for user " + userId);
+                return sessionId;
+            }
+        }
+        throw new IllegalStateException("Failed to create unique sessionId for user " + userId);
+    }
+
+    /** 切换到指定会话 */
+    public boolean switchSession(String userId, String sessionId) {
+        boolean activated = store.activateSession(userId, sessionId);
+        if (!activated) {
+            return false;
+        }
+        SessionMemoryStore.SessionInfo info = store.getSession(userId, sessionId);
+        activeSessions.put(userId, new ActiveSessionState(
+                sessionId,
+                info != null ? info.createdAt : System.currentTimeMillis()));
+        Log.d(TAG, "Switched session " + sessionId + " for user " + userId);
+        return true;
+    }
+
+    // ── 兼容旧读取器 ──
+
+    public String currentSessionId() { return currentSessionId(currentUserId.get()); }
     public String currentUserId() { return currentUserId.get(); }
     public long sessionDurationMs() {
-        return sessionStartTimeMs > 0 ? System.currentTimeMillis() - sessionStartTimeMs : 0;
+        ActiveSessionState state = activeSessions.get(currentUserId.get());
+        return state != null ? System.currentTimeMillis() - state.sessionStartTimeMs : 0;
     }
-    public boolean hasActiveSession() { return currentSessionId != null; }
-
-    /** 构建 ChatMemoryStore 用的 memoryId */
+    public boolean hasActiveSession() { return hasActiveSession(currentUserId.get()); }
     public String currentMemoryId() {
-        return currentSessionId != null
-                ? SessionMemoryStore.buildMemoryId(currentUserId.get(), currentSessionId)
-                : null;
-    }
-
-    // ── 内部 ──
-
-    private String createNewSession(String userId) {
-        String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
-                .format(new Date());
-        currentSessionId = "S_" + timestamp;
-        sessionStartTimeMs = System.currentTimeMillis();
-        store.createSession(userId, currentSessionId);
-        Log.d(TAG, "Created new session " + currentSessionId + " for user " + userId);
-        return currentSessionId;
+        return currentMemoryId(currentUserId.get());
     }
 }

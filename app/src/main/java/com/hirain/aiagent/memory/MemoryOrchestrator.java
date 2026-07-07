@@ -53,7 +53,7 @@ public class MemoryOrchestrator {
     public String prepareSystemPrompt(String userId, String baseSystemPrompt) {
         // 确保用户的 Session 已初始化
         UserMemoryContext ctx = getUserContext(userId);
-        if (!sessionManager.hasActiveSession()) {
+        if (!sessionManager.hasActiveSession(userId)) {
             ctx.initSession();
         }
 
@@ -116,6 +116,40 @@ public class MemoryOrchestrator {
         }
         userContexts.clear();
         Log.d(TAG, "MemoryOrchestrator shut down");
+    }
+
+    // ── 会话管理门面 ──
+
+    public List<SessionMemoryStore.SessionInfo> listSessions(String userId) {
+        return sessionStore.listSessions(userId);
+    }
+
+    public SessionMemoryStore.SessionInfo getActiveSession(String userId) {
+        return sessionStore.getActiveSession(userId);
+    }
+
+    public SessionMemoryStore.SessionInfo getSession(String userId, String sessionId) {
+        return sessionStore.getSession(userId, sessionId);
+    }
+
+    public String createConversationSession(String userId, String title,
+                                            String personaId, String sourceApp) {
+        getUserContext(userId);
+        String sessionId = sessionManager.createConversationSession(userId, title, personaId, sourceApp);
+        Log.d(TAG, "Conversation session created for user " + userId + ": " + sessionId);
+        return sessionId;
+    }
+
+    public boolean switchSession(String userId, String sessionId) {
+        boolean switched = sessionManager.switchSession(userId, sessionId);
+        if (switched) {
+            Log.d(TAG, "Session switched for user " + userId + ": " + sessionId);
+        }
+        return switched;
+    }
+
+    public boolean deleteSession(String userId, String sessionId) {
+        return sessionStore.deleteSession(userId, sessionId);
     }
 
     // ── 内部 ──

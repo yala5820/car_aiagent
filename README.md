@@ -31,6 +31,13 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 | **Phase 7** | AgentLoop Bug 修复：状态机重置、长期记忆刷新、onTurnComplete 去重 |
 | **Phase 8** | **统一入口改造**：`sendMessage/sendMessageWithImage/requestAI` → `processAgentRequest(AgentRequest)`，`AgentResponse` 统一回调 |
 | **Phase 9** | **虚拟车辆状态机**：VehicleStateMachine + 8 个子系统 State POJO，替换 SoaService 调用，参数校验 |
+| **Phase 10** | **Runtime 层**：AgentRuntime + RequestSession + RequestSessionFactory，解耦 Service 与 Orchestrator |
+| **Phase 11** | **IntentRouter**：KeywordIntentRouter 关键词+正则意图标签器，11 种 IntentTag，只观测不分流 |
+| **Phase 12** | **ToolGroup**：13 个工具组元数据 + DefaultToolGroupSelector，基于 IntentResult 选择候选工具组，只记录不限制 |
+| **Phase 13** | **协议扩展**：AgentRequest/AgentResponse 新增 userId/personaId/clientMessageId/status/errorDetail；新增 5 个会话与取消 Parcelable；AIDL 新增 6 个管理接口 |
+| **Phase 14** | **会话管理**：ConversationManager 门面，ConversationSessionGateway 可测试抽象，create/list/switch/delete/getActive 全链路；SessionManager 多用户隔离修复；SessionMemoryStore 扩展（元数据、事务创建、级联删除） |
+| **Phase 15** | **用户与 Persona**：RequestSessionFactory userId/sessionId 分离；TEXT 三种内置人格（chat/friendly/concise）；AgentConfigFactory.createTextPersona() 统一入口；Trace 记录有效 persona |
+| **Phase 16** | **请求取消**：ActiveRequestRegistry + CAS 终态抢占（RUNNING/COMPLETED/CANCELLED/TIMEOUT/FAILED）；cancelAgentRequest AIDL 全链路；RuntimeResult/Response 元信息补齐 |
 
 ---
 
@@ -53,7 +60,23 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 │  │  IAIAgentAidlInterface.Stub (AIDL Binder)   │            │
 │  │  ├─ processAgentRequest(AgentRequest)        │            │
 │  │  │   输入类型: TEXT / IMAGE / VOICE / CONTROL│            │
+│  │  ├─ createConversation                       │            │
+│  │  ├─ listConversations                        │            │
+│  │  ├─ deleteConversation                       │            │
+│  │  ├─ switchConversation                       │            │
+│  │  ├─ getActiveConversation                    │            │
+│  │  ├─ cancelAgentRequest                       │            │
 │  │  └─ registerListener / unregisterListener    │            │
+│  └──────────────────┬──────────────────────────┘            │
+│                     │                                       │
+│                     ▼                                       │
+│  ┌─────────────────────────────────────────────┐            │
+│  │              AgentRuntime                    │            │
+│  │  运行时协调层（Service 与 Orchestrator 之间） │            │
+│  │  IntentRouter → ToolGroupSelector → 观测元信息│          │
+│  │  ├─ TEXT → textOrchestrators[personaId]     │            │
+│  │  ├─ ActiveRequestRegistry（终态抢占）       │            │
+│  │  └─ RequestSession（userId/sessionId/personaId/clientMsgId/intent/toolgroup）│
 │  └──────────────────┬──────────────────────────┘            │
 │                     │                                       │
 │                     ▼                                       │
@@ -75,7 +98,9 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 │  │  PromptSelector (动态切换策略)                │            │
 │  ├─────────────────────────────────────────────┤            │
 │  │           记忆系统（四层架构）                  │            │
-│  │  SessionManager → 会话生命周期                │            │
+│  │  SessionManager → 会话生命周期（多用户隔离）    │            │
+│  │  SessionMemoryStore → SQLite 持久化（含元数据） │            │
+│  │  SessionChatMemoryProvider → 按 userId+sessionId+personaId 选择 ChatMemory  │
 │  │  LongTermMemory → 用户偏好持久化              │            │
 │  │  MemoryCompressor → Token 超限自动摘要        │            │
 │  │  MemoryExtractor → 对话中提取可记忆信息        │            │
@@ -95,7 +120,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 | AI 框架 | LangChain4j 1.16.3 |
 | LLM 模型 | qwen-turbo（对话）、qwen-flash（场景）、qwen-vl-max（视觉问答） |
 | LLM API | 阿里云 DashScope（OpenAI 兼容接口） |
-| 通信 | AIDL（Launcher ↔ AIAgent、SOA 总线、Camera） |
+| 通信 | AIDL（Launcher ↔ AIAgent：主对话 + 会话 CRUD + 取消 + Listener、SOA 总线、Camera） |
 | UI | **无**（纯后台 Service） |
 | 持久化 | SQLite（ChatMemory 持久化 + 长期记忆 + Session 管理） |
 | 网络 | OkHttp 4.12 |
@@ -120,8 +145,13 @@ AIAgent/
 │   │   ├── java/com/hirain/aiagent/
 │   │   │   ├── AIAgentService.kt           # 前台 Service，AIDL Binder 实现
 │   │   │   ├── AIAgent.java                # Facade 单例（客户端使用，JAR 中）
-│   │   │   ├── AgentRequest.java           # 统一请求体 Parcelable
-│   │   │   ├── AgentResponse.java          # 统一响应体 Parcelable
+│   │   │   ├── AgentRequest.java           # 统一请求体 Parcelable（含 userId/personaId/clientMessageId）
+│   │   │   ├── AgentResponse.java          # 统一响应体 Parcelable（含 userId/personaId/status/errorDetail/clientMessageId）
+│   │   │   ├── ConversationRequest.java    # 创建会话请求 Parcelable
+│   │   │   ├── ConversationInfo.java       # 会话信息 Parcelable（12 字段）
+│   │   │   ├── ConversationListResponse.java # 会话列表响应 Parcelable
+│   │   │   ├── ConversationOperationResult.java # 会话操作结果 Parcelable
+│   │   │   ├── CancelRequestResult.java    # 取消请求结果 Parcelable
 │   │   │   ├── IAIAgentServiceListener.java # 本地回调接口
 │   │   │   ├── MainActivity.kt             # Launcher Activity（仅用于调试启动）
 │   │   │   ├── BootCompleteReceiver.kt     # 开机广播 → 启动 Service
@@ -138,6 +168,40 @@ AIAgent/
 │   │   │   │       ├── FragState.java
 │   │   │   │       └── DmsState.java
 │   │   │   │
+│   │   │   ├── runtime/                     # 运行时协调层
+│   │   │   │   ├── AgentRuntime.java          # Runtime 主入口（Service ↔ Orchestrator 中间层）
+│   │   │   │   ├── AgentExecutor.java         # 执行器接口
+│   │   │   │   ├── RequestSession.java        # 单次请求快照（含 intent / toolgroup 选择结果）
+│   │   │   │   ├── RequestSessionFactory.java # 请求快照工厂
+│   │   │   │   ├── RuntimeResult.java         # 统一执行结果
+│   │   │   │   ├── RuntimeResponseMapper.java # RuntimeResult → AgentResponse 映射（含 status/errorDetail 等元信息）
+│   │   │   │   ├── ActiveRequest.java            # 运行中请求 + CAS 终态抢占
+│   │   │   │   ├── ActiveRequestRegistry.java    # 请求注册 + 取消 + finished 60s 缓存
+│   │   │   │   ├── IdGenerator.java / UuidIdGenerator.java
+│   │   │   │   └── TimeProvider.java / SystemTimeProvider.java
+│   │   │   │
+│   │   │   ├── intentrouter/                # 轻量意图标签器
+│   │   │   │   ├── IntentRouter.java           # 意图路由接口
+│   │   │   │   ├── KeywordIntentRouter.java    # 关键词 + 正则匹配实现
+│   │   │   │   ├── IntentTag.java              # 11 种粗粒度意图枚举
+│   │   │   │   ├── IntentConfidence.java       # 置信度枚举
+│   │   │   │   └── IntentResult.java           # 单次意图识别结果
+│   │   │   │
+│   │   │   ├── toolgroup/                    # 工具分组与选择
+│   │   │   │   ├── ToolGroupId.java             # 13 个工具组枚举
+│   │   │   │   ├── ToolGroup.java               # 不可变工具组元数据
+│   │   │   │   ├── ToolGroupRegistry.java       # 注册表（defaultRegistry 全量 47 个 toolName 注册）
+│   │   │   │   ├── ToolGroupSelector.java       # 选择器接口
+│   │   │   │   ├── DefaultToolGroupSelector.java # 基于 IntentResult + 弱车载关键词的选择
+│   │   │   │   └── ToolGroupSelectionResult.java # 选择结果
+│   │   │   │
+│   │   │   ├── conversation/                  # 会话管理门面
+│   │   │   │   ├── ConversationManager.java        # 面向 AIDL 的会话 CRUD 门面
+│   │   │   │   ├── ConversationConstants.java      # 统一常量
+│   │   │   │   ├── ConversationSessionGateway.java # 可测试抽象接口
+│   │   │   │   └── MemoryConversationSessionGateway.java # 生产实现（委托 MemoryOrchestrator）
+│   │   │   │
+│   │   │   ├── runtime/                       # 运行时协调层（续）
 │   │   │   ├── ai/langchain4j/tool/        # 工具调度系统
 │   │   │   │   ├── ToolDispatcher.java     # 反射工具执行器
 │   │   │   │   └── ToolRegistry.java       # 注册中心
@@ -160,9 +224,11 @@ AIAgent/
 │   │   │   │   └── factory/                    # 人格工厂
 │   │   │   │
 │   │   │   ├── memory/                     # 记忆系统
-│   │   │   │   ├── MemoryOrchestrator.java  # 协调器
-│   │   │   │   ├── SessionManager.java      # Session 生命周期
-│   │   │   │   ├── SessionMemoryStore.java  # Session 持久化
+│   │   │   │   ├── MemoryOrchestrator.java  # 协调器（含会话管理门面）
+│   │   │   │   ├── SessionManager.java      # Session 生命周期（多用户隔离）
+│   │   │   │   ├── SessionMemoryStore.java  # Session 持久化（含元数据字段）
+│   │   │   │   ├── SessionMemoryIds.java    # memoryId 统一生成工具
+│   │   │   │   ├── SessionChatMemoryProvider.java # 按 userId+sessionId+personaId 选择 ChatMemory
 │   │   │   │   ├── UserMemoryContext.java   # 用户记忆聚合
 │   │   │   │   ├── LongTermMemoryStore.java # 长期记忆
 │   │   │   │   ├── MemoryEntry.java         # 记忆条目
@@ -225,12 +291,23 @@ AIAgent/
 
 前台 Service，职责包括：
 
-- **AIDL Binder 实现**：`processAgentRequest(AgentRequest)` / `registerListener`
-  - 内部按 `AgentRequest.inputType` 路由：`TEXT` → chatOrchestrator / `IMAGE` → VlManager / `VOICE` → AI + TTS / `CONTROL` → StartListen/StopListen
+- **AIDL Binder 实现**：完整的对话与会话管理接口集
+  - `processAgentRequest(AgentRequest)` — 主对话入口（TEXT → AgentRuntime → textOrchestrators[personaId] / IMAGE → VlManager / VOICE → 旧链路 AI + TTS / CONTROL → StartListen/StopListen）
+  - `createConversation(ConversationRequest)` — 创建新对话（不结束旧会话，响应含 sessionId）
+  - `listConversations(String userId)` — 列出用户最近 50 条会话
+  - `deleteConversation(String userId, String sessionId)` — 删除会话（消息 + 记录）
+  - `switchConversation(String userId, String sessionId)` — 切换活跃对话（只改 is_active，不写 ended_at）
+  - `getActiveConversation(String userId)` — 查询当前活跃对话
+  - `cancelAgentRequest(String requestId, String reason)` — 协作式取消（CAS 终态抢占，抑制 late result）
+  - `registerListener(IAIAgentAidlListener)` / `unregisterListener(...)`
+- **AgentRuntime 协调层**：TEXT 请求经 startSession → routeIntentSafely → selectToolGroupsSafely → execute 管线
+- **TEXT Persona 多实例**：按 personaId（chat/friendly/concise）初始化三个独立 `AgentLoopOrchestrator`，每个有独立 system prompt 和 ChatMemory
+- **ActiveRequestRegistry**：运行中请求终态管理，timeout/success/failure/cancel 四路通过 CAS 抢占终态，只允许一方发送 listener 响应
+- **Trace 元信息**：Trace 创建前补齐 requestId，userId 使用 `request.userId ?: default_user`，记录有效 personaId（normalize 后）
 - **Camera 接入**：每 1 秒请求一次前向摄像头抓拍
 - **场景识别循环**：抓拍 → SceneMatch 识别 → 场景变化 → AgentLoopOrchestrator 主动响应
 - **Listener 回调推送**：`onAIResponse(AgentResponse)` 统一回调
-- **15 秒超时保护**
+- **15 秒超时保护**（经 ActiveRequestRegistry 终态抢占）
 
 ### 4.2 AgentLoopOrchestrator（统一 Agent 循环引擎）
 
@@ -250,6 +327,8 @@ execute(userInput, extraContext)
 ```
 
 **7 个组件接口**全部可插拔替换，`AgentConfigFactory` 提供三个预设人格。
+
+**对话隔离增强：** `AgentLoopOrchestrator` 现已集成 `SessionChatMemoryProvider`，每次 `execute()` 按 `userId + sessionId + personaId` 从 `MessageWindowChatMemory` 选择对应 ChatMemory，而非构造期固定实例。create/switch/delete 对话后 LLM 可见的短期历史随之真实切换。
 
 ### 4.3 ToolRegistry + ToolDispatcher（集中式工具调度）
 
@@ -286,12 +365,32 @@ execute(userInput, extraContext)
 **文件：** `trace/`
 
 基于 OpenTelemetry + Phoenix 的追踪系统：
-- 一次请求一个完整 Trace，含 `llm.call` + `tool.execute` 子 span
+- 一次请求一个完整 Trace，含 `gen_ai.chat` + `tool.execute` 子 span
 - Span 携带：模型名、输入/输出、Token 用量、HTTP 状态码、工具参数/结果
 - 开发环境通过 `adb reverse tcp:6006 tcp:6006` 连接 PC 端 Phoenix
 - `TraceConfig.production()` 一键关闭（全局 no-op）
 
-### 4.7 Vehicle*Manager 系列（车控工具）
+### 4.7 ConversationManager（会话管理门面）
+
+**文件：** `conversation/`
+
+面向 AIDL 的会话 CRUD 门面，通过 `ConversationSessionGateway` 接口解耦测试与生产：
+
+| 组件 | 说明 |
+|------|------|
+| `ConversationConstants` | 统一常量（DEFAULT_USER_ID/DEFAULT_PERSONA_ID/OP_CREATE/OP_DELETE/OP_SWITCH） |
+| `ConversationSessionGateway` | 6 方法接口：createConversationSession / listSessions / getActiveSession / getSession / switchSession / deleteSession |
+| `MemoryConversationSessionGateway` | 生产实现，委托 MemoryOrchestrator + SessionManager + SessionMemoryStore |
+| `ConversationManager` | CRUD 门面：create/list/delete/switch/getActive，含 toConversationInfo 元数据映射 |
+
+**会话元数据：** `ConversationInfo` 包含 12 个字段（userId/sessionId/personaId/title/active/createdAt/updatedAt/endedAt/messageCount/tokenEstimate/compressionCount），`endedAt=0` 表示对话尚未结束。
+
+**底层支持：**
+- `SessionMemoryStore` DB_VERSION 升级到 2，sessions 表新增 title/persona_id/source_app/updated_at 列，`onUpgrade(1→2)` 使用 ALTER TABLE 补列
+- `SessionManager` active session 从单个字段改为 `ConcurrentHashMap<userId, ActiveSessionState>`，`createConversationSession` 不结束旧会话（区别于 `startNewSession`）
+- `SessionChatMemoryProvider` 按 `userId_sessionId_personaId` 生成 memoryId，对话切换真实影响 LLM ChatMemory
+
+### 4.8 Vehicle*Manager 系列（车控工具）
 
 8 个模块，共约 **40+ 个 @Tool 方法**，全部使用 `ToolRegistry` 统一调度。
 每个 Manager 的 `@Tool` 方法**委托给 `VehicleStateMachine`** 执行状态变更和参数校验。
@@ -307,7 +406,19 @@ execute(userInput, extraContext)
 | VehicleSpeedManager | 1 | 巡航车速 |
 | VehicleDMSManager | 3 | 驾驶员疲劳、分心、情绪 |
 
-### 4.8 VehicleStateMachine（虚拟车辆状态机）
+### 4.9 ActiveRequestRegistry（请求取消与终态管理）
+
+**文件：** `runtime/ActiveRequest.java` / `runtime/ActiveRequestRegistry.java`
+
+提供协作式请求取消能力，不承诺硬中断 LLM HTTP 调用：
+
+- `ActiveRequest`：不可变请求快照（requestId/sessionId/userId/personaId/clientMessageId） + CAS 终态标记
+- `ActiveRequest.TerminalState`：RUNNING → COMPLETED / CANCELLED / TIMEOUT / FAILED（只有 RUNNING→终态一次有效）
+- `ActiveRequestRegistry`：`ConcurrentHashMap` 管理活跃请求 + `finishedRequests` 缓存（60s TTL 防 race）
+- **四路终态抢占**：cancel AIDL、timeout runnable、worker success、worker exception 通过 `tryComplete` 竞争终态；只有首次抢占成功方允许发送 listener 响应
+- **竞态修复**：取消后 Worker 的 `isCancelled` 路径不调用 `finish()`，将请求清理责任留给 cancel handler 独占
+
+### 4.10 VehicleStateMachine（虚拟车辆状态机）
 
 **文件：** `VirtualStateMachine/`
 
@@ -318,7 +429,57 @@ Demo 阶段引入的状态托管中心，替换原有的 `SoaService` 外部调�
 - Vehicle*Manager 删除本地状态字段和 `formalfunc` 标志，@Tool 方法直接委托给 VehicleStateMachine
 - 状态查询（`getXxxStatus()`）统一从状态机读取，形成整车状态快照
 
-### 4.9 SoaService（SOA 总线封装）
+### 4.11 AgentRuntime（运行时协调层）
+
+**文件：** `runtime/`
+
+位于 AIAgentService 与 AgentLoopOrchestrator 之间的薄协调层，职责：
+
+- **RequestSession 创建**：从 AgentRequest + TraceContext 创建规范化快照（含 userId/sessionId/personaId/clientMessageId/intent/toolgroup 选择结果）
+- **IntentRouter 调度**：在 `startSession()` 中调用 IntentRouter 生成 `IntentResult`（11 种粗粒度意图标签）
+- **ToolGroup 选择**：基于 IntentResult 调用 ToolGroupSelector，生成 `ToolGroupSelectionResult`（候选工具组 + 工具名列表）
+- **Trace 写入**：将 intent / toolgroup / clientMessageId 信息写入 Trace root span 的 11 个 attribute
+- **异常降级**：Router / Selector 异常不影响执行路径，降级为 `UNKNOWN` / `CHAT_ONLY_GROUP`
+- **执行封装**：`execute()` / `timeoutResult()` / `errorResult()` / `cancelledResult()` 统一封装 RuntimeResult（全部含 userId/personaId/clientMessageId 元信息）
+- **服务端取消支持**：`cancelledResult(session, reason)` → RuntimeResult.cancelled → Mapper 按状态码 CANCELLED 映射
+
+5 个构造函数支持全量依赖注入（生产 / 测试），TEXT 请求执行路径：
+
+```
+handleTextRequest() → traceManager.startAgentRequest() → agentRuntime.startSession()
+  → routeIntentSafely() → selectToolGroupsSafely()
+  → writeIntentToTrace() → writeToolGroupsToTrace() → sessionFactory.create() → writeRequestMetaToTrace()
+  → ActiveRequestRegistry.register() → agentRuntime.execute() → chatExecutor.execute()
+  → tryComplete(COMPLETED/FAILED) → runtimeResponseMapper.toAgentResponse()
+  → notifyAIAgentListeners() → session.close()
+```
+
+### 4.12 IntentRouter（轻量意图标签器）
+
+**文件：** `intentrouter/`
+
+非 LLM 的纯关键词 + 正则匹配意图系统，只为观测和后续策略做准备，不做分流：
+
+- `KeywordIntentRouter`：使用 LinkedHashMap + 正则实现，当前约 56 个业务关键词 + 少量正则，空文本返回 UNKNOWN，无关键词返回 CHAT
+- 11 种 IntentTag：`CHAT` / 7 个车辆域 / `VISION_QA` / `WEATHER` / `UNKNOWN`
+- 输出 `IntentResult` 含 6 个字段：`intentTag` / `confidence` / `matchedKeywords` / `normalizedText` / `sourceInputType` / `debugReason`
+- 优先级稳定（LinkedHashMap 保证顺序），不调用 LLM、不引用 tool registry
+
+### 4.13 ToolGroup（工具分组与选择）
+
+**文件：** `toolgroup/`
+
+将当前 47 个 @Tool 方法按功能域分组的纯元数据层，本阶段只记录不限制 LLM 可见工具：
+
+- 13 个 `ToolGroupId`：11 个基础/领域组 + `COMMON_VEHICLE_GROUP`（车辆聚合）+ `ALL_SAFE_DEMO_GROUP`（全量）
+- `ToolGroupRegistry.defaultRegistry()`：全量 47 个 toolName 注册，支持按 toolName 反查、多组合并去重
+- `DefaultToolGroupSelector`：11 种 IntentTag → ToolGroupId 映射，车辆意图附加 `BASIC_STATUS_GROUP`，UNKNOWN 含弱车载关键词时选 `COMMON_VEHICLE_GROUP`
+- 当前默认 `KeywordIntentRouter` 对非空但无关键词命中的文本会返回 `CHAT`；因此弱车载 UNKNOWN fallback 需要结合真实 TEXT/Trace 手动验收继续确认
+- `ToolGroupSelectionResult`：记录 `selectedGroupIds` / `selectedToolNames` / `selectionReason` / `confidence` / `fallbackUsed`
+- 聚合组 `riskLevel` 遵循最高风险上浮规则（`COMMON_VEHICLE_GROUP` 和 `ALL_SAFE_DEMO_GROUP` 均为 HIGH）
+- 不执行 Tool、不修改 ToolRegistry/ToolDispatcher/AgentLoopOrchestrator
+
+### 4.14 SoaService（SOA 总线封装）
 
 **文件：** `infra/soa/SoaService.kt`
 
@@ -350,35 +511,52 @@ AIAgentService.onCreate()
     ├─ toolRegistry.registerAll(10 managers) ← 注册所有工具（Manager 注入 vehicleStateMachine）
     ├─ memoryOrchestrator(...)             ← 记忆系统初始化
     ├─ traceManager = TraceManager(...)    ← Trace 系统初始化
-    ├─ chatOrchestrator = AgentLoopOrchestrator(...) ← 对话引擎
+    ├─ chatOrchestrator = AgentLoopOrchestrator(...) ← 旧版对话引擎（VOICE 链路使用）
+    ├─ conversationManager = ConversationManager(...)  ← 会话管理门面
+    ├─ textOrchestrators = {chat, friendly, concise} × AgentLoopOrchestrator ← TEXT 人格多实例
+    ├─ agentRuntime = AgentRuntime(AgentExecutor { textOrchestrators[persona].execute() })
     ├─ sceneMatcher = SceneMatch(...)
     └─ VRServiceManager.initCallback()     ← VR/TTS 初始化
 ```
 
-### 5.2 对话流程（processAgentRequest）
+### 5.2 对话流程（processAgentRequest — TEXT 完整链路）
 
 ```
 Launcher/AIAgentTestApp → AIDL processAgentRequest(AgentRequest)
-    │  inputType=TEXT / IMAGE / VOICE / CONTROL
+    │  inputType=TEXT
     ▼
-AIAgentService 按 inputType 路由 → handleTextRequest/handleImageRequest/...
+AIAgentService.handleTextRequest()
+    ├─ traceManager.startSession() → root span → makeCurrent()
+    └─ agentRuntime.startSession(request, traceContext)
+         ├─ routeIntentSafely(request)             ← KeywordIntentRouter
+         │      → IntentResult(intentTag, confidence, matchedKeywords, ...)
+         ├─ selectToolGroupsSafely(intentResult, request)  ← DefaultToolGroupSelector
+         │      → ToolGroupSelectionResult(selectedGroupIds, selectedToolNames, ...)
+         ├─ writeIntentToTrace(traceContext, intentResult)      ← 5 个 agent.intent.* 属性
+         ├─ writeToolGroupsToTrace(traceContext, toolGroups)    ← 5 个 agent.tool_group.* 属性
+         └─ sessionFactory.create(request, persona, traceContext,
+                  intentResult, toolGroupSelectionResult)
+              └─ RequestSession（不可变，含 intent + toolgroup 元信息）
     │
     ▼
-创建 TraceSession (root span → makeCurrent)
+agentRuntime.execute(runtimeSession)
+    └─ chatExecutor.execute(userInput, orchestratorContext)
+         └─ AgentLoopOrchestrator.execute(text, extraContext)
+              ├→ ① injectSystemPrompt() → 含长期记忆
+              ├→ ② MemoryPreProcessor → 注入【用户记忆参考】
+              ├→ ③ VehicleStatusPreProcessor → 车辆状态 JSON
+              ├→ ④ TimeContextPreProcessor → 当前时间
+              ├→ ⑤ LLM 调用 → gen_ai.chat 子 span
+              │       ├─ LLM 返回 ToolCall → tool.execute 子 span → continue
+              │       └─ LLM 返回文本 → PostProcessor → Terminator → ResultCollector
+              └─ AgentResult
     │
     ▼
-AgentLoopOrchestrator.execute(text, extraContext)
-    │
-    ├→ ① injectSystemPrompt() → 含长期记忆
-    ├→ ② MemoryPreProcessor → 注入【用户记忆参考】
-    ├→ ③ VehicleStatusPreProcessor → 车辆状态 JSON
-    ├→ ④ TimeContextPreProcessor → 当前时间
-    ├→ ⑤ LLM 调用 → llm.call 子 span（makeCurrent → http 属性归此 span）
-    │       ├─ LLM 返回 ToolCall → tool.execute 子 span → continue
-    │       └─ LLM 返回文本 → PostProcessor → Terminator → ResultCollector
+runtimeResponseMapper.toAgentResponse(runtimeResult) → AgentResponse
     │
     ▼
-AIAgentService session.close() → scope.close() + rootSpan.end()
+notifyAIAgentListeners(response)
+session.close() → scope.close() + rootSpan.end()
     OTLP/HTTP → Phoenix (localhost:6006)
 ```
 
@@ -388,18 +566,26 @@ AIAgentService session.close() → scope.close() + rootSpan.end()
 
 | 层次 | 完成度 | 关键瓶颈 |
 |------|--------|---------|
-| 对外 AIDL 接口 | 100% | **已统一为 `processAgentRequest(AgentRequest)`**，4 种 inputType 路由 |
+| 对外 AIDL 接口 | 100% | **已扩展为完整 API：** `processAgentRequest` + 6 个会话管理/取消接口 + listener 注册 |
+| **TEXT Persona** | **100%** | **3 个内置人格（chat/friendly/concise），独立 system prompt + ChatMemory 隔离** |
+| **请求取消** | **100%** | **cancelAgentRequest AIDL + ActiveRequestRegistry CAS 终态抢占 + late result 抑制** |
+| **会话管理** | **100%** | **ConversationManager CRUD + SessionManager 多用户隔离 + 短期记忆隔离** |
+| **AgentRuntime** | **100%** | TEXT 主链路已接管，IntentRouter + ToolGroupSelector + ActiveRequestRegistry 串联；VOICE 仍保留旧链路 |
 | Agent 主循环（Orchestrator） | 95% | 组件化管道完整，角色前缀问题需上游兼容 |
-| 工具调度（ToolRegistry） | 95% | 反射调度 + 安全审查，SceneServer 已删除 |
+| 工具调度（ToolRegistry） | 100% | 反射调度 + 安全审查，SceneServer 已删除 |
+| **IntentRouter** | **100%** | KeywordIntentRouter，11 种 IntentTag，关键词+正则匹配 |
+| **ToolGroup** | **100%** | 13 个工具组，DefaultToolGroupSelector，只观测不限制 |
 | Prompt 管理 | 95% | 9 个模板文件，长期记忆注入 |
 | 对话记忆 | 90% | SQLite 持久化，Session 管理，自动压缩 |
+| **Persona Prompt** | **100%** | **新增 assistant_friendly / assistant_concise 两套独立 system prompt** |
 | 长期记忆 | 70% | 提取+存储完成，置信度衰减待实现 |
-| Trace 追踪 | 90% | OpenTelemetry + Phoenix 完整链路 |
-| 车控工具定义（@Tool） | 95% | 40+ 方法，参数描述详尽 |
+| Trace 追踪 | 95% | OpenTelemetry + Phoenix 完整链路 + intent/tool_group/client_message 属性 |
+| **协议扩展** | **100%** | **AgentRequest/Response 新增 userId/personaId/clientMessageId/status/errorDetail；5 个会话管理 Parcelable** |
+| 车控工具定义（@Tool） | 100% | 当前 47 个 @Tool 方法，参数描述详尽 |
 | **虚拟车辆状态机** | **100%** | **替换 SoaService 调用，8 个子系统状态，参数校验完整** |
 | 硬件通信（SoaService） | 5% | **所有方法为空——最大断点**（已被 VehicleStateMachine 替代） |
 | 场景识别 | 85% | 真实模型推理，特异性操作为模拟 |
 | UI | 0% | 已移除（纯后台服务） |
-| 构建 | 100% | 单模块，Version Catalog，AIDL 预存错误 |
+| 构建 | 100% | 单模块，Version Catalog，JVM 单测覆盖持续补充 |
 
-**一句话：** LLM 推理链路、工具调度、Prompt/记忆/Trace 等基础设施已完整。AIDL 接口已统一为 `processAgentRequest(AgentRequest)`。硬件通信层（SoaService）为空，但虚拟车辆状态机（VehicleStateMachine）已接管车控 tool 的状态管理，Demo 阶段可直接使用。
+**一句话：** LLM 推理链路、工具调度、Prompt/记忆/Trace 等基础设施已基本成型。AIDL 接口已扩展为完整协议（`processAgentRequest` + 6 个会话管理/取消接口）。TEXT 主链路集成 Runtime 协调层，串联 IntentRouter + ToolGroupSelector + ActiveRequestRegistry 实现请求可观测性与取消能力。会话管理（ConversationManager）支持多用户隔离、短期记忆真实隔离、3 种内置 TEXT 人格。硬件通信层（SoaService）为空，虚拟车辆状态机已接管车控 Demo。JVM 单测已覆盖所有关键模块，流程性验收需在真实设备上执行手动验收清单。

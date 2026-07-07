@@ -23,11 +23,16 @@ import com.hirain.adapter.vr.VRServiceManager
 import com.hirain.aiagent.ai.langchain4j.tool.ToolRegistry
 import com.hirain.aiagent.core.AgentResult
 import com.hirain.aiagent.core.AgentLoopOrchestrator
+import com.hirain.aiagent.runtime.ActiveRequest
+import com.hirain.aiagent.runtime.ActiveRequestRegistry
 import com.hirain.aiagent.runtime.AgentExecutor
 import com.hirain.aiagent.runtime.AgentRuntime
 import com.hirain.aiagent.runtime.RuntimeResponseMapper
+import com.hirain.aiagent.runtime.RuntimeResult
 import com.hirain.aiagent.core.factory.AgentConfigFactory
 import com.hirain.aiagent.core.preprocessor.VehicleStatusPreProcessor
+import com.hirain.aiagent.conversation.ConversationManager
+import com.hirain.aiagent.conversation.MemoryConversationSessionGateway
 import com.hirain.aiagent.memory.MemoryOrchestrator
 import com.hirain.aiagent.trace.TraceConfig
 import com.hirain.aiagent.trace.TraceManager
@@ -75,6 +80,9 @@ class AIAgentService : Service() {
     private lateinit var chatOrchestrator: AgentLoopOrchestrator
     private lateinit var agentRuntime: AgentRuntime
     private lateinit var runtimeResponseMapper: RuntimeResponseMapper
+    private lateinit var conversationManager: ConversationManager
+    private val activeRequestRegistry = ActiveRequestRegistry()
+    private val activeTimeouts = java.util.concurrent.ConcurrentHashMap<String, Runnable>()
     private lateinit var statusProvider: VehicleStatusPreProcessor.VehicleStatusProvider
     private var mWorkHandlerThread: HandlerThread? = null
     private var mWorkHandler: Handler? = null
@@ -87,6 +95,9 @@ class AIAgentService : Service() {
     private var mRequestAIStr = ""
     private var mNagativeTTSplaying = false;
     private lateinit var sceneMatcher: SceneMatch
+
+    private val supportedTextPersonas = setOf("chat", "friendly", "concise")
+    private lateinit var textOrchestrators: Map<String, AgentLoopOrchestrator>
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var mChating = false
@@ -348,6 +359,9 @@ class AIAgentService : Service() {
         // ── Trace 初始化 ──
         traceManager = TraceManager(TraceConfig.development(BuildConfig.VERSION_NAME))
 
+        // ── 会话管理 ──
+        conversationManager = ConversationManager(MemoryConversationSessionGateway(memoryOrchestrator))
+
         // ── 对话 Agent（持久化 Persona） ──
         chatOrchestrator = AgentLoopOrchestrator(
             AgentConfigFactory.createChatPersona(
@@ -355,10 +369,30 @@ class AIAgentService : Service() {
                 statusProvider, speedManager),
             this, promptManager!!, memoryOrchestrator, toolRegistry.toolSpecifications)
 
+        // ── TEXT Persona Orchestrators ──
+        textOrchestrators = supportedTextPersonas.associateWith { persona ->
+            val config = AgentConfigFactory.createTextPersona(
+                this, promptManager!!, memoryOrchestrator,
+                toolRegistry, statusProvider, speedManager, persona
+            )
+            AgentLoopOrchestrator(
+                config, this, promptManager!!,
+                memoryOrchestrator, toolRegistry.toolSpecifications
+            )
+        }
+
         // ── AgentRuntime 初始化 ──
         agentRuntime = AgentRuntime(
             AgentExecutor { userInput, context ->
-                chatOrchestrator.execute(userInput, context)
+                val requestedPersona = context["persona_id"] as? String ?: "chat"
+                val persona = normalizeTextPersona(requestedPersona)
+                if (persona != requestedPersona) {
+                    Log.w("TAG", "Unsupported TEXT persona=$requestedPersona, fallback to chat")
+                }
+                val personaContext = HashMap(context)
+                personaContext["persona_id"] = persona
+                textOrchestrators[persona]?.execute(userInput, personaContext)
+                    ?: chatOrchestrator.execute(userInput, personaContext)
             }
         )
         runtimeResponseMapper = RuntimeResponseMapper()
@@ -403,6 +437,31 @@ class AIAgentService : Service() {
 
     }
 
+    // ── 请求规范化辅助 ──
+
+    private fun ensureRequestId(request: AgentRequest?): String {
+        val existing = request?.requestId?.takeIf { it.isNotBlank() }
+        if (existing != null) return existing
+        val generated = java.util.UUID.randomUUID().toString()
+        if (request != null) {
+            request.requestId = generated
+        }
+        return generated
+    }
+
+    private fun normalizeUserId(request: AgentRequest?): String {
+        return request?.userId?.takeIf { it.isNotBlank() } ?: "default_user"
+    }
+
+    private fun normalizePersonaId(request: AgentRequest?): String {
+        return request?.personaId?.takeIf { it.isNotBlank() } ?: "chat"
+    }
+
+    private fun normalizeTextPersona(requested: String?): String {
+        val requestedPersona = requested?.takeIf { it.isNotBlank() } ?: "chat"
+        return if (supportedTextPersonas.contains(requestedPersona)) requestedPersona else "chat"
+    }
+
     inner class AIAgentBinder :  IAIAgentAidlInterface.Stub() {
 
         @Throws(RemoteException::class)
@@ -417,6 +476,55 @@ class AIAgentService : Service() {
                 "CONTROL" -> handleControlRequest(request)
                 else -> Log.w("TAG", "Unknown inputType: ${request.inputType}")
             }
+        }
+
+        @Throws(RemoteException::class)
+        override fun createConversation(request: ConversationRequest?): ConversationOperationResult {
+            return conversationManager.createConversation(request)
+        }
+
+        @Throws(RemoteException::class)
+        override fun listConversations(userId: String?): ConversationListResponse {
+            return conversationManager.listConversations(userId)
+        }
+
+        @Throws(RemoteException::class)
+        override fun deleteConversation(userId: String?, sessionId: String?): ConversationOperationResult {
+            return conversationManager.deleteConversation(userId, sessionId)
+        }
+
+        @Throws(RemoteException::class)
+        override fun switchConversation(userId: String?, sessionId: String?): ConversationOperationResult {
+            return conversationManager.switchConversation(userId, sessionId)
+        }
+
+        @Throws(RemoteException::class)
+        override fun getActiveConversation(userId: String?): ConversationInfo? {
+            return conversationManager.getActiveConversation(userId)
+        }
+
+        @Throws(RemoteException::class)
+        override fun cancelAgentRequest(requestId: String?, reason: String?): CancelRequestResult {
+            val cancelReason = reason ?: "cancelled_by_client"
+            val result = activeRequestRegistry.cancel(requestId, cancelReason, System.currentTimeMillis())
+            if (result.isSuccess) {
+                requestId?.let { id ->
+                    activeTimeouts.remove(id)?.let { timeoutRunnable ->
+                        mainHandler.removeCallbacks(timeoutRunnable)
+                    }
+                    activeRequestRegistry.get(id)?.let { active ->
+                        val cancelledResult = RuntimeResult.cancelled(
+                            active.requestId(), active.sessionId(),
+                            active.userId(), active.personaId(), active.clientMessageId(),
+                            cancelReason, System.currentTimeMillis())
+                        val cancelledResponse = runtimeResponseMapper.toAgentResponse(cancelledResult)
+                        notifyAIAgentListeners(cancelledResponse)
+                        activeRequestRegistry.finish(id)
+                    }
+                }
+                stopTTS()
+            }
+            return result
         }
 
         @Throws(RemoteException::class)
@@ -462,47 +570,75 @@ class AIAgentService : Service() {
 
     private fun handleTextRequest(request: AgentRequest) {
         val message = request.text ?: ""
+        val requestId = ensureRequestId(request)
+        val userId = normalizeUserId(request)
+        val rawPersonaId = normalizePersonaId(request)
+        val effectivePersonaId = normalizeTextPersona(rawPersonaId)
+        // 将实际使用的 persona 写回 request，确保 Trace 和 Runtime 使用同一值
+        request.personaId = effectivePersonaId
         val session = traceManager.startAgentRequest(
-            "chat",
-            request.sessionId ?: "default_user",
-            request.requestId,
+            effectivePersonaId,
+            userId,
+            requestId,
             request.sessionId,
             request.sourceApp,
             request.inputType,
             message
         )
-        val responseDispatcher = TraceResponseDispatcher(session)
         val runtimeSession = agentRuntime.startSession(request, session.toTraceContext())
+        val activeRequest = activeRequestRegistry.register(runtimeSession)
 
         val timeoutRunnable = Runnable {
             Log.e("TAG", "processAgentRequest TEXT timeout")
-            val timeoutResponse = runtimeResponseMapper.toAgentResponse(agentRuntime.timeoutResult(runtimeSession))
-            responseDispatcher.dispatchAndClose(timeoutResponse, "TIMEOUT") { response ->
-                notifyAIAgentListeners(response)
+            val requestIdLocal = runtimeSession.requestId()
+            if (activeRequestRegistry.tryComplete(requestIdLocal, ActiveRequest.TerminalState.TIMEOUT)) {
+                val timeoutResponse = runtimeResponseMapper.toAgentResponse(
+                    agentRuntime.timeoutResult(runtimeSession))
+                notifyAIAgentListeners(timeoutResponse)
+                activeTimeouts.remove(requestIdLocal)
+                activeRequestRegistry.finish(requestIdLocal)
             }
         }
+        activeTimeouts[runtimeSession.requestId()] = timeoutRunnable
         mainHandler.postDelayed(timeoutRunnable, SENDMESSAGE_TIMEOUT_MS)
+
+        Log.d("TAG", "TextRequest requestId=$requestId sessionId=${request.sessionId} " +
+                "userId=$userId personaId=$effectivePersonaId " +
+                "clientMessageId=${request.clientMessageId}")
 
         mWorkHandler?.post {
             val traceScope = session.makeCurrent()
             try {
+                if (activeRequest.isCancelled) {
+                    activeTimeouts.remove(runtimeSession.requestId())?.let {
+                        mainHandler.removeCallbacks(it)
+                    }
+                    // finish 由已抢占 CANCELLED 的 cancel handler 独占负责
+                    return@post
+                }
                 Log.d("TAG", "handleTextRequest begin")
                 val runtimeResult = agentRuntime.execute(runtimeSession)
-                val response = runtimeResponseMapper.toAgentResponse(runtimeResult)
-                mainHandler.removeCallbacks(timeoutRunnable)
-                responseDispatcher.dispatch(
-                    response,
-                    runtimeResult.errorDetail() ?: runtimeResult.errorType()
-                ) { sent -> notifyAIAgentListeners(sent) }
+                if (activeRequestRegistry.tryComplete(
+                        runtimeSession.requestId(), ActiveRequest.TerminalState.COMPLETED)) {
+                    activeTimeouts.remove(runtimeSession.requestId())?.let {
+                        mainHandler.removeCallbacks(it)
+                    }
+                    val response = runtimeResponseMapper.toAgentResponse(runtimeResult)
+                    notifyAIAgentListeners(response)
+                    activeRequestRegistry.finish(runtimeSession.requestId())
+                }
             } catch (e: Exception) {
-                mainHandler.removeCallbacks(timeoutRunnable)
                 Log.e("TAG", "handleTextRequest service-level failure", e)
-                val runtimeResult = agentRuntime.errorResult(runtimeSession, e)
-                val response = runtimeResponseMapper.toAgentResponse(runtimeResult)
-                responseDispatcher.dispatch(
-                    response,
-                    runtimeResult.errorDetail() ?: runtimeResult.errorType()
-                ) { sent -> notifyAIAgentListeners(sent) }
+                if (activeRequestRegistry.tryComplete(
+                        runtimeSession.requestId(), ActiveRequest.TerminalState.FAILED)) {
+                    activeTimeouts.remove(runtimeSession.requestId())?.let {
+                        mainHandler.removeCallbacks(it)
+                    }
+                    val runtimeResult = agentRuntime.errorResult(runtimeSession, e)
+                    val response = runtimeResponseMapper.toAgentResponse(runtimeResult)
+                    notifyAIAgentListeners(response)
+                    activeRequestRegistry.finish(runtimeSession.requestId())
+                }
             } finally {
                 traceScope.close()
                 session.close()
@@ -573,11 +709,17 @@ class AIAgentService : Service() {
         mNagativeReqExecuting.set(true)
         stopTTS()
 
-        val session = traceManager.startSession("chat", request.sessionId ?: "default_user", request.text ?: "")
+        val userId = normalizeUserId(request)
+        val personaId = normalizePersonaId(request)
+        val session = traceManager.startSession(personaId, userId, request.text ?: "")
         mWorkHandler?.post {
             try {
                 Log.d("TAG", "handleVoiceRequest begin text=${request.text}")
-                val ctx = mapOf("user_id" to (request.sessionId ?: "default_user")) + session.toTraceContext().toContextData()
+                val ctx = mutableMapOf<String, Any>(
+                    "user_id" to userId,
+                    "persona_id" to personaId
+                )
+                ctx.putAll(session.toTraceContext().toContextData())
                 val result = chatOrchestrator.execute(request.text ?: "", ctx)
                 session.setStatus(result.isSuccess, result.errorDetail())
                 val res = if (result.isSuccess) result.output()
