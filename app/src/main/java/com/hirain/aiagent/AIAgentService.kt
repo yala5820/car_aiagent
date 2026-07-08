@@ -48,6 +48,11 @@ import com.hirain.aiagent.tools.vehicle.seat.VehicleSeatManager
 import com.hirain.aiagent.tools.vehicle.speed.VehicleSpeedManager
 import com.hirain.aiagent.tools.vehicle.window.VehicleWindowManager
 import com.hirain.aiagent.VirtualStateMachine.VehicleStateMachine
+import com.hirain.aiagent.context.ContextBuildInput
+import com.hirain.aiagent.context.ContextMode
+import com.hirain.aiagent.context.ContextOrchestrator
+import com.hirain.aiagent.runtime.RuntimeCancelChecker
+import com.hirain.aiagent.runtime.SystemTimeProvider
 import com.hirain.aiagent.tools.vision.vl.VlManager
 import com.hirain.aiagent.AgentRequest
 import com.hirain.aiagent.AgentResponse
@@ -75,6 +80,7 @@ class AIAgentService : Service() {
     private var vl: VlManager? = null
     private lateinit var toolRegistry: ToolRegistry
     private lateinit var memoryOrchestrator: MemoryOrchestrator
+    private lateinit var contextOrchestrator: ContextOrchestrator
     private lateinit var vehicleStateMachine: VehicleStateMachine
     private lateinit var traceManager: TraceManager
     private lateinit var chatOrchestrator: AgentLoopOrchestrator
@@ -381,6 +387,18 @@ class AIAgentService : Service() {
             )
         }
 
+        // ── ContextOrchestrator 初始化 ──
+        contextOrchestrator = ContextOrchestrator.defaultForText(
+            ContextBuildInput.builder()
+                .mode(ContextMode.HYBRID_EXTRA_CONTEXT)
+                .toolGroupRegistry(com.hirain.aiagent.toolgroup.ToolGroupRegistry.defaultRegistry())
+                .promptManager(promptManager!!)
+                .memoryOrchestrator(memoryOrchestrator)
+                .vehicleStatusProvider { statusProvider.getVehicleStatus() }
+                .timeProvider(SystemTimeProvider())
+                .build()
+        )
+
         // ── AgentRuntime 初始化 ──
         agentRuntime = AgentRuntime(
             AgentExecutor { userInput, context ->
@@ -393,6 +411,10 @@ class AIAgentService : Service() {
                 personaContext["persona_id"] = persona
                 textOrchestrators[persona]?.execute(userInput, personaContext)
                     ?: chatOrchestrator.execute(userInput, personaContext)
+            },
+            contextOrchestrator,
+            RuntimeCancelChecker { runtimeSession ->
+                activeRequestRegistry.get(runtimeSession.requestId())?.isCancelled == true
             }
         )
         runtimeResponseMapper = RuntimeResponseMapper()
@@ -618,6 +640,13 @@ class AIAgentService : Service() {
                 }
                 Log.d("TAG", "handleTextRequest begin")
                 val runtimeResult = agentRuntime.execute(runtimeSession)
+                // Runtime 返回后取消检查：suppress late success，取消响应由 cancelAgentRequest() 抢占并发送
+                if (activeRequest.isCancelled) {
+                    activeTimeouts.remove(runtimeSession.requestId())?.let {
+                        mainHandler.removeCallbacks(it)
+                    }
+                    return@post
+                }
                 if (activeRequestRegistry.tryComplete(
                         runtimeSession.requestId(), ActiveRequest.TerminalState.COMPLETED)) {
                     activeTimeouts.remove(runtimeSession.requestId())?.let {

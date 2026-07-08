@@ -58,6 +58,20 @@ public final class TraceAttributeKeys {
     public static final String ERROR_TYPE = "error.type";
     public static final String ERROR_MESSAGE = "error.message";
 
+    // ── Context ──
+
+    public static final String CONTEXT_ENABLED = "agent.context.enabled";
+    public static final String CONTEXT_MODE = "agent.context.mode";
+    public static final String CONTEXT_PROVIDER_COUNT = "agent.context.provider_count";
+    public static final String CONTEXT_PROVIDERS = "agent.context.providers";
+    public static final String CONTEXT_SELECTED_TOOL_COUNT = "agent.context.selected_tool_count";
+    public static final String CONTEXT_SELECTED_TOOL_NAMES = "agent.context.selected_tool_names";
+    public static final String CONTEXT_SECTION_COUNT = "agent.context.section_count";
+    public static final String CONTEXT_TOKEN_ESTIMATE = "agent.context.token_estimate";
+    public static final String CONTEXT_FALLBACK_USED = "agent.context.fallback_used";
+    public static final String CONTEXT_BUILD_MS = "agent.context.build_ms";
+    public static final String CONTEXT_ERROR = "agent.context.error";
+
     private TraceAttributeKeys() {
     }
 }

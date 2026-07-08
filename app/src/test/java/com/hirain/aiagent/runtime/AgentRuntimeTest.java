@@ -55,6 +55,9 @@ public class AgentRuntimeTest {
         assertSame(traceContext, context.get().get(TraceContext.TRACE_CONTEXT_KEY));
         assertEquals("req-fixed", result.requestId());
         assertEquals(3000L, result.timestampMs());
+        assertEquals("HYBRID_EXTRA_CONTEXT", context.get().get("context_mode"));
+        assertTrue(context.get().containsKey("context_frame"));
+        assertTrue(context.get().containsKey("context_rendered_extra"));
     }
 
     @Test
@@ -189,8 +192,11 @@ public class AgentRuntimeTest {
         assertEquals(List.of(ToolGroupId.AC_GROUP, ToolGroupId.BASIC_STATUS_GROUP),
                 session.toolGroupSelectionResult().selectedGroupIds());
         assertTrue(result.success());
-        assertFalse(context.get().containsKey("selected_tool_groups"));
-        assertFalse(context.get().containsKey("selected_tool_names"));
+        // ContextFrame.toOrchestratorContext 现在会写入 selected_tool_names 和 selected_group_ids
+        assertTrue(context.get().containsKey("selected_tool_names"));
+        assertTrue(context.get().containsKey("selected_group_ids"));
+        assertTrue(context.get().containsKey("context_rendered_extra"));
+        assertEquals("HYBRID_EXTRA_CONTEXT", context.get().get("context_mode"));
     }
 
     @Test

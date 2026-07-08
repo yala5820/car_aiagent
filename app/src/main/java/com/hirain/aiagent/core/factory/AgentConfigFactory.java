@@ -12,6 +12,7 @@ import com.hirain.aiagent.core.postprocessor.NoOpPostProcessor;
 import com.hirain.aiagent.core.postprocessor.SceneActionMergePostProcessor;
 import com.hirain.aiagent.core.postprocessor.VlWarningPostProcessor;
 import com.hirain.aiagent.core.preprocessor.ActiveControlPreProcessor;
+import com.hirain.aiagent.core.preprocessor.ContextExtraPreProcessor;
 import com.hirain.aiagent.core.preprocessor.MemoryPreProcessor;
 import com.hirain.aiagent.core.preprocessor.SceneContextPreProcessor;
 import com.hirain.aiagent.core.preprocessor.TimeContextPreProcessor;
@@ -147,6 +148,7 @@ public class AgentConfigFactory {
                 .memoryPolicy(AgentConfig.MemoryPolicy.PERSISTENT)
                 .chatMemoryStoreId(memoryId)
                 .preProcessors(List.of(
+                        new ContextExtraPreProcessor(),
                         new MemoryPreProcessor(memoryOrchestrator),
                         new VehicleStatusPreProcessor(promptManager, statusProvider),
                         new TimeContextPreProcessor()))
@@ -167,9 +169,7 @@ public class AgentConfigFactory {
     }
 
     private static String switchPersonaTemplate(String personaId) {
-        if ("friendly".equals(personaId)) return PromptConstants.SYSTEM_ASSISTANT_FRIENDLY;
-        if ("concise".equals(personaId)) return PromptConstants.SYSTEM_ASSISTANT_CONCISE;
-        return PromptConstants.SYSTEM_ASSISTANT_DEFAULT;
+        return PromptConstants.textPersonaTemplateName(personaId);
     }
 
     private static String normalizeTextPersona(String personaId) {

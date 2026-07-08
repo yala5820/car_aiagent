@@ -1,6 +1,11 @@
 package com.hirain.aiagent.runtime;
 
 import com.hirain.aiagent.AgentRequest;
+import com.hirain.aiagent.context.ContextBuildInput;
+import com.hirain.aiagent.context.ContextBuildResult;
+import com.hirain.aiagent.context.ContextFrame;
+import com.hirain.aiagent.context.ContextMode;
+import com.hirain.aiagent.context.ContextOrchestrator;
 import com.hirain.aiagent.core.AgentResult;
 import com.hirain.aiagent.intentrouter.IntentResult;
 import com.hirain.aiagent.intentrouter.IntentRouter;
@@ -15,7 +20,8 @@ import com.hirain.aiagent.trace.TraceContext;
 /**
  * Runtime 主入口 — 位于 AIAgentService 与 AgentLoopOrchestrator 之间。
  * <p>
- * 职责：创建 RequestSession（含 IntentResult 路由）、执行 Agent 对话、封装 RuntimeResult。
+ * 职责：创建 RequestSession（含 IntentResult 路由）、通过 ContextOrchestrator 构建
+ * ContextFrame、执行 Agent 对话、封装 RuntimeResult。
  * 不创建 TraceSession、不调度 timeout、不通知 listener。
  */
 public class AgentRuntime {
@@ -23,59 +29,106 @@ public class AgentRuntime {
     private static final String CHAT_PERSONA = "chat";
 
     private final AgentExecutor chatExecutor;
+    private final ContextOrchestrator contextOrchestrator;
+    private final RuntimeCancelChecker cancelChecker;
     private final IntentRouter intentRouter;
     private final ToolGroupSelector toolGroupSelector;
     private final IdGenerator idGenerator;
     private final TimeProvider timeProvider;
     private final RequestSessionFactory sessionFactory;
 
-    /**
-     * 生产构造函数 — 默认 KeywordIntentRouter + DefaultToolGroupSelector + UUID + 系统时间。
-     */
-    public AgentRuntime(AgentExecutor chatExecutor) {
-        this(chatExecutor, new KeywordIntentRouter(),
-                new DefaultToolGroupSelector(ToolGroupRegistry.defaultRegistry()),
-                new UuidIdGenerator(), new SystemTimeProvider());
+    // ── 默认 ContextOrchestrator ──
+
+    private static ContextOrchestrator defaultContextOrchestrator() {
+        return ContextOrchestrator.defaultForText(
+                ContextBuildInput.builder()
+                        .mode(ContextMode.HYBRID_EXTRA_CONTEXT)
+                        .toolGroupRegistry(ToolGroupRegistry.defaultRegistry())
+                        .build());
     }
 
-    /**
-     * 测试构造函数 — 默认 KeywordIntentRouter + DefaultToolGroupSelector + 可注入 ID/时间。
-     */
+    // ── 构造函数 ──
+
+    /** 最简生产构造函数 — 使用默认 ContextOrchestrator，无取消检查。 */
+    public AgentRuntime(AgentExecutor chatExecutor) {
+        this(chatExecutor, defaultContextOrchestrator());
+    }
+
+    /** 生产构造函数 — 指定 ContextOrchestrator，无取消检查。 */
+    public AgentRuntime(AgentExecutor chatExecutor,
+                        ContextOrchestrator contextOrchestrator) {
+        this(chatExecutor, contextOrchestrator, RuntimeCancelChecker.neverCancelled());
+    }
+
+    /** 生产构造函数 — 指定 ContextOrchestrator 和取消检查器。 */
+    public AgentRuntime(AgentExecutor chatExecutor,
+                        ContextOrchestrator contextOrchestrator,
+                        RuntimeCancelChecker cancelChecker) {
+        this(chatExecutor, contextOrchestrator, new KeywordIntentRouter(),
+                new DefaultToolGroupSelector(ToolGroupRegistry.defaultRegistry()),
+                new UuidIdGenerator(), new SystemTimeProvider(), cancelChecker);
+    }
+
+    /** 测试构造函数 — 指定 ContextOrchestrator 和 ID/时间，使用默认 Router/Selector。 */
+    public AgentRuntime(AgentExecutor chatExecutor,
+                        ContextOrchestrator contextOrchestrator,
+                        IdGenerator idGenerator,
+                        TimeProvider timeProvider) {
+        this(chatExecutor, contextOrchestrator, new KeywordIntentRouter(),
+                new DefaultToolGroupSelector(ToolGroupRegistry.defaultRegistry()),
+                idGenerator, timeProvider, RuntimeCancelChecker.neverCancelled());
+    }
+
+    /** 测试构造函数 — 默认 ContextOrchestrator/Router/Selector + 可注入 ID/时间。 */
     public AgentRuntime(AgentExecutor chatExecutor,
                         IdGenerator idGenerator,
                         TimeProvider timeProvider) {
-        this(chatExecutor, new KeywordIntentRouter(),
+        this(chatExecutor, defaultContextOrchestrator(),
+                new KeywordIntentRouter(),
                 new DefaultToolGroupSelector(ToolGroupRegistry.defaultRegistry()),
-                idGenerator, timeProvider);
+                idGenerator, timeProvider, RuntimeCancelChecker.neverCancelled());
     }
 
-    /**
-     * 测试构造函数 — 默认 DefaultToolGroupSelector + 可注入 Router + ID/时间。
-     */
+    /** 测试构造函数 — 默认 ContextOrchestrator/Selector + 可注入 Router + ID/时间。 */
     public AgentRuntime(AgentExecutor chatExecutor,
                         IntentRouter intentRouter,
                         IdGenerator idGenerator,
                         TimeProvider timeProvider) {
-        this(chatExecutor, intentRouter,
+        this(chatExecutor, defaultContextOrchestrator(), intentRouter,
                 new DefaultToolGroupSelector(ToolGroupRegistry.defaultRegistry()),
-                idGenerator, timeProvider);
+                idGenerator, timeProvider, RuntimeCancelChecker.neverCancelled());
     }
 
-    /**
-     * 全可注入构造函数。
-     */
+    /** 测试构造函数 — 默认 ContextOrchestrator + 可注入 Router/Selector + ID/时间。 */
     public AgentRuntime(AgentExecutor chatExecutor,
                         IntentRouter intentRouter,
                         ToolGroupSelector toolGroupSelector,
                         IdGenerator idGenerator,
                         TimeProvider timeProvider) {
+        this(chatExecutor, defaultContextOrchestrator(), intentRouter,
+                toolGroupSelector, idGenerator, timeProvider,
+                RuntimeCancelChecker.neverCancelled());
+    }
+
+    /** 全可注入构造函数。 */
+    public AgentRuntime(AgentExecutor chatExecutor,
+                        ContextOrchestrator contextOrchestrator,
+                        IntentRouter intentRouter,
+                        ToolGroupSelector toolGroupSelector,
+                        IdGenerator idGenerator,
+                        TimeProvider timeProvider,
+                        RuntimeCancelChecker cancelChecker) {
         this.chatExecutor = chatExecutor;
+        this.contextOrchestrator = contextOrchestrator;
+        this.cancelChecker = cancelChecker;
         this.intentRouter = intentRouter;
         this.toolGroupSelector = toolGroupSelector;
         this.idGenerator = idGenerator;
         this.timeProvider = timeProvider;
         this.sessionFactory = new RequestSessionFactory(idGenerator, timeProvider);
     }
+
+    // ── Session 创建 ──
 
     /**
      * 从 AgentRequest 和 TraceContext 创建规范化请求快照。
@@ -92,13 +145,23 @@ public class AgentRuntime {
         return session;
     }
 
+    // ── 执行 ──
+
     /**
-     * 执行 Agent 对话，捕获异常并返回 RuntimeResult。
+     * 执行 Agent 对话：先通过 ContextOrchestrator 构建 ContextFrame，
+     * 构建后、AgentLoop 前检查取消，再委托 chatExecutor 执行。
      */
     public RuntimeResult execute(RequestSession session) {
         try {
-            AgentResult result = chatExecutor.execute(
-                    session.userInput(), session.orchestratorContext());
+            ContextBuildResult contextBuildResult = contextOrchestrator.build(session);
+            ContextFrame contextFrame = contextBuildResult.frame();
+            if (cancelChecker.isCancelled(session)) {
+                return RuntimeResult.cancelled(
+                        session.requestId(), session.sessionId(),
+                        session.userId(), session.personaId(), session.clientMessageId(),
+                        "cancelled_before_agent_loop", timeProvider.nowMillis());
+            }
+            AgentResult result = chatExecutor.execute(session, contextFrame);
             return RuntimeResult.fromAgentResult(
                     session.requestId(), session.sessionId(),
                     session.userId(), session.personaId(), session.clientMessageId(),
@@ -110,6 +173,8 @@ public class AgentRuntime {
                     e, timeProvider.nowMillis());
         }
     }
+
+    // ── 超时 / 错误 / 取消 辅助方法 ──
 
     /**
      * 生成超时结果（不执行 Agent 对话）。
@@ -143,9 +208,6 @@ public class AgentRuntime {
 
     // ── Intent 路由 ──
 
-    /**
-     * 安全调用 IntentRouter，捕获所有异常降级为 UNKNOWN。
-     */
     private IntentResult routeIntentSafely(AgentRequest request) {
         String text = request != null && request.getText() != null ? request.getText() : "";
         String inputType = request != null && request.getInputType() != null
@@ -161,9 +223,6 @@ public class AgentRuntime {
         }
     }
 
-    /**
-     * 安全调用 ToolGroupSelector，捕获所有异常降级为 fallback。
-     */
     private ToolGroupSelectionResult selectToolGroupsSafely(IntentResult intentResult, AgentRequest request) {
         String text = request != null && request.getText() != null ? request.getText() : "";
         try {
@@ -176,9 +235,6 @@ public class AgentRuntime {
         }
     }
 
-    /**
-     * 将 ToolGroupSelectionResult 写入 Trace root span attribute。
-     */
     private void writeToolGroupsToTrace(TraceContext traceContext, ToolGroupSelectionResult result) {
         if (traceContext == null || traceContext.session() == null || result == null) return;
         traceContext.session().setAttribute("agent.tool_group.selected_group_ids",
@@ -195,11 +251,6 @@ public class AgentRuntime {
                 result.fallbackUsed());
     }
 
-    /**
-     * 将 RequestSession 元信息写入 Trace。
-     * 不重复写 TraceManager 已有的 request.id/session.id/user.id/agent.persona。
-     * 只补充外部 App 对账所需的 clientMessageId。
-     */
     private void writeRequestMetaToTrace(TraceContext traceContext, RequestSession session) {
         if (traceContext == null || traceContext.session() == null || session == null) return;
         if (session.clientMessageId() != null) {

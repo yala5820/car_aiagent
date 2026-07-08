@@ -48,4 +48,16 @@ public final class PromptConstants {
 
     /** VL 响应后缀警告 */
     public static final String MSG_VL_WARNING = "messages/vl_warning";
+
+    /**
+     * 根据 TEXT persona 选择系统提示词模板。
+     * <p>
+     * 设计原因：AgentConfigFactory 和 Context 的 PromptContextProvider 都需要记录同一映射，
+     * 映射必须集中维护，避免新增 persona 时出现两处硬编码不一致。
+     */
+    public static String textPersonaTemplateName(String personaId) {
+        if ("friendly".equals(personaId)) return SYSTEM_ASSISTANT_FRIENDLY;
+        if ("concise".equals(personaId)) return SYSTEM_ASSISTANT_CONCISE;
+        return SYSTEM_ASSISTANT_DEFAULT;
+    }
 }

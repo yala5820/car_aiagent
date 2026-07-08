@@ -17,6 +17,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 - 四层记忆系统（Session / 长期记忆 / 压缩 / 提取）
 - 全链路追踪（OpenTelemetry + Phoenix）
 - **虚拟车辆状态机（VehicleStateMachine）**：Demo 阶段车控 tool 的状态托管中心，参数校验 + 状态收敛
+- **Context 上下文模块**：统一管理 TEXT 请求的上下文元信息，按需渲染后注入 LLM 输入，同时记入 Trace 观测
 
 ### 改造历史
 
@@ -38,6 +39,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 | **Phase 14** | **会话管理**：ConversationManager 门面，ConversationSessionGateway 可测试抽象，create/list/switch/delete/getActive 全链路；SessionManager 多用户隔离修复；SessionMemoryStore 扩展（元数据、事务创建、级联删除） |
 | **Phase 15** | **用户与 Persona**：RequestSessionFactory userId/sessionId 分离；TEXT 三种内置人格（chat/friendly/concise）；AgentConfigFactory.createTextPersona() 统一入口；Trace 记录有效 persona |
 | **Phase 16** | **请求取消**：ActiveRequestRegistry + CAS 终态抢占（RUNNING/COMPLETED/CANCELLED/TIMEOUT/FAILED）；cancelAgentRequest AIDL 全链路；RuntimeResult/Response 元信息补齐 |
+| **Phase 17** | **Context 上下文模块**：ContextOrchestrator + 9 个 Provider 构建统一 ContextFrame；ContextExtraPreProcessor 将上下文注入 LLM 首轮输入；ContextTraceRecorder 写 Trace；RuntimeCancelChecker 三处取消拦截 |
 
 ---
 
@@ -76,14 +78,19 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 │  │  IntentRouter → ToolGroupSelector → 观测元信息│          │
 │  │  ├─ TEXT → textOrchestrators[personaId]     │            │
 │  │  ├─ ActiveRequestRegistry（终态抢占）       │            │
-│  │  └─ RequestSession（userId/sessionId/personaId/clientMsgId/intent/toolgroup）│
+│  │  ├─ RequestSession                          │            │
+│  │  └─ ContextOrchestrator → ContextFrame      │            │
+│  │      （9 个 Provider 按序采集上下文信息）    │            │
 │  └──────────────────┬──────────────────────────┘            │
-│                     │                                       │
+│                     │ execute(session, contextFrame)         │
 │                     ▼                                       │
 │  ┌─────────────────────────────────────────────┐            │
 │  │           AgentLoopOrchestrator               │            │
 │  │  统一 Agent 循环引擎，7 组件管线装配            │            │
-│  │  PreProcessor → ModelCaller → SafetyGuard    │            │
+│  │  PreProcessor 链：                            │            │
+│  │    ContextExtraPreProcessor（首轮注入 Context）│            │
+│  │    MemoryPreProcessor → VehicleStatus → Time  │            │
+│  │  → ModelCaller → SafetyGuard                  │            │
 │  │  → ToolExecutor → PostProcessor → Terminator │            │
 │  │  → ResultCollector                           │            │
 │  ├─────────────────────────────────────────────┤            │
@@ -200,6 +207,33 @@ AIAgent/
 │   │   │   │   ├── ConversationConstants.java      # 统一常量
 │   │   │   │   ├── ConversationSessionGateway.java # 可测试抽象接口
 │   │   │   │   └── MemoryConversationSessionGateway.java # 生产实现（委托 MemoryOrchestrator）
+│   │   │   │
+│   │   │   ├── context/                      # Context 上下文模块
+│   │   │   │   ├── ContextMode.java             # 三种模式（OBSERVE_ONLY/HYBRID_EXTRA_CONTEXT/FULL_CONTEXT）
+│   │   │   │   ├── ContextSectionType.java      # 10 种上下文段分类
+│   │   │   │   ├── ContextSection.java          # 不可变上下文段
+│   │   │   │   ├── ContextFrame.java            # 不可变上下文快照
+│   │   │   │   ├── ContextFrameBuilder.java     # 从 RequestSession 构造 Frame
+│   │   │   │   ├── ContextBudgetManager.java    # 预算规则
+│   │   │   │   ├── ContextDebugInfo.java        # 构建诊断信息
+│   │   │   │   ├── ContextBuildInput.java       # Provider 依赖容器
+│   │   │   │   ├── ContextBuildResult.java      # 执行结果
+│   │   │   │   ├── ContextBuildException.java   # 构建异常
+│   │   │   │   ├── ContextProvider.java         # Provider 接口
+│   │   │   │   ├── ContextProviderResult.java   # 执行结果（success/fallback/failure）
+│   │   │   │   ├── ContextOrchestrator.java     # 构建总入口
+│   │   │   │   ├── ContextTraceRecorder.java    # 构建指标写入 Trace
+│   │   │   │   ├── VehicleStatusProvider.java   # 车辆状态接口
+│   │   │   │   └── provider/                    # 9 个 Provider
+│   │   │   │       ├── RuntimeContextProvider.java
+│   │   │   │       ├── PersonaContextProvider.java
+│   │   │   │       ├── UserInputContextProvider.java
+│   │   │   │       ├── IntentContextProvider.java
+│   │   │   │       ├── ToolGroupContextProvider.java
+│   │   │   │       ├── MemoryContextProvider.java
+│   │   │   │       ├── VehicleStateContextProvider.java
+│   │   │   │       ├── TimeContextProvider.java
+│   │   │   │       └── PromptContextProvider.java
 │   │   │   │
 │   │   │   ├── runtime/                       # 运行时协调层（续）
 │   │   │   ├── ai/langchain4j/tool/        # 工具调度系统
@@ -442,14 +476,18 @@ Demo 阶段引入的状态托管中心，替换原有的 `SoaService` 外部调�
 - **异常降级**：Router / Selector 异常不影响执行路径，降级为 `UNKNOWN` / `CHAT_ONLY_GROUP`
 - **执行封装**：`execute()` / `timeoutResult()` / `errorResult()` / `cancelledResult()` 统一封装 RuntimeResult（全部含 userId/personaId/clientMessageId 元信息）
 - **服务端取消支持**：`cancelledResult(session, reason)` → RuntimeResult.cancelled → Mapper 按状态码 CANCELLED 映射
+- **Context 编排**：`execute(session)` 内先调 `contextOrchestrator.build(session)` 构建 ContextFrame，再执行 `chatExecutor.execute(session, contextFrame)`，中间插 `cancelChecker.isCancelled(session)` 检查；8 个构造函数支持 ContextOrchestrator 和 RuntimeCancelChecker 注入
 
-5 个构造函数支持全量依赖注入（生产 / 测试），TEXT 请求执行路径：
+8 个构造函数支持全量依赖注入（生产 / 测试），TEXT 请求执行路径：
 
 ```
 handleTextRequest() → traceManager.startAgentRequest() → agentRuntime.startSession()
   → routeIntentSafely() → selectToolGroupsSafely()
   → writeIntentToTrace() → writeToolGroupsToTrace() → sessionFactory.create() → writeRequestMetaToTrace()
-  → ActiveRequestRegistry.register() → agentRuntime.execute() → chatExecutor.execute()
+  → ActiveRequestRegistry.register() → agentRuntime.execute()
+     → contextOrchestrator.build(session) → ContextFrame
+     → cancelChecker.isCancelled(session) → cancelled_before_agent_loop
+     → chatExecutor.execute(session, contextFrame) [旧 execute(String, Map) 兼容]
   → tryComplete(COMPLETED/FAILED) → runtimeResponseMapper.toAgentResponse()
   → notifyAIAgentListeners() → session.close()
 ```
@@ -479,7 +517,77 @@ handleTextRequest() → traceManager.startAgentRequest() → agentRuntime.startS
 - 聚合组 `riskLevel` 遵循最高风险上浮规则（`COMMON_VEHICLE_GROUP` 和 `ALL_SAFE_DEMO_GROUP` 均为 HIGH）
 - 不执行 Tool、不修改 ToolRegistry/ToolDispatcher/AgentLoopOrchestrator
 
-### 4.14 SoaService（SOA 总线封装）
+### 4.14 ContextOrchestrator（上下文模块）
+
+**文件：** `context/`
+
+在 AgentRuntime.execute() 中、AgentLoop 启动前，由 ContextOrchestrator 按序驱动 9 个 Provider 采集上下文，组装成不可变的 ContextFrame。这个 Frame 既承担"让 LLM 看到更多信息"的职责（部分 section 渲染后混入 ChatRequest），也承担"让开发者看到每次请求的上下文全貌"的职责（全部 section 写入 Trace）。
+
+#### 两种模式区分渲染边界
+
+一期采用 HYBRID_EXTRA_CONTEXT 模式，9 个 Provider 的采集结果分为两类：
+
+**渲染给 LLM 的部分（renderable=true）：**
+- 【运行时上下文】— requestId、userId、sessionId、personaId、inputType
+- 【人格上下文】— 当前请求的人格（chat/friendly/concise）
+- 【意图上下文】— IntentRouter 的识别结果（intentTag、confidence、关键词）
+- 【工具组上下文】— 选中的工具组列表、工具名列表、组描述
+
+**仅用于观测的部分（renderable=false）：**
+- 【用户输入】— 原始和规范化后的用户文本（避免重复给 LLM）
+- 【长期记忆】— 仅标记 memory owner，不读真实摘要
+- 【车辆状态】— VehicleStatusProvider 的快照字符串（已有 VehicleStatusPreProcessor 处理）
+- 【当前时间】— 格式化时间字符串（已有 TimeContextPreProcessor 处理）
+- 【Prompt】— 记录当前使用的 persona→system prompt 模板映射
+
+这么做的目的是：memory/vehicle/time/prompt 这四个维度的上下文已经由 AgentLoopOrchestrator 的 PreProcessor 链（MemoryPreProcessor / VehicleStatusPreProcessor / TimeContextPreProcessor / injectSystemPrompt）各自独立注入到 LLM 输入中。Context 模块不再重复注入，只在调度面做观测记录，避免 LLM 收到重复信息。
+
+#### 三个层次的取消保护
+
+Context 模块在"Context 构建后、AgentLoop 启动前"这个关键窗口插入了取消检查（RuntimeCancelChecker），与 Service 层原有的构建前取消和返回后取消形成三路保护：
+
+```
+构建前取消（原有）→ Context 构建 → 构建后取消（新增）→ AgentLoop → 返回后取消（新增）
+     worker 入口检查        │             Runtime 内部           │     Service 层检查
+                            ▼                                   ▼
+                     cancelled_before_agent_loop           suppress late success
+```
+
+#### 核心组成
+
+| 组件 | 职责 |
+|------|------|
+| `ContextOrchestrator` | 构建总入口，`defaultForText()` 装配 9-Provider 标准链，`build(session)` 按序遍历 |
+| `ContextMode` | OBSERVE_ONLY（只观测不注入）/ HYBRID_EXTRA_CONTEXT（一期默认）/ FULL_CONTEXT（预留） |
+| `ContextFrame` | 不可变快照，含 requestId/sessionId/userId/personaId/intentResult/selectedTools/sections |
+| `ContextFrameBuilder` | 从 `RequestSession` 构造 Frame，不重新生成 ID |
+| `ContextBudgetManager` | section 800 字符 / memory 500 / tool 1200 / total 3000 的粗估预算 |
+| `ContextTraceRecorder` | 将 11 个构建指标（mode、provider_count、selected_tool_count、build_ms 等）写入 Trace |
+| `RuntimeCancelChecker` | Context 构建后、AgentLoop 前的只读取消接口 |
+| `ContextExtraPreProcessor` | AgentLoop 首轮 PreProcessor，将 renderedExtraContext 转为 UserMessage |
+
+#### 9 个 Provider
+
+| Provider | name() | 采集内容 | renderable |
+|----------|--------|---------|-----------|
+| RuntimeContextProvider | requestId/userId/sessionId/personaId/inputType | true |
+| PersonaContextProvider | 请求人格标识 | true |
+| UserInputContextProvider | 原始和规范化后用户文本（仅 metadata） | false |
+| IntentContextProvider | IntentRouter 输出（intentTag/confidence/keywords） | true |
+| ToolGroupContextProvider | 选中组 ID/工具名/组描述 | true |
+| MemoryContextProvider | 标记 memory owner，不读真实长记 | false |
+| VehicleStateContextProvider | 通过 VehicleStatusProvider 采集快照 | false |
+| TimeContextProvider | 格式化当前时间 | false |
+| PromptContextProvider | 记录 persona→prompt 模板映射 | false |
+
+#### 异常处理策略
+
+- 单个 Provider 异常通过 try/catch 保护，不影响其他 Provider
+- Provider 依赖缺失（如 ToolGroupRegistry 为 null）自动 fallback 而非抛 NPE
+- 全部 9 个 Provider 均失败时仍返回 ContextFrame（renderedExtraContext 为空），下游 AgentLoop 照常执行
+- ContextBuildResult 区分 success（部分降级仍算成功）和 fallback（全部失败）两种结果
+
+### 4.15 SoaService（SOA 总线封装）
 
 **文件：** `infra/soa/SoaService.kt`
 
@@ -514,7 +622,11 @@ AIAgentService.onCreate()
     ├─ chatOrchestrator = AgentLoopOrchestrator(...) ← 旧版对话引擎（VOICE 链路使用）
     ├─ conversationManager = ConversationManager(...)  ← 会话管理门面
     ├─ textOrchestrators = {chat, friendly, concise} × AgentLoopOrchestrator ← TEXT 人格多实例
-    ├─ agentRuntime = AgentRuntime(AgentExecutor { textOrchestrators[persona].execute() })
+    ├─ contextOrchestrator = ContextOrchestrator.defaultForText(...) ← Context 模块
+    ├─ agentRuntime = AgentRuntime(
+    │      AgentExecutor { textOrchestrators[persona].execute() },
+    │      contextOrchestrator,
+    │      RuntimeCancelChecker { activeRequestRegistry.get(it.requestId())?.isCancelled == true })
     ├─ sceneMatcher = SceneMatch(...)
     └─ VRServiceManager.initCallback()     ← VR/TTS 初始化
 ```
@@ -540,13 +652,18 @@ AIAgentService.handleTextRequest()
     │
     ▼
 agentRuntime.execute(runtimeSession)
-    └─ chatExecutor.execute(userInput, orchestratorContext)
+    ├→ ① contextOrchestrator.build(session) → ContextFrame
+    │     9 个 Provider 按序采集 → renderedExtraContext(仅 renderable=true 的 section)
+    │   → ContextTraceRecorder.record() → 11 个 agent.context.* 属性写入 Trace
+    ├→ ② cancelChecker.isCancelled(session) → 取消则返回 CANCELLED，不调 AgentLoop
+    └→ ③ chatExecutor.execute(session, contextFrame) [default → old execute(String, Map)]
          └─ AgentLoopOrchestrator.execute(text, extraContext)
               ├→ ① injectSystemPrompt() → 含长期记忆
-              ├→ ② MemoryPreProcessor → 注入【用户记忆参考】
-              ├→ ③ VehicleStatusPreProcessor → 车辆状态 JSON
-              ├→ ④ TimeContextPreProcessor → 当前时间
-              ├→ ⑤ LLM 调用 → gen_ai.chat 子 span
+              ├→ ② ContextExtraPreProcessor → 首轮注入【运行时】【意图】【工具组】上下文
+              ├→ ③ MemoryPreProcessor → 注入【用户记忆参考】
+              ├→ ④ VehicleStatusPreProcessor → 车辆状态 JSON
+              ├→ ⑤ TimeContextPreProcessor → 当前时间
+              ├→ ⑥ LLM 调用 → gen_ai.chat 子 span
               │       ├─ LLM 返回 ToolCall → tool.execute 子 span → continue
               │       └─ LLM 返回文本 → PostProcessor → Terminator → ResultCollector
               └─ AgentResult
@@ -570,7 +687,8 @@ session.close() → scope.close() + rootSpan.end()
 | **TEXT Persona** | **100%** | **3 个内置人格（chat/friendly/concise），独立 system prompt + ChatMemory 隔离** |
 | **请求取消** | **100%** | **cancelAgentRequest AIDL + ActiveRequestRegistry CAS 终态抢占 + late result 抑制** |
 | **会话管理** | **100%** | **ConversationManager CRUD + SessionManager 多用户隔离 + 短期记忆隔离** |
-| **AgentRuntime** | **100%** | TEXT 主链路已接管，IntentRouter + ToolGroupSelector + ActiveRequestRegistry 串联；VOICE 仍保留旧链路 |
+| **AgentRuntime** | **100%** | TEXT 主链路已接管，IntentRouter + ToolGroupSelector + ActiveRequestRegistry + ContextOrchestrator 串联；VOICE 仍保留旧链路 |
+| **Context 模块** | **100%** | **ContextOrchestrator + 9 Provider + ContextFrame + Trace 记录 + RuntimeCancelChecker 三路取消保护；HYBRID_EXTRA_CONTEXT 一期模式** |
 | Agent 主循环（Orchestrator） | 95% | 组件化管道完整，角色前缀问题需上游兼容 |
 | 工具调度（ToolRegistry） | 100% | 反射调度 + 安全审查，SceneServer 已删除 |
 | **IntentRouter** | **100%** | KeywordIntentRouter，11 种 IntentTag，关键词+正则匹配 |
@@ -588,4 +706,4 @@ session.close() → scope.close() + rootSpan.end()
 | UI | 0% | 已移除（纯后台服务） |
 | 构建 | 100% | 单模块，Version Catalog，JVM 单测覆盖持续补充 |
 
-**一句话：** LLM 推理链路、工具调度、Prompt/记忆/Trace 等基础设施已基本成型。AIDL 接口已扩展为完整协议（`processAgentRequest` + 6 个会话管理/取消接口）。TEXT 主链路集成 Runtime 协调层，串联 IntentRouter + ToolGroupSelector + ActiveRequestRegistry 实现请求可观测性与取消能力。会话管理（ConversationManager）支持多用户隔离、短期记忆真实隔离、3 种内置 TEXT 人格。硬件通信层（SoaService）为空，虚拟车辆状态机已接管车控 Demo。JVM 单测已覆盖所有关键模块，流程性验收需在真实设备上执行手动验收清单。
+**一句话：** LLM 推理链路、工具调度、Prompt/记忆/Trace/Context 等基础设施已基本成型。AIDL 接口已扩展为完整协议（`processAgentRequest` + 6 个会话管理/取消接口）。TEXT 主链路集成 Runtime 协调层，串联 IntentRouter + ToolGroupSelector + ActiveRequestRegistry + ContextOrchestrator 实现请求可观测性、上下文管理与取消能力。Context 模块在 AgentLoop 前统一采集 9 类上下文，按需注入 LLM 输入并记入 Trace。会话管理（ConversationManager）支持多用户隔离、短期记忆真实隔离、3 种内置 TEXT 人格。硬件通信层（SoaService）为空，虚拟车辆状态机已接管车控 Demo。JVM 单测已覆盖所有关键模块（44+ 测试），流程性验收需在真实设备上执行手动验收清单。
