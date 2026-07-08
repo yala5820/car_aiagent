@@ -113,6 +113,11 @@ public class AgentLoopOrchestrator {
 
         AgentLoopContext ctx = new AgentLoopContext(userInput, config.personaId(), extraContext);
         Log.d(TAG, "execute: persona=" + config.personaId() + " maxIter=" + config.maxIterations());
+        Log.d(TAG, "execute: personaId from context=[" + personaId + "] template="
+                + com.hirain.aiagent.prompt.PromptConstants.textPersonaTemplateName(personaId));
+        Log.d(TAG, "execute: chatMemory hasSystemMessage="
+                + (!chatMemory.messages().isEmpty() && chatMemory.messages().get(0) instanceof dev.langchain4j.data.message.SystemMessage)
+                + " messageCount=" + chatMemory.messages().size());
 
         // 提取 TraceSession（用于创建 LLM 和工具子 span）
         TraceSession traceSession = extractTraceSession(extraContext);
