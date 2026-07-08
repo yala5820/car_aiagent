@@ -139,7 +139,7 @@ public class AgentConfigFactory {
                                                  VehicleSpeedManager speedManager,
                                                  String personaId) {
         String template = switchPersonaTemplate(personaId);
-        String memoryId = "ChatMemory_" + normalizeTextPersona(personaId);
+        String memoryId = "ChatMemory";
         return AgentConfig.builder(normalizeTextPersona(personaId))
                 .modelName("qwen-turbo")
                 .systemPromptTemplateName(template)

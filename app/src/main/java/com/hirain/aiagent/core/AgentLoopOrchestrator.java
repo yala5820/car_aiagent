@@ -106,6 +106,11 @@ public class AgentLoopOrchestrator {
                 ? (String) extraContext.getOrDefault("user_id", "default_user")
                 : "default_user";
 
+        // 获取 persona ID（对话性格，影响 system prompt 模板选择）
+        String personaId = extraContext != null
+                ? (String) extraContext.getOrDefault("persona_id", "chat")
+                : "chat";
+
         AgentLoopContext ctx = new AgentLoopContext(userInput, config.personaId(), extraContext);
         Log.d(TAG, "execute: persona=" + config.personaId() + " maxIter=" + config.maxIterations());
 
@@ -117,7 +122,7 @@ public class AgentLoopOrchestrator {
 
         try {
             // 注入 SystemPrompt（刷新长期记忆）
-            injectSystemPrompt(userId);
+            injectSystemPrompt(userId, personaId);
 
             // 写入用户消息到记忆
             if (userInput != null && !userInput.isEmpty()) {
@@ -306,15 +311,17 @@ public class AgentLoopOrchestrator {
 
     // ── 内部方法 ──
 
-    /** 确保 ChatMemory 中的 SystemMessage 是最新的（含长期记忆） */
-    private void injectSystemPrompt(String userId) {
+    /** 确保 ChatMemory 中的 SystemMessage 是最新的（含长期记忆、按 persona 选择模板） */
+    private void injectSystemPrompt(String userId, String personaId) {
         List<ChatMessage> existing = chatMemory.messages();
         boolean hasSystemMessage = !existing.isEmpty()
                 && existing.get(0) instanceof SystemMessage;
 
+        // 根据 persona 选择系统提示词模板
+        String templateName = com.hirain.aiagent.prompt.PromptConstants.textPersonaTemplateName(personaId);
         if (!hasSystemMessage) {
             // 无 SystemMessage → 直接写入
-            String basePrompt = promptManager.render(config.systemPromptTemplateName());
+            String basePrompt = promptManager.render(templateName);
             String sysPrompt = memoryOrchestrator != null
                     ? memoryOrchestrator.prepareSystemPrompt(userId, basePrompt)
                     : basePrompt;
@@ -323,7 +330,7 @@ public class AgentLoopOrchestrator {
         }
 
         // 已有 SystemMessage → 替换为含最新长期记忆的版本
-        String basePrompt = promptManager.render(config.systemPromptTemplateName());
+        String basePrompt = promptManager.render(templateName);
         String sysPrompt = memoryOrchestrator != null
                 ? memoryOrchestrator.prepareSystemPrompt(userId, basePrompt)
                 : basePrompt;

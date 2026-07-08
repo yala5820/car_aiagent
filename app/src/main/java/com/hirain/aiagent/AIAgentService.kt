@@ -102,8 +102,7 @@ class AIAgentService : Service() {
     private var mNagativeTTSplaying = false;
     private lateinit var sceneMatcher: SceneMatch
 
-    private val supportedTextPersonas = setOf("chat", "friendly", "concise")
-    private lateinit var textOrchestrators: Map<String, AgentLoopOrchestrator>
+    private lateinit var textOrchestrator: AgentLoopOrchestrator
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var mChating = false
@@ -375,17 +374,15 @@ class AIAgentService : Service() {
                 statusProvider, speedManager),
             this, promptManager!!, memoryOrchestrator, toolRegistry.toolSpecifications)
 
-        // ── TEXT Persona Orchestrators ──
-        textOrchestrators = supportedTextPersonas.associateWith { persona ->
-            val config = AgentConfigFactory.createTextPersona(
+        // ── TEXT Persona Orchestrator（单一实例，Persona 通过 context 动态变更） ──
+        textOrchestrator = AgentLoopOrchestrator(
+            AgentConfigFactory.createTextPersona(
                 this, promptManager!!, memoryOrchestrator,
-                toolRegistry, statusProvider, speedManager, persona
-            )
-            AgentLoopOrchestrator(
-                config, this, promptManager!!,
-                memoryOrchestrator, toolRegistry.toolSpecifications
-            )
-        }
+                toolRegistry, statusProvider, speedManager, "chat"
+            ),
+            this, promptManager!!,
+            memoryOrchestrator, toolRegistry.toolSpecifications
+        )
 
         // ── ContextOrchestrator 初始化 ──
         contextOrchestrator = ContextOrchestrator.defaultForText(
@@ -402,15 +399,7 @@ class AIAgentService : Service() {
         // ── AgentRuntime 初始化 ──
         agentRuntime = AgentRuntime(
             AgentExecutor { userInput, context ->
-                val requestedPersona = context["persona_id"] as? String ?: "chat"
-                val persona = normalizeTextPersona(requestedPersona)
-                if (persona != requestedPersona) {
-                    Log.w("TAG", "Unsupported TEXT persona=$requestedPersona, fallback to chat")
-                }
-                val personaContext = HashMap(context)
-                personaContext["persona_id"] = persona
-                textOrchestrators[persona]?.execute(userInput, personaContext)
-                    ?: chatOrchestrator.execute(userInput, personaContext)
+                textOrchestrator.execute(userInput, context)
             },
             contextOrchestrator,
             RuntimeCancelChecker { runtimeSession ->
@@ -481,7 +470,8 @@ class AIAgentService : Service() {
 
     private fun normalizeTextPersona(requested: String?): String {
         val requestedPersona = requested?.takeIf { it.isNotBlank() } ?: "chat"
-        return if (supportedTextPersonas.contains(requestedPersona)) requestedPersona else "chat"
+        return if (requestedPersona == "chat" || requestedPersona == "friendly" || requestedPersona == "concise")
+            requestedPersona else "chat"
     }
 
     inner class AIAgentBinder :  IAIAgentAidlInterface.Stub() {
