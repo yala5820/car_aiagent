@@ -40,6 +40,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 | **Phase 15** | **用户与 Persona**：RequestSessionFactory userId/sessionId 分离；TEXT 三种内置人格（chat/friendly/concise）；AgentConfigFactory.createTextPersona() 统一入口；Trace 记录有效 persona |
 | **Phase 16** | **请求取消**：ActiveRequestRegistry + CAS 终态抢占（RUNNING/COMPLETED/CANCELLED/TIMEOUT/FAILED）；cancelAgentRequest AIDL 全链路；RuntimeResult/Response 元信息补齐 |
 | **Phase 17** | **Context 上下文模块**：ContextOrchestrator + 9 个 Provider 构建统一 ContextFrame；ContextExtraPreProcessor 将上下文注入 LLM 首轮输入；ContextTraceRecorder 写 Trace；RuntimeCancelChecker 三处取消拦截 |
+| **Phase 18** | **Context 最小恢复 + TEXT 唯一输入权**：11 个 Provider 改为 Contribution 输出，删除 type()/ContextSection 依赖；TextAgentLoopOrchestrator 拆分；多工具取消闭合；FALLBACK 状态修复；JvmToolRegistry 支持 JVM 集成测试；270+ tests |
 
 ---
 
@@ -343,11 +344,25 @@ AIAgent/
 - **Listener 回调推送**：`onAIResponse(AgentResponse)` 统一回调
 - **15 秒超时保护**（经 ActiveRequestRegistry 终态抢占）
 
-### 4.2 AgentLoopOrchestrator（统一 Agent 循环引擎）
+### 4.2 TextAgentLoopOrchestrator（TEXT 专用循环引擎）
 
-**文件：** `core/AgentLoopOrchestrator.java`
+**文件：** `core/TextAgentLoopOrchestrator.java`
 
-唯一的 Agent 执行入口。通过 `AgentConfig` 配置驱动不同"人格"（chat / scene / vision_qa）：
+TEXT 请求的唯一 Agent 执行入口。构造器只接收 `AgentConfig`、`ContextMemoryGateway` 和 `ContextAssemblyGateway`，不持有 PromptManager 或固定工具规格。消息和工具全部来自 `ContextAssemblyResult`：
+
+```
+execute(session, prepareResult)
+  → UserMessage 提交推迟到预算和取消检查通过后
+  → for i in 0..maxIterations:
+      ① ContextOrchestrator.assemble()
+           → 动态 Provider + ContextMessageAssembler
+           → ContextAssemblyResult(messages, toolSpecifications, budgetReport)
+      ② 预算 & 取消检查
+      ③ ChatRequest(messages, toolSpecifications) → ModelCaller
+      ④ LLM 返回 ToolCall → SafetyGuard → ToolExecutor → continue
+      ⑤ LLM 返回文本 → PostProcessor → Terminator → ResultCollector → return
+  → max iterations → AgentResult.error()
+```
 
 ```
 execute(userInput, extraContext)
@@ -521,26 +536,22 @@ handleTextRequest() → traceManager.startAgentRequest() → agentRuntime.startS
 
 **文件：** `context/`
 
-在 AgentRuntime.execute() 中、AgentLoop 启动前，由 ContextOrchestrator 按序驱动 9 个 Provider 采集上下文，组装成不可变的 ContextFrame。这个 Frame 既承担"让 LLM 看到更多信息"的职责（部分 section 渲染后混入 ChatRequest），也承担"让开发者看到每次请求的上下文全貌"的职责（全部 section 写入 Trace）。
+在 AgentRuntime.execute() 中、TextAgentLoop 启动前，由 ContextOrchestrator 按序驱动 11 个 Provider 采集更新，生成 `ContextPrepareResult`。TextAgentLoopOrchestrator 每轮调用 `ContextOrchestrator.assemble()`，经 `ContextMessageAssembler` 装配为最终 `ChatRequest.messages()` 和 `toolSpecifications()`。
 
-#### 两种模式区分渲染边界
+#### Contribution 输出与 Provider 链
 
-一期采用 HYBRID_EXTRA_CONTEXT 模式，9 个 Provider 的采集结果分为两类：
+Provider 分为 REQUEST_STATIC（8 个，prepare 执行）和 ITERATION_DYNAMIC（3 个，assemble 执行）：
 
-**渲染给 LLM 的部分（renderable=true）：**
-- 【运行时上下文】— requestId、userId、sessionId、personaId、inputType
-- 【人格上下文】— 当前请求的人格（chat/friendly/concise）
-- 【意图上下文】— IntentRouter 的识别结果（intentTag、confidence、关键词）
-- 【工具组上下文】— 选中的工具组列表、工具名列表、组描述
+- **REQUEST_STATIC**：Runtime、Persona、Prompt、UserInput、Intent、ToolGroup、LongTermMemory、CallerExtra
+- **ITERATION_DYNAMIC**：SessionMemory、VehicleState、Time
 
-**仅用于观测的部分（renderable=false）：**
-- 【用户输入】— 原始和规范化后的用户文本（避免重复给 LLM）
-- 【长期记忆】— 仅标记 memory owner，不读真实摘要
-- 【车辆状态】— VehicleStatusProvider 的快照字符串（已有 VehicleStatusPreProcessor 处理）
-- 【当前时间】— 格式化时间字符串（已有 TimeContextPreProcessor 处理）
-- 【Prompt】— 记录当前使用的 persona→system prompt 模板映射
+每个 Provider 输出 `List<ContextContribution>`，包含可见性、信任级别、优先级和来源标记。Provider 不再直接操作 `ContextSection`。
 
-这么做的目的是：memory/vehicle/time/prompt 这四个维度的上下文已经由 AgentLoopOrchestrator 的 PreProcessor 链（MemoryPreProcessor / VehicleStatusPreProcessor / TimeContextPreProcessor / injectSystemPrompt）各自独立注入到 LLM 输入中。Context 模块不再重复注入，只在调度面做观测记录，避免 LLM 收到重复信息。
+#### 消息装配
+
+`ContextMessageAssembler` 根据 iteration 参数决定是否包含 CURRENT_USER：
+- **iteration 0**：SystemMessage → Context Data（ContextDataFormatter envelope） → SessionMemory → CurrentUser
+- **iteration 1+**：SystemMessage → Context Data → SessionMemory（不含 CURRENT_USER）
 
 #### 三个层次的取消保护
 
@@ -566,19 +577,21 @@ Context 模块在"Context 构建后、AgentLoop 启动前"这个关键窗口插�
 | `RuntimeCancelChecker` | Context 构建后、AgentLoop 前的只读取消接口 |
 | `ContextExtraPreProcessor` | AgentLoop 首轮 PreProcessor，将 renderedExtraContext 转为 UserMessage |
 
-#### 9 个 Provider
+#### 11 个 Provider
 
-| Provider | name() | 采集内容 | renderable |
-|----------|--------|---------|-----------|
-| RuntimeContextProvider | requestId/userId/sessionId/personaId/inputType | true |
-| PersonaContextProvider | 请求人格标识 | true |
-| UserInputContextProvider | 原始和规范化后用户文本（仅 metadata） | false |
-| IntentContextProvider | IntentRouter 输出（intentTag/confidence/keywords） | true |
-| ToolGroupContextProvider | 选中组 ID/工具名/组描述 | true |
-| MemoryContextProvider | 标记 memory owner，不读真实长记 | false |
-| VehicleStateContextProvider | 通过 VehicleStatusProvider 采集快照 | false |
-| TimeContextProvider | 格式化当前时间 | false |
-| PromptContextProvider | 记录 persona→prompt 模板映射 | false |
+| Provider | 生命周期 | required | 输出目标 |
+|----------|---------|----------|---------|
+| RuntimeContextProvider | REQUEST_STATIC | TEXT 始终 required | POLICY_ONLY 诊断 |
+| PersonaContextProvider | REQUEST_STATIC | optional | POLICY_ONLY |
+| PromptContextProvider | REQUEST_STATIC | 始终 required | SYSTEM Message |
+| UserInputContextProvider | REQUEST_STATIC | 始终 required | CURRENT_USER Message |
+| IntentContextProvider | REQUEST_STATIC | optional | POLICY_ONLY |
+| ToolGroupContextProvider | REQUEST_STATIC | 非 CHAT_ONLY | ToolContextContribution |
+| LongTermMemoryContextProvider | REQUEST_STATIC | optional | CONTEXT_DATA |
+| CallerExtraContextProvider | REQUEST_STATIC | optional | CONTEXT_DATA |
+| SessionMemoryContextProvider | ITERATION_DYNAMIC | TEXT 始终 required | SESSION_MEMORY Message |
+| VehicleStateContextProvider | ITERATION_DYNAMIC | 需 vehicle_status | CONTEXT_DATA |
+| TimeContextProvider | ITERATION_DYNAMIC | optional | CONTEXT_DATA |
 
 #### 异常处理策略
 
@@ -621,7 +634,7 @@ AIAgentService.onCreate()
     ├─ traceManager = TraceManager(...)    ← Trace 系统初始化
     ├─ chatOrchestrator = AgentLoopOrchestrator(...) ← 旧版对话引擎（VOICE 链路使用）
     ├─ conversationManager = ConversationManager(...)  ← 会话管理门面
-    ├─ textOrchestrators = {chat, friendly, concise} × AgentLoopOrchestrator ← TEXT 人格多实例
+    ├─ textOrchestrator = TextAgentLoopOrchestrator(config, memoryOrch, contextOrch) ← TEXT 专用循环
     ├─ contextOrchestrator = ContextOrchestrator.defaultForText(...) ← Context 模块
     ├─ agentRuntime = AgentRuntime(
     │      AgentExecutor { textOrchestrators[persona].execute() },

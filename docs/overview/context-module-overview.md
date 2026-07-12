@@ -1,8 +1,8 @@
 # Context 模块现状与初始计划完成度总结
 
 **更新日期：** 2026-07-12  
-**对照基线：** `docs/plan_overall/2026-07-11-context-full-control-implementation-plan.md`  
-**当前结论：** TEXT 模型输入统一控制的核心目标已经完成；初始六阶段计划未原样全部实现，预算裁剪、生产自动压缩和迁移债务彻底清理仍未完成。
+**对照基线：** `docs/plan_overall/2026-07-12-context-text-minimal-recovery-plan.md`  
+**当前结论：** TEXT 模型输入统一控制的核心目标已经完成；预算裁剪、生产自动压缩和迁移债务彻底清理仍未完成。
 
 ---
 
@@ -46,6 +46,8 @@ AIAgentService
 
 生产 TEXT 路径中，`ChatRequest.messages()` 和 `toolSpecifications()` 均直接来自 `ContextAssemblyResult`。`TextAgentLoopOrchestrator` 不再自行渲染 System Prompt、拼接消息或维护固定模型可见工具集合。
 
+iteration 0 包含当前用户 `CURRENT_USER` 消息，位于 SessionMemory 之后、消息序列末尾。iteration 1+ 不重复追加当前用户，SessionMemory 已包含上一轮提交的用户消息。
+
 ---
 
 ## 三、当前模块结构
@@ -58,6 +60,7 @@ AIAgentService
 | `TextContextContribution` | System Prompt、长期记忆、车辆、时间、caller extra 等文本上下文 |
 | `MessageContextContribution` | 当前用户消息和 Session ChatMemory 消息序列 |
 | `ToolContextContribution` | 真实 LangChain4j `ToolSpecification` 集合 |
+| `ContextDataFormatter` | 将 Context Data 格式化为带 `[source=xxx trust=YYY]` 标签的 `[CONTEXT_DATA_BEGIN]` 包围的 envelope |
 | `ContextPrepareResult` | 请求级 Provider 的准备结果、当前用户消息、取消检查器和静态 Frame |
 | `ContextAssemblyRequest` | 每轮装配输入，包含 Frame、迭代号、预算、取消状态和 RequestSession |
 | `ContextAssemblyResult` | 最终消息、工具规格、预算报告、Provider outcome 和稳定错误信息 |
@@ -75,6 +78,8 @@ AIAgentService
 7. `LongTermMemoryContextProvider`
 8. `CallerExtraContextProvider`
 
+`MemoryContextProvider` 已在最小恢复中删除，职责由 `LongTermMemoryContextProvider` 和 `SessionMemoryContextProvider` 分别承担。
+
 **ITERATION_DYNAMIC，每轮模型调用前重新读取：**
 
 1. `SessionMemoryContextProvider`
@@ -85,13 +90,21 @@ required Provider 只有返回 `SUCCESS` 才能继续；`FALLBACK` 和 `FAILED` 
 
 ### 3.3 最终消息顺序
 
-`ContextMessageAssembler` 固定输出：
+`ContextMessageAssembler` 根据 `iteration` 参数输出：
 
+**iteration = 0（首轮）：**
 1. 唯一 `SystemMessage`，只接受受信 System Contribution。
-2. 可选 Context Data `UserMessage`，承载长期记忆、车辆状态、时间和 caller extra。
-3. Session ChatMemory 消息序列与当前 UserMessage。
+2. 可选 Context Data `UserMessage`（使用 `ContextDataFormatter` 的 `[CONTEXT_DATA_BEGIN]`/`[CONTEXT_DATA_END]` envelope 格式化）。
+3. Session ChatMemory 消息序列。
+4. **Current UserMessage**（来自 `SOURCE_CURRENT_USER`），必须是消息末尾且恰好出现一次。
 
-Assembler 同时校验消息序列和 ToolExchange，拒绝重复 System、孤立 Tool Result、缺失当前用户和工具 schema 冲突。
+**iteration > 0（工具迭代）：**
+1. 唯一 `SystemMessage`。
+2. 可选 Context Data `UserMessage`。
+3. Session ChatMemory 消息序列（已包含上一轮提交的当前用户和完整 ToolExchange）。
+4. 不追加 `CURRENT_USER`。
+
+Assembler 同时校验消息序列和 ToolExchange，拒绝重复 System、孤立 Tool Result、缺少当前用户、重复当前用户和工具 schema 冲突。
 
 ---
 
@@ -170,16 +183,19 @@ Assembler 同时校验消息序列和 ToolExchange，拒绝重复 System、孤�
 
 - TEXT 使用独立 `TextAgentLoopOrchestrator`，构造器强制依赖 `ContextAssemblyGateway`。
 - TEXT 的消息和工具只取自 `ContextAssemblyResult`。
-- TEXT Persona 配置不注册消息型 PreProcessor，旧 PreProcessor 不再参与 TEXT 模型输入。
+- TEXT 无 PreProcessor 链，消息输入唯一来源是 `ContextMessageAssembler`。
 - Service 装配真实 PromptManager、Memory Gateway、ToolRegistry、车辆状态和 ContextOrchestrator。
 - 空 TEXT 在 Runtime 返回 `INVALID_INPUT`，不会进入 Context、模型或 Memory。
+- 当前 UserMessage 只出现在 iteration 0 末尾，iteration 1+ 不重复追加。
+- Context Data 使用 `ContextDataFormatter` 的 `[CONTEXT_DATA_BEGIN]`/`[CONTEXT_DATA_END]` envelope 格式化，含 source 和 trust 标签。
+- CHAT_ONLY 场景车辆状态不注入模型（`POLICY_ONLY` 可见性）。
 - Session 切换隔离短期历史；同 Session 切换用户保留短期历史并切换长期记忆；Persona 切换更新 System Prompt。
 - CHAT_ONLY、明确工具、allToolsFallback、required 失败、预算、取消和多工具闭合已有真实链路测试。
 - 当前 UserMessage 只在预算和取消检查通过后写入一次。
 
 **没有按初始计划实现：**
 
-- Phase 5 原计划要求生产启用“一次压缩 -> 重读 ChatMemory -> 二次 assemble”，最终为了避免错误删除和扩大改动，该能力被明确停用。
+- Phase 5 原计划要求生产启用”一次压缩 -> 重读 ChatMemory -> 二次 assemble”，最终为了避免错误删除和扩大改动，该能力被明确停用。
 
 **判断：TEXT 唯一输入权已完成；生产自动压缩未完成。**
 
@@ -222,11 +238,11 @@ Assembler 同时校验消息序列和 ToolExchange，拒绝重复 System、孤�
 | 预算估算与硬失败 | 已完成 | 超限零模型、零工具、零 compaction、零 Memory 写入 |
 | 优先级裁剪 | 未实现 | 当前不裁剪，直接超限失败 |
 | 生产自动压缩与二次装配 | 未实现 | Memory 能力接口存在，生产 Context 不调用 |
-| Context Trace | 基本完成 | prepare/assemble span 和父子关系已完成；旧 prompt.assembly 未清理 |
-| 迁移债务清零 | 部分完成 | 核心旁路已删除，兼容类型与非 TEXT legacy 仍保留 |
+| Context Trace | 基本完成 | prepare/assemble span 含 Provider event、assembled messages、逐消息 event、gen_ai.chat 记录完整请求消息 |
+| 迁移债务清零 | 部分完成 | 核心旁路已删除，ContextSection/旧 Budget API/旧 AgentLoop 仍保留 |
 | 非 TEXT 输入统一接管 | 未实现 | IMAGE/VOICE/CONTROL/SCENE/VL 不属于本轮范围 |
 
-综合判断：**TEXT Context 核心架构约 85% 完成；以“统一生成 TEXT 模型输入”为标准已经完成，以初始六阶段全部任务和清理项为标准尚未 100% 完成。**
+综合判断：**TEXT Context 核心架构约 90% 完成；以”统一生成 TEXT 模型输入”为标准已经完成，以初始六阶段全部任务和清理项为标准尚未 100% 完成。**
 
 ---
 
@@ -245,10 +261,23 @@ agent.request
   -> response.dispatch
 ```
 
-`context.prepare` 记录 Provider 总数、成功/降级/失败数量和静态 Contribution 数量。  
-`context.assemble` 记录 iteration、消息数、工具数、Provider outcome、估算 token、最大 token、预算结果和错误码。
+**context.prepare span：**
+- 汇总属性：phase、result、provider_count、success/fallback/failed 计数、contribution_count、current_user.contribution_count、duration_ms、error_code、error_detail
+- 每个 request-static Provider 一条 `context.provider.output` event：provider.name、lifecycle、required、status、contribution_count、error_code、error_reason
 
-Provider 继续使用 outcome/属性表达，不为每个轻量 Provider 创建独立 span。Prompt、Memory、LLM、Tool 的业务 span 保留各自模块所有权。
+**context.assemble span：**
+- 汇总属性：phase、iteration、result、message_count、tool_count、current_user.included/count/is_last、estimated_tokens、max_input_tokens、within_budget、sequence_valid、error_code
+- 每条最终消息一个 `context.message` event：message.index、role、content
+- `context.assembled_messages`：完整消息列表（含角色和内容）
+- `context.assembled_tool_specs`：完整工具规格（name、description、parameters）
+- 每个 iteration-dynamic Provider 一条 `context.provider.output` event
+
+**gen_ai.chat span（LLM 请求）：**
+- `gen_ai.request.messages`：完整请求消息
+- `gen_ai.request.tool_specs`：完整请求工具规格
+- 模型响应使用 `enrichLlmResponse()` 记录
+
+所有内容完整记录（不超过 OpenTelemetry 属性长度限制），不建设脱敏/截断策略。
 
 ---
 
@@ -256,9 +285,9 @@ Provider 继续使用 outcome/属性表达，不为每个轻量 Provider 创建�
 
 截至 2026-07-12：
 
-- `testDebugUnitTest --rerun-tasks`：259 tests，0 failures，0 errors。
+- `testDebugUnitTest --rerun-tasks`：270 tests，0 failures，0 errors。
 - `assembleDebug --rerun-tasks`：成功。
-- 已覆盖真实 Context + Text Loop 的普通聊天、会话切换、用户切换、Persona、工具选择、全量 fallback、required 失败、预算和取消行为。
+- 已覆盖真实 Context + Text Loop 的普通聊天、会话切换、用户切换、Persona、工具选择、全量 fallback、required 失败、预算、取消、Context Data envelope、Provider Trace event 和 LLM Trace 请求内容。
 - 尚未完成 Android/车机设备验证，因此不能宣称真实 SQLite、真实车控 ToolRegistry、网络超时和 Phoenix 导出已经完成生产验收。
 
 ---
