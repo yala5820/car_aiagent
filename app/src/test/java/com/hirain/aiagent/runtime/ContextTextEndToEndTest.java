@@ -97,9 +97,12 @@ public class ContextTextEndToEndTest {
         }
         @Override public LongTermMemorySnapshot longTermMemorySnapshot(String userId) {
             List<MemoryEntry> entries = new ArrayList<>();
-            if (userId != null && userId.equals("user-b")) {
+            if ("user-a".equals(userId)) {
                 entries.add(new MemoryEntry(MemoryEntry.Category.FACT,
-                        "userId", userId, 1.0f, 0L, 1));
+                        "owner_memory", "A_ONLY_MEMORY", 1.0f, 0L, 1));
+            } else if ("user-b".equals(userId)) {
+                entries.add(new MemoryEntry(MemoryEntry.Category.FACT,
+                        "owner_memory", "B_ONLY_MEMORY", 1.0f, 0L, 1));
             }
             return new LongTermMemorySnapshot(userId, entries, 0L);
         }
@@ -280,6 +283,13 @@ public class ContextTextEndToEndTest {
                 .anyMatch(m -> m instanceof dev.langchain4j.data.message.UserMessage
                         && ((dev.langchain4j.data.message.UserMessage) m).singleText().contains("用户A的消息"));
         assertTrue("User B's session should retain User A's history", hasUserAHistory);
+        String secondRequestText = secondSessionMsgs.stream()
+                .filter(m -> m instanceof dev.langchain4j.data.message.UserMessage)
+                .map(m -> ((dev.langchain4j.data.message.UserMessage) m).singleText())
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertTrue("User B's long-term memory should be injected", secondRequestText.contains("B_ONLY_MEMORY"));
+        assertFalse("User A's long-term memory must not leak after user switch",
+                secondRequestText.contains("A_ONLY_MEMORY"));
     }
 
     @Test
@@ -363,6 +373,37 @@ public class ContextTextEndToEndTest {
     }
 
     @Test
+    public void allToolsFallback_completeEnabledToolsReachChatRequest() {
+        ToolGroupRegistry groupRegistry = ToolGroupRegistry.defaultRegistry();
+        JvmToolRegistry toolRegistry = defaultToolRegistry();
+        FakeMemoryGateway mg = new FakeMemoryGateway();
+        CapturingModelCaller caller = new CapturingModelCaller();
+        ContextOrchestrator orch = createOrchestrator(testPrompt(), toolRegistry, mg);
+        TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
+                configWith(caller, req -> "{}"), mg, orch);
+        AgentRuntime runtime = new AgentRuntime(
+                (session, pr) -> loop.execute(session, pr),
+                orch,
+                null,
+                groupRegistry,
+                (text, sourceInputType) -> com.hirain.aiagent.intentrouter.IntentResult.unknown(
+                        text, sourceInputType, "test_unknown"),
+                (intent, text) -> ToolGroupSelectionResult.allToolsFallback(
+                        groupRegistry, "test_all_tools_fallback"),
+                () -> "req-all-tools",
+                () -> 1000L,
+                runtimeSession -> false);
+
+        RuntimeResult result = runtime.execute(runtime.startSession(request("模糊指令"), null));
+
+        assertTrue("All-tools fallback request should succeed", result.success());
+        List<String> actualNames = caller.capturedRequests().get(0).toolSpecifications().stream()
+                .map(ToolSpecification::name).toList();
+        assertEquals("Complete enabled tool set must reach ChatRequest",
+                groupRegistry.allToolNames(), actualNames);
+    }
+
+    @Test
     public void promptOrMemoryFailure_modelNotCalled() {
         // PromptManager=null → PromptContextProvider 返回 FAILED, prepare 失败
         ContextOrchestrator orch = ContextOrchestrator.defaultForText(
@@ -386,30 +427,38 @@ public class ContextTextEndToEndTest {
     }
 
     @Test
-    public void budgetExceeded_assemblerGeneratesCorrectReport() {
-        // 通过 ContextMessageAssembler 验证超长输入产生超限报告
-        // TextAgentLoopOrchestrator 的预算门禁（line 142-149）是简单 if 检查，
-        // 由 ContextMinimalBudgetGuardTest 覆盖
+    public void budgetExceeded_modelToolMemoryAndCompactionRemainUntouched() {
         ToolSpecification longSpec = ToolSpecification.builder()
                 .name("very_long_tool")
                 .description("x".repeat(10000))
                 .build();
         FakeMemoryGateway mg = new FakeMemoryGateway();
         ContextOrchestrator orch = createOrchestrator(testPrompt(), new JvmToolRegistry(longSpec), mg);
-
+        CapturingModelCaller caller = new CapturingModelCaller();
+        java.util.concurrent.atomic.AtomicInteger toolCalls = new java.util.concurrent.atomic.AtomicInteger();
         RequestSession session = com.hirain.aiagent.context.TestRequestSessions.chatOnlySession(
                 "req-1", "conv-1", "user-a", "chat", "cl-1", "hi");
         ContextPrepareResult pr = orch.prepare(session, ContextCancelChecker.neverCancelled());
         com.hirain.aiagent.context.ContextBudgetPolicy tinyBudget =
                 new com.hirain.aiagent.context.ContextBudgetPolicy(200, 50, 50);
-        com.hirain.aiagent.context.ContextAssemblyRequest req =
+        com.hirain.aiagent.context.ContextAssemblyGateway tinyBudgetGateway = request -> orch.assemble(
                 new com.hirain.aiagent.context.ContextAssemblyRequest(
-                        pr.frame(), 0, tinyBudget,
-                        ContextCancelChecker.neverCancelled(), false, session);
-        com.hirain.aiagent.context.ContextAssemblyResult result = orch.assemble(req);
+                        request.frame(), request.iteration(), tinyBudget,
+                        request.cancelChecker(), request.compressionAlreadyAttempted(), request.session()));
+        TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
+                configWith(caller, req -> {
+                    toolCalls.incrementAndGet();
+                    return "{}";
+                }), mg, tinyBudgetGateway);
 
-        assertFalse("Budget should be exceeded with tiny policy",
-                result.budgetReport().withinBudget());
+        AgentResult result = loop.execute(session, pr);
+
+        assertEquals(AgentResult.ErrorType.CONTEXT_BUDGET_EXCEEDED, result.errorType());
+        assertTrue("Model must not be called when budget is exceeded", caller.capturedRequests().isEmpty());
+        assertEquals("Tool executor must not run when budget is exceeded", 0, toolCalls.get());
+        ChatMemory sessionMemory = mg.perSessionChatMemory.get("conv-1");
+        assertTrue("SessionMemory must remain unchanged when budget is exceeded",
+                sessionMemory == null || sessionMemory.messages().isEmpty());
         assertEquals("Compaction plan should not be called", 0, mg.planCallCount);
         assertEquals("Compaction execute should not be called", 0, mg.executeCallCount);
     }

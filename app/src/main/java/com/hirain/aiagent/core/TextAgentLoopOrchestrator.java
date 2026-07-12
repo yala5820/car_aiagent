@@ -99,12 +99,10 @@ public class TextAgentLoopOrchestrator {
                 session.userInput(), session.personaId(), session.orchestratorContext());
 
         try {
-            // iteration 0：将当前 UserMessage 写入 ChatMemory 一次（单向提交）
-            // 只从 ContextPrepareResult 的 currentUserMessage 获取（来自 UserInputContextProvider）
+            // 当前用户消息先参与 Context 装配，只有预算和取消检查通过后才持久化。
+            // 这样超预算或模型调用前取消的请求不会污染 SessionMemory。
             UserMessage currentMsg = prepareResult.currentUserMessage();
-            if (currentMsg != null) {
-                chatMemory.add(currentMsg);
-            }
+            boolean currentUserCommitted = false;
 
             for (int i = 0; i < config.maxIterations(); i++) {
                 loopCtx.setIteration(i);
@@ -150,6 +148,11 @@ public class TextAgentLoopOrchestrator {
                 if (cancelCheck.isCancelled()) {
                     state.markError();
                     return AgentResult.error(AgentResult.ErrorType.CANCELLED, "cancelled_before_model_call");
+                }
+
+                if (!currentUserCommitted && currentMsg != null) {
+                    chatMemory.add(currentMsg);
+                    currentUserCommitted = true;
                 }
 
                 // ModelCaller → LLM 调用
