@@ -28,7 +28,18 @@
       "Bash(./gradlew.bat testDebugUnitTest --tests \"com.hirain.aiagent.runtime.AgentRuntimeTest\" --tests \"com.hirain.aiagent.runtime.AgentRuntimeResolvedSessionTest\" --tests \"com.hirain.aiagent.runtime.AgentExecutorCompatibilityTest\" --rerun-tasks)",
       "Bash(./gradlew.bat testDebugUnitTest --rerun-tasks)",
       "Bash(./gradlew.bat testDebugUnitTest --tests \"com.hirain.aiagent.runtime.ContextTextEndToEndTest.explicitAcControl_selectedToolSpecs\" --rerun-tasks --info)",
-      "Bash(./gradlew.bat testDebugUnitTest --tests \"com.hirain.aiagent.runtime.ContextTextEndToEndTest.explicitAcControl_selectedToolSpecs\" --rerun-tasks)"
+      "Bash(./gradlew.bat testDebugUnitTest --tests \"com.hirain.aiagent.runtime.ContextTextEndToEndTest.explicitAcControl_selectedToolSpecs\" --rerun-tasks)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'docs: update context overview and README to reflect current architecture *)",
+      "Bash(git push *)",
+      "Bash(./gradlew :app:testDebugUnitTest --tests \"com.hirain.aiagent.trace.*\" --tests \"com.hirain.aiagent.context.*\")",
+      "Bash(./gradlew :app:compileDebugJavaWithJavac)",
+      "Bash(./gradlew :app:compileDebugKotlin)",
+      "Bash(git stash *)",
+      "Bash(./gradlew :app:testDebugUnitTest --tests \"com.hirain.aiagent.trace.ToolPhaseTraceTest\" --tests \"com.hirain.aiagent.trace.AIAgentServiceTraceWiringTest\" --tests \"com.hirain.aiagent.core.TextAgentLoopOrchestratorTest\" --tests \"com.hirain.aiagent.trace.ContextProductionTraceHierarchyTest\" --tests \"com.hirain.aiagent.trace.ContextProviderTraceTest\")",
+      "Bash(./gradlew :app:testDebugUnitTest --tests \"com.hirain.aiagent.trace.ToolPhaseTraceTest\")",
+      "Bash(./gradlew :app:testDebugUnitTest)",
+      "Bash(bc)"
     ]
   }
 }

@@ -130,4 +130,30 @@ public class ToolRegistry {
     public int size() {
         return allSpecs.size();
     }
+
+    /**
+     * 返回工具分发目标信息，供 trace 记录。
+     * @return "TargetClass.methodName" 或 null（工具未注册）
+     */
+    public String dispatchTargetInfo(String toolName) {
+        ToolDispatcher dispatcher = dispatchers.get(toolName);
+        return dispatcher != null ? dispatcher.dispatchTargetInfo(toolName) : null;
+    }
+
+    /** 返回工具目标类名（trace 用）。 */
+    public String targetClassName(String toolName) {
+        ToolDispatcher dispatcher = dispatchers.get(toolName);
+        return dispatcher != null ? dispatcher.targetClassName(toolName) : null;
+    }
+
+    /** 返回工具目标方法名（trace 用）。 */
+    public String targetMethodName(String toolName) {
+        ToolDispatcher dispatcher = dispatchers.get(toolName);
+        return dispatcher != null ? dispatcher.targetMethodName(toolName) : null;
+    }
+
+    /** 返回工具 dispatcher 实例（trace 用，用于传入 DispatchDiagnostics）。 */
+    public ToolDispatcher dispatcherFor(String toolName) {
+        return dispatchers.get(toolName);
+    }
 }

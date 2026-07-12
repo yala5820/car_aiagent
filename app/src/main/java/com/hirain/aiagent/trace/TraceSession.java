@@ -96,6 +96,17 @@ public class TraceSession implements AutoCloseable {
                 .startSpan();
     }
 
+    /**
+     * 创建 agent.loop span（以当前 TraceSession 的 root span 为父）。
+     * 用于 AgentRuntime.execute() 替代 GlobalOpenTelemetry 直接使用。
+     */
+    public Span startAgentLoopSpan() {
+        return tracer.spanBuilder(TraceSpanNames.AGENT_LOOP)
+                .setParent(rootContext)
+                .setSpanKind(io.opentelemetry.api.trace.SpanKind.INTERNAL)
+                .startSpan();
+    }
+
     // ── Session 生命周期 ──
 
     /** 标记 session 成功/失败 */

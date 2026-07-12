@@ -54,6 +54,14 @@ public class ToolDispatcher {
 
     /** 根据 ToolExecutionRequest 执行对应工具方法 */
     public String dispatch(ToolExecutionRequest request) {
+        return dispatch(request, null);
+    }
+
+    /**
+     * 根据 ToolExecutionRequest 执行对应工具方法，并记录阶段诊断信息。
+     * @param diag 可选的诊断收集器（null 表示不收集），调用方传入以获取参数解析/反射调用状态
+     */
+    public String dispatch(ToolExecutionRequest request, DispatchDiagnostics diag) {
         ToolBinding binding = bindings.get(request.name());
         if (binding == null) {
             return "无效的工具调用: " + request.name();
@@ -61,14 +69,22 @@ public class ToolDispatcher {
         try {
             JSONObject args = new JSONObject(request.arguments());
             Object[] params = resolveParameters(binding, args);
+            if (diag != null) diag.argumentParseSuccess = true;
 
             Object result = binding.method.invoke(target, params);
+            if (diag != null) diag.invokeSuccess = true;
             return result != null ? result.toString() : "Success";
         } catch (Exception e) {
             Log.e(TAG, "Failed to execute tool: " + request.name(), e);
             Throwable cause = e;
             if (e instanceof InvocationTargetException) {
                 cause = e.getCause();
+                // 反射调用本身失败，参数解析是成功的（已越过 parse）
+                if (diag != null && !diag.argumentParseSuccess) diag.argumentParseSuccess = true;
+            } else if (diag != null) {
+                // 参数解析阶段失败
+                diag.invokeSuccess = false;
+                diag.argumentParseSuccess = false;
             }
             return "工具执行失败: " + cause.getMessage();
         }
@@ -97,6 +113,38 @@ public class ToolDispatcher {
             }
         }
         return params;
+    }
+
+    /**
+     * 返回分发目标信息，供 trace 记录。
+     * @return "TargetClass.methodName" 或 null（工具未注册）
+     */
+    public String dispatchTargetInfo(String toolName) {
+        ToolBinding b = bindings.get(toolName);
+        if (b == null) return null;
+        return target.getClass().getSimpleName() + "." + b.method.getName();
+    }
+
+    /** 返回工具目标类名。 */
+    public String targetClassName(String toolName) {
+        ToolBinding b = bindings.get(toolName);
+        return b != null ? target.getClass().getSimpleName() : null;
+    }
+
+    /** 返回工具目标方法名。 */
+    public String targetMethodName(String toolName) {
+        ToolBinding b = bindings.get(toolName);
+        return b != null ? b.method.getName() : null;
+    }
+
+    // ── Dispatch 阶段诊断 ──
+
+    /** 记录 dispatch 各阶段成败的轻量数据容器，供 trace 使用。 */
+    public static final class DispatchDiagnostics {
+        /** 参数解析是否成功（JSON 解析 + resolveParameters） */
+        public boolean argumentParseSuccess;
+        /** 反射调用是否成功（method.invoke） */
+        public boolean invokeSuccess;
     }
 
     // ── 内部类型 ──

@@ -40,6 +40,16 @@ public final class TraceAttributeKeys {
     public static final String TOOL_SUCCESS = "tool.success";
     public static final String TOOL_SAFETY_VETO = "tool.safety_veto";
     public static final String TOOL_SAFETY_VETO_REASON = "tool.safety_veto_reason";
+    public static final String TOOL_SAFETY_GUARD_COUNT = "tool.safety_guard_count";
+    public static final String TOOL_DISPATCH_TARGET = "tool.dispatch_target";
+    public static final String TOOL_DISPATCH_SUCCESS = "tool.dispatch_success";
+    public static final String TOOL_DISPATCH_DURATION_MS = "tool.dispatch_duration_ms";
+    public static final String TOOL_DISPATCH_TARGET_CLASS = "tool.target_class";
+    public static final String TOOL_DISPATCH_TARGET_METHOD = "tool.target_method";
+    public static final String TOOL_ARGUMENT_PARSE_SUCCESS = "tool.argument_parse_success";
+    public static final String TOOL_INVOKE_SUCCESS = "tool.invoke_success";
+    public static final String TOOL_WRITEBACK_RESULT = "tool.writeback_result";
+    public static final String TOOL_WRITEBACK_TO_MEMORY = "tool.writeback_to_memory";
 
     public static final String MEMORY_OPERATION = "memory.operation";
     public static final String MEMORY_INPUT_CHARS = "memory.input_chars";
@@ -71,6 +81,20 @@ public final class TraceAttributeKeys {
     public static final String CONTEXT_FALLBACK_USED = "agent.context.fallback_used";
     public static final String CONTEXT_BUILD_MS = "agent.context.build_ms";
     public static final String CONTEXT_ERROR = "agent.context.error";
+
+    // ── Context Fragment / Message / Toolset ──
+
+    public static final String FRAGMENT_SOURCE_KEY = "fragment.source_key";
+    public static final String FRAGMENT_TARGET_AREA = "fragment.target_area";
+    public static final String FRAGMENT_PROVIDER = "fragment.provider";
+    public static final String FRAGMENT_INCLUDED_IN_MODEL = "fragment.included_in_model";
+    public static final String FRAGMENT_CONTENT = "fragment.content";
+    public static final String MESSAGE_SOURCE = "message.source";
+    public static final String MESSAGE_PROVIDER = "message.provider";
+    public static final String MESSAGE_COUNT = "message.count";
+    public static final String TOOLSET_PROVIDER = "toolset.provider";
+    public static final String TOOLSET_TOOL_COUNT = "toolset.tool_count";
+    public static final String TOOLSET_TOOL_NAMES = "toolset.tool_names";
 
     private TraceAttributeKeys() {
     }

@@ -12,6 +12,13 @@ public final class TraceSpanNames {
     public static final String RESPONSE_DISPATCH = "response.dispatch";
     public static final String CONTEXT_PREPARE = "context.prepare";
     public static final String CONTEXT_ASSEMBLE = "context.assemble";
+    public static final String AGENT_ITERATION = "agent.iteration";
+    public static final String CONTEXT_FRAGMENT = "context.fragment";
+    public static final String CONTEXT_MESSAGE = "context.message";
+    public static final String CONTEXT_TOOLSET = "context.toolset";
+    public static final String TOOL_SAFETY_CHECK = "tool.safety_check";
+    public static final String TOOL_DISPATCH = "tool.dispatch";
+    public static final String TOOL_RESULT_WRITEBACK = "tool.result_writeback";
 
     private TraceSpanNames() {
     }

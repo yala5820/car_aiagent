@@ -90,6 +90,7 @@ class AIAgentService : Service() {
     private lateinit var conversationManager: ConversationManager
     private val activeRequestRegistry = ActiveRequestRegistry()
     private val activeTimeouts = java.util.concurrent.ConcurrentHashMap<String, Runnable>()
+    private val requestDispatchers = java.util.concurrent.ConcurrentHashMap<String, TraceResponseDispatcher>()
     private lateinit var statusProvider: VehicleStatusPreProcessor.VehicleStatusProvider
     private var mWorkHandlerThread: HandlerThread? = null
     private var mWorkHandler: Handler? = null
@@ -535,7 +536,14 @@ class AIAgentService : Service() {
                             active.userId(), active.personaId(), active.clientMessageId(),
                             cancelReason, System.currentTimeMillis())
                         val cancelledResponse = runtimeResponseMapper.toAgentResponse(cancelledResult)
-                        notifyAIAgentListeners(cancelledResponse)
+                        // 使用 TraceResponseDispatcher 记录取消路径的 response.dispatch
+                        requestDispatchers.remove(id)?.let { dispatcher ->
+                            dispatcher.dispatchAndClose(cancelledResponse, cancelReason) {
+                                notifyAIAgentListeners(it)
+                            }
+                        } ?: run {
+                            notifyAIAgentListeners(cancelledResponse)
+                        }
                         activeRequestRegistry.finish(id)
                     }
                 }
@@ -603,6 +611,8 @@ class AIAgentService : Service() {
             message
         )
         val runtimeSession = agentRuntime.startSession(request, session.toTraceContext())
+        val responseDispatcher = TraceResponseDispatcher(session)
+        requestDispatchers[requestId] = responseDispatcher
         val activeRequest = activeRequestRegistry.register(runtimeSession)
 
         val timeoutRunnable = Runnable {
@@ -611,9 +621,10 @@ class AIAgentService : Service() {
             if (activeRequestRegistry.tryComplete(requestIdLocal, ActiveRequest.TerminalState.TIMEOUT)) {
                 val timeoutResponse = runtimeResponseMapper.toAgentResponse(
                     agentRuntime.timeoutResult(runtimeSession))
-                notifyAIAgentListeners(timeoutResponse)
+                responseDispatcher.dispatchAndClose(timeoutResponse, "timeout") { notifyAIAgentListeners(it) }
                 activeTimeouts.remove(requestIdLocal)
                 activeRequestRegistry.finish(requestIdLocal)
+                requestDispatchers.remove(requestIdLocal)
             }
         }
         activeTimeouts[runtimeSession.requestId()] = timeoutRunnable
@@ -648,8 +659,9 @@ class AIAgentService : Service() {
                         mainHandler.removeCallbacks(it)
                     }
                     val response = runtimeResponseMapper.toAgentResponse(runtimeResult)
-                    notifyAIAgentListeners(response)
+                    responseDispatcher.dispatch(response, null) { notifyAIAgentListeners(it) }
                     activeRequestRegistry.finish(runtimeSession.requestId())
+                    requestDispatchers.remove(runtimeSession.requestId())
                 }
             } catch (e: Exception) {
                 Log.e("TAG", "handleTextRequest service-level failure", e)
@@ -660,8 +672,9 @@ class AIAgentService : Service() {
                     }
                     val runtimeResult = agentRuntime.errorResult(runtimeSession, e)
                     val response = runtimeResponseMapper.toAgentResponse(runtimeResult)
-                    notifyAIAgentListeners(response)
+                    responseDispatcher.dispatch(response, e.message ?: "service_failure") { notifyAIAgentListeners(it) }
                     activeRequestRegistry.finish(runtimeSession.requestId())
+                    requestDispatchers.remove(runtimeSession.requestId())
                 }
             } finally {
                 traceScope.close()

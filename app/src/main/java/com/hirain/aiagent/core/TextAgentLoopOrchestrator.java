@@ -94,6 +94,10 @@ public class TextAgentLoopOrchestrator {
         TraceSession traceSession = extractTraceSession(session.orchestratorContext());
         AgentTraceRecorder trace = traceSession != null
                 ? new AgentTraceRecorder(traceSession) : null;
+        // 捕获 agent.loop 的 Context，确保 memory span 挂在 agent.loop 下而非 iteration 下
+        if (trace != null) {
+            trace.setMemoryParentContext(io.opentelemetry.context.Context.current());
+        }
         ContextBudgetPolicy budgetPolicy = ModelContextWindowProfiles.qwenTurboDemo();
         AgentLoopContext loopCtx = new AgentLoopContext(
                 session.userInput(), session.personaId(), session.orchestratorContext());
@@ -108,212 +112,267 @@ public class TextAgentLoopOrchestrator {
                 loopCtx.setIteration(i);
                 state.setIteration(i);
 
-                // 超时检查
-                if (System.currentTimeMillis() - loopCtx.startTimeMs() > config.timeout().toMillis()) {
-                    state.markTimeout();
-                    return AgentResult.error(AgentResult.ErrorType.TIMEOUT, "Agent loop timed out");
-                }
-
-                // Context Assembly
-                ContextCancelChecker cancelCheck = () ->
-                        prepareResult.cancelChecker() != null
-                                && prepareResult.cancelChecker().isCancelled();
-                ContextAssemblyRequest assemblyReq = new ContextAssemblyRequest(
-                        prepareResult.frame(), i, budgetPolicy,
-                        cancelCheck, false, session);
-                ContextAssemblyResult assemblyResult = contextAssemblyGateway.assemble(assemblyReq);
-
-                if (assemblyResult == null || !assemblyResult.success()) {
-                    state.markError();
-                    AgentResult.ErrorType mappedType = mapAssemblyError(assemblyResult);
-                    return AgentResult.error(mappedType,
-                            assemblyResult != null ? assemblyResult.errorDetail()
-                                    : "Context assembly result is null");
-                }
-
-                // 预算超限检查
-                if (assemblyResult.budgetReport() != null
-                        && !assemblyResult.budgetReport().withinBudget()) {
-                    state.markError();
-                    return AgentResult.error(AgentResult.ErrorType.CONTEXT_BUDGET_EXCEEDED,
-                            "Context budget exceeded: estimated="
-                                    + assemblyResult.budgetReport().estimatedInputTokens()
-                                    + " max=" + assemblyResult.budgetReport().maxInputTokens());
-                }
-
-                List<ChatMessage> requestMessages = assemblyResult.messages();
-                List<ToolSpecification> requestTools = assemblyResult.toolSpecifications();
-
-                // 模型调用前检查取消
-                if (cancelCheck.isCancelled()) {
-                    state.markError();
-                    return AgentResult.error(AgentResult.ErrorType.CANCELLED, "cancelled_before_model_call");
-                }
-
-                if (!currentUserCommitted && currentMsg != null) {
-                    chatMemory.add(currentMsg);
-                    currentUserCommitted = true;
-                }
-
-                // ModelCaller → LLM 调用
-                ChatRequest request = ChatRequest.builder()
-                        .messages(requestMessages)
-                        .toolSpecifications(requestTools)
-                        .build();
-
-                Span llmSpan = trace != null
-                        ? trace.startLlmCall(config.modelName(), i, requestMessages.size(),
-                                io.opentelemetry.context.Context.current())
+                // 创建 agent.iteration 容器 span
+                Span iterSpan = trace != null
+                        ? trace.startIteration(i, io.opentelemetry.context.Context.current())
                         : null;
-                if (trace != null) {
-                    trace.recordLlmRequest(llmSpan, config.modelName(), i,
-                            requestMessages, requestTools);
-                }
-                Scope llmScope = llmSpan != null ? llmSpan.makeCurrent() : null;
-                ChatResponse response;
-                AiMessage aiMessage;
+                Scope iterScope = iterSpan != null ? iterSpan.makeCurrent() : null;
                 try {
-                    response = config.modelCaller().call(request);
-                    aiMessage = response.aiMessage();
-                    if (llmSpan != null) trace.enrichLlmResponse(llmSpan, response);
-                } catch (Exception e) {
-                    if (trace != null) trace.recordException(llmSpan, e);
-                    throw e;
-                } finally {
-                    if (llmScope != null) llmScope.close();
-                    if (llmSpan != null) llmSpan.end();
-                }
 
-                // 模型返回后、写 AiMessage 前检查取消
-                if (cancelCheck.isCancelled()) {
-                    state.markError();
-                    return AgentResult.error(AgentResult.ErrorType.CANCELLED,
-                            "cancelled_after_model_call");
-                }
-
-                chatMemory.add(aiMessage);
-
-                // LLM 请求了工具调用 → SafetyGuard → ToolExecutor → 回填
-                if (aiMessage.hasToolExecutionRequests()) {
-                    List<ToolExecutionRequest> toolReqs = aiMessage.toolExecutionRequests();
+                    // 超时检查
+                    if (System.currentTimeMillis() - loopCtx.startTimeMs() > config.timeout().toMillis()) {
+                        state.markTimeout();
+                        return AgentResult.error(AgentResult.ErrorType.TIMEOUT, "Agent loop timed out");
+                    }
+    
+                    // Context Assembly
+                    ContextCancelChecker cancelCheck = () ->
+                            prepareResult.cancelChecker() != null
+                                    && prepareResult.cancelChecker().isCancelled();
+                    ContextAssemblyRequest assemblyReq = new ContextAssemblyRequest(
+                            prepareResult.frame(), i, budgetPolicy,
+                            cancelCheck, false, session);
+                    ContextAssemblyResult assemblyResult = contextAssemblyGateway.assemble(assemblyReq);
+    
+                    if (assemblyResult == null || !assemblyResult.success()) {
+                        state.markError();
+                        AgentResult.ErrorType mappedType = mapAssemblyError(assemblyResult);
+                        return AgentResult.error(mappedType,
+                                assemblyResult != null ? assemblyResult.errorDetail()
+                                        : "Context assembly result is null");
+                    }
+    
+                    // 预算超限检查
+                    if (assemblyResult.budgetReport() != null
+                            && !assemblyResult.budgetReport().withinBudget()) {
+                        state.markError();
+                        return AgentResult.error(AgentResult.ErrorType.CONTEXT_BUDGET_EXCEEDED,
+                                "Context budget exceeded: estimated="
+                                        + assemblyResult.budgetReport().estimatedInputTokens()
+                                        + " max=" + assemblyResult.budgetReport().maxInputTokens());
+                    }
+    
+                    List<ChatMessage> requestMessages = assemblyResult.messages();
+                    List<ToolSpecification> requestTools = assemblyResult.toolSpecifications();
+    
+                    // 模型调用前检查取消
+                    if (cancelCheck.isCancelled()) {
+                        state.markError();
+                        return AgentResult.error(AgentResult.ErrorType.CANCELLED, "cancelled_before_model_call");
+                    }
+    
+                    if (!currentUserCommitted && currentMsg != null) {
+                        chatMemory.add(currentMsg);
+                        currentUserCommitted = true;
+                    }
+    
+                    // ModelCaller → LLM 调用
+                    ChatRequest request = ChatRequest.builder()
+                            .messages(requestMessages)
+                            .toolSpecifications(requestTools)
+                            .build();
+    
+                    Span llmSpan = trace != null
+                            ? trace.startLlmCall(config.modelName(), i, requestMessages.size(),
+                                    io.opentelemetry.context.Context.current())
+                            : null;
+                    if (trace != null) {
+                        trace.recordLlmRequest(llmSpan, config.modelName(), i,
+                                requestMessages, requestTools);
+                    }
+                    Scope llmScope = llmSpan != null ? llmSpan.makeCurrent() : null;
+                    ChatResponse response;
+                    AiMessage aiMessage;
+                    try {
+                        response = config.modelCaller().call(request);
+                        aiMessage = response.aiMessage();
+                        if (llmSpan != null) trace.enrichLlmResponse(llmSpan, response);
+                    } catch (Exception e) {
+                        if (trace != null) trace.recordException(llmSpan, e);
+                        throw e;
+                    } finally {
+                        if (llmScope != null) llmScope.close();
+                        if (llmSpan != null) llmSpan.end();
+                    }
+    
+                    // 模型返回后、写 AiMessage 前检查取消
                     if (cancelCheck.isCancelled()) {
                         state.markError();
                         return AgentResult.error(AgentResult.ErrorType.CANCELLED,
-                                "cancelled_before_tool_execution");
+                                "cancelled_after_model_call");
                     }
-                    int vetoCount = 0;
-
-                    for (int toolIdx = 0; toolIdx < toolReqs.size(); toolIdx++) {
-                        ToolExecutionRequest req = toolReqs.get(toolIdx);
-                        Span toolSpan = trace != null
-                                ? trace.startTool(req, i,
-                                        io.opentelemetry.context.Context.current()) : null;
-                        try {
-                            if (cancelCheck.isCancelled()) {
-                                // 为所有未执行工具写入 cancelled ToolResult，保证 ToolExchange 闭合
-                                for (int remaining = toolIdx; remaining < toolReqs.size(); remaining++) {
-                                    ToolExecutionRequest unexReq = toolReqs.get(remaining);
-                                    chatMemory.add(new ToolExecutionResultMessage(
-                                            unexReq.id(), unexReq.name(),
-                                            "[CANCELLED] tool execution cancelled"));
+    
+                    chatMemory.add(aiMessage);
+    
+                    // LLM 请求了工具调用 → SafetyGuard → ToolExecutor → 回填
+                    if (aiMessage.hasToolExecutionRequests()) {
+                        List<ToolExecutionRequest> toolReqs = aiMessage.toolExecutionRequests();
+                        if (cancelCheck.isCancelled()) {
+                            state.markError();
+                            return AgentResult.error(AgentResult.ErrorType.CANCELLED,
+                                    "cancelled_before_tool_execution");
+                        }
+                        int vetoCount = 0;
+    
+                        for (int toolIdx = 0; toolIdx < toolReqs.size(); toolIdx++) {
+                            ToolExecutionRequest req = toolReqs.get(toolIdx);
+                            Span toolSpan = trace != null
+                                    ? trace.startTool(req, i,
+                                            io.opentelemetry.context.Context.current()) : null;
+                            Scope toolScope = toolSpan != null ? toolSpan.makeCurrent() : null;
+                            try {
+                                if (cancelCheck.isCancelled()) {
+                                    // 为所有未执行工具写入 cancelled ToolResult，保证 ToolExchange 闭合
+                                    for (int remaining = toolIdx; remaining < toolReqs.size(); remaining++) {
+                                        ToolExecutionRequest unexReq = toolReqs.get(remaining);
+                                        chatMemory.add(new ToolExecutionResultMessage(
+                                                unexReq.id(), unexReq.name(),
+                                                "[CANCELLED] tool execution cancelled"));
+                                    }
+                                    state.markError();
+                                    return AgentResult.error(AgentResult.ErrorType.CANCELLED,
+                                            "cancelled_during_tool_execution");
                                 }
-                                state.markError();
-                                return AgentResult.error(AgentResult.ErrorType.CANCELLED,
-                                        "cancelled_during_tool_execution");
-                            }
-                            SafetyVerdict verdict = SafetyVerdict.allow();
-                            for (SafetyGuard guard : config.safetyGuards()) {
-                                verdict = guard.evaluate(req, loopCtx);
-                                if (verdict.isVetoed()) break;
-                            }
+                                // Stage 1: tool.safety_check
+                                Span safetySpan = trace != null ? trace.startToolSafetyCheck() : null;
+                                SafetyVerdict verdict = SafetyVerdict.allow();
+                                String vetoReason = null;
+                                try {
+                                    for (SafetyGuard guard : config.safetyGuards()) {
+                                        verdict = guard.evaluate(req, loopCtx);
+                                        if (verdict.isVetoed()) {
+                                            vetoReason = verdict.reason();
+                                            break;
+                                        }
+                                    }
+                                } finally {
+                                    if (trace != null) {
+                                        trace.finishToolSafetyCheck(safetySpan,
+                                                config.safetyGuards().size(), verdict.isVetoed(), vetoReason);
+                                    }
+                                }
+    
+                                String toolResult;
+                                if (verdict.isVetoed()) {
+                                    loopCtx.setLastSafetyVeto(verdict);
+                                    toolResult = "[SAFETY VETO] " + verdict.reason();
+                                    vetoCount++;
+                                } else {
+                                    // Stage 2: tool.dispatch
+                                    Span dispatchSpan = trace != null ? trace.startToolDispatch(req.name()) : null;
+                                    long dispatchStartMs = System.currentTimeMillis();
+                                    String targetClass = getTargetClass(req.name());
+                                    String targetMethod = getTargetMethod(req.name());
+                                    try {
+                                        toolResult = config.toolExecutor().execute(req);
+                                        if (trace != null) {
+                                            trace.finishToolDispatch(dispatchSpan, true, targetClass, targetMethod,
+                                                    System.currentTimeMillis() - dispatchStartMs,
+                                                    true, true);
+                                        }
+                                    } catch (Exception dispatchEx) {
+                                        if (trace != null) {
+                                            trace.finishToolDispatch(dispatchSpan, false, targetClass, targetMethod,
+                                                    System.currentTimeMillis() - dispatchStartMs,
+                                                    false, false);
+                                        }
+                                        throw dispatchEx;
+                                    }
+                                }
 
-                            String toolResult;
-                            if (verdict.isVetoed()) {
-                                loopCtx.setLastSafetyVeto(verdict);
-                                toolResult = "[SAFETY VETO] " + verdict.reason();
-                                vetoCount++;
-                            } else {
-                                toolResult = config.toolExecutor().execute(req);
+                                // Stage 3: tool.result_writeback
+                                Span writebackSpan = trace != null ? trace.startToolWriteback() : null;
+                                try {
+                                    chatMemory.add(new ToolExecutionResultMessage(
+                                            req.id(), req.name(),
+                                            toolResult != null ? toolResult : "{}"));
+                                    if (trace != null) {
+                                        trace.finishTool(toolSpan, toolResult, verdict);
+                                    }
+                                    loopCtx.addToolResult(req.name(), req.arguments(),
+                                            toolResult, verdict);
+                                } finally {
+                                    if (trace != null) trace.finishToolWriteback(writebackSpan, true);
+                                }
+                            } catch (Exception e) {
+                                if (toolScope != null) {
+                                    toolScope.close();
+                                    toolScope = null;
+                                }
+                                if (trace != null) trace.finishTool(toolSpan, "error", null);
+                                loopCtx.addToolResult(req.name(), req.arguments(),
+                                        "error: " + e.getMessage(), null);
+                                chatMemory.add(new ToolExecutionResultMessage(
+                                        req.id(), req.name(),
+                                        "error: " + e.getMessage()));
+                            } finally {
+                                if (toolScope != null) toolScope.close();
+                                if (toolSpan != null) toolSpan.end();
                             }
-
-                            chatMemory.add(new ToolExecutionResultMessage(
-                                    req.id(), req.name(),
-                                    toolResult != null ? toolResult : "{}"));
-                            if (trace != null) {
-                                trace.finishTool(toolSpan, toolResult, verdict);
+                        }
+    
+                        // 工具循环因取消中断 → 返回
+                        if (cancelCheck.isCancelled()) {
+                            state.markError();
+                            return AgentResult.error(AgentResult.ErrorType.CANCELLED,
+                                    "cancelled_during_tool_execution");
+                        }
+    
+                        // 全部工具均被安全否决 → 运行 PostProcessor，经 ResultCollector 返回
+                        if (vetoCount == toolReqs.size() && vetoCount > 0) {
+                            String output = "安全原因已阻止所有工具调用。";
+                            if (config.postProcessors() != null) {
+                                for (PostProcessor pp : config.postProcessors()) {
+                                    output = pp.process(output, loopCtx);
+                                }
                             }
-                            loopCtx.addToolResult(req.name(), req.arguments(),
-                                    toolResult, verdict);
-                        } catch (Exception e) {
-                            if (trace != null) trace.finishTool(toolSpan, "error", null);
-                            loopCtx.addToolResult(req.name(), req.arguments(),
-                                    "error: " + e.getMessage(), null);
-                            chatMemory.add(new ToolExecutionResultMessage(
-                                    req.id(), req.name(),
-                                    "error: " + e.getMessage()));
-                        } finally {
-                            if (toolSpan != null) toolSpan.end();
+                            if (memoryGateway != null) {
+                                memoryGateway.extractTurnMemory(userId, sessionId,
+                                        session.userInput(), output, trace);
+                            }
+                            state.markCompleted();
+                            return config.resultCollector().collect(
+                                    ChatResponse.builder()
+                                            .aiMessage(AiMessage.from(output))
+                                            .build(), loopCtx);
+                        }
+    
+                        continue;
+                    }
+    
+                    // LLM 返回文本 → PostProcessor → Terminator → ResultCollector
+                    String output = aiMessage.text();
+    
+                    if (config.postProcessors() != null) {
+                        for (PostProcessor pp : config.postProcessors()) {
+                            output = pp.process(output, loopCtx);
                         }
                     }
-
-                    // 工具循环因取消中断 → 返回
+    
                     if (cancelCheck.isCancelled()) {
                         state.markError();
                         return AgentResult.error(AgentResult.ErrorType.CANCELLED,
-                                "cancelled_during_tool_execution");
+                                "cancelled_before_result");
                     }
-
-                    // 全部工具均被安全否决 → 运行 PostProcessor，经 ResultCollector 返回
-                    if (vetoCount == toolReqs.size() && vetoCount > 0) {
-                        String output = "安全原因已阻止所有工具调用。";
-                        if (config.postProcessors() != null) {
-                            for (PostProcessor pp : config.postProcessors()) {
-                                output = pp.process(output, loopCtx);
-                            }
-                        }
+    
+                    AiMessage processedMsg = AiMessage.from(output);
+                    if (config.terminator().shouldStop(loopCtx,
+                            ChatResponse.builder().aiMessage(processedMsg).build())) {
                         if (memoryGateway != null) {
                             memoryGateway.extractTurnMemory(userId, sessionId,
                                     session.userInput(), output, trace);
                         }
                         state.markCompleted();
                         return config.resultCollector().collect(
-                                ChatResponse.builder()
-                                        .aiMessage(AiMessage.from(output))
-                                        .build(), loopCtx);
+                                ChatResponse.builder().aiMessage(processedMsg).build(), loopCtx);
                     }
-
+    
+                    // 不终止 → 继续下一轮迭代
                     continue;
+                } finally {
+                    if (iterScope != null) iterScope.close();
+                    if (iterSpan != null) iterSpan.end();
                 }
-
-                // LLM 返回文本 → PostProcessor → Terminator → ResultCollector
-                String output = aiMessage.text();
-
-                if (config.postProcessors() != null) {
-                    for (PostProcessor pp : config.postProcessors()) {
-                        output = pp.process(output, loopCtx);
-                    }
-                }
-
-                if (cancelCheck.isCancelled()) {
-                    state.markError();
-                    return AgentResult.error(AgentResult.ErrorType.CANCELLED,
-                            "cancelled_before_result");
-                }
-
-                AiMessage processedMsg = AiMessage.from(output);
-                if (config.terminator().shouldStop(loopCtx,
-                        ChatResponse.builder().aiMessage(processedMsg).build())) {
-                    if (memoryGateway != null) {
-                        memoryGateway.extractTurnMemory(userId, sessionId,
-                                session.userInput(), output, trace);
-                    }
-                    state.markCompleted();
-                    return config.resultCollector().collect(
-                            ChatResponse.builder().aiMessage(processedMsg).build(), loopCtx);
-                }
-
-                // 不终止 → 继续下一轮迭代
-                continue;
             }
 
             state.markError();
@@ -334,6 +393,24 @@ public class TextAgentLoopOrchestrator {
         if (!(value instanceof TraceContext traceContext)) return null;
         if (!traceContext.isActive()) return null;
         return traceContext.session();
+    }
+
+    /** 获取工具 dispatch target 信息供 trace 记录（通过 config.toolRegistry 可选获取）。 */
+    private String getDispatchTarget(String toolName) {
+        if (config.toolRegistry() == null) return null;
+        return config.toolRegistry().dispatchTargetInfo(toolName);
+    }
+
+    /** 获取工具目标类名（trace 用）。 */
+    private String getTargetClass(String toolName) {
+        if (config.toolRegistry() == null) return null;
+        return config.toolRegistry().targetClassName(toolName);
+    }
+
+    /** 获取工具目标方法名（trace 用）。 */
+    private String getTargetMethod(String toolName) {
+        if (config.toolRegistry() == null) return null;
+        return config.toolRegistry().targetMethodName(toolName);
     }
 
     /** 将 ContextAssemblyResult.errorCode() 映射到 AgentResult.ErrorType。 */

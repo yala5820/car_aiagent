@@ -19,6 +19,7 @@ import com.hirain.aiagent.toolgroup.ToolGroupSelector;
 import com.hirain.aiagent.memory.SessionIdResolver;
 import com.hirain.aiagent.trace.TraceAttributeKeys;
 import com.hirain.aiagent.trace.TraceContext;
+import com.hirain.aiagent.trace.TraceSession;
 import com.hirain.aiagent.trace.TraceSpanNames;
 
 import io.opentelemetry.api.trace.Span;
@@ -225,9 +226,17 @@ public class AgentRuntime {
                     timeProvider.nowMillis());
         }
 
-        Span loopSpan = io.opentelemetry.api.GlobalOpenTelemetry.get()
-                .getTracer("agent").spanBuilder(TraceSpanNames.AGENT_LOOP)
-                .startSpan();
+        // 从 RequestSession 中提取 TraceSession，用于创建 agent.loop span
+        TraceContext traceCtx = session.traceContext();
+        TraceSession traceSession = (traceCtx != null && traceCtx.isActive())
+                ? traceCtx.session() : null;
+
+        Span loopSpan = traceSession != null
+                ? traceSession.startAgentLoopSpan()
+                : io.opentelemetry.api.GlobalOpenTelemetry.get()
+                        .getTracer("agent")
+                        .spanBuilder(TraceSpanNames.AGENT_LOOP)
+                        .startSpan();
         try (Scope ignored = loopSpan.makeCurrent()) {
             // Context 准备（将 RuntimeCancelChecker 适配为 ContextCancelChecker）
             ContextCancelChecker contextCancel = () ->

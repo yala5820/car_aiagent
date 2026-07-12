@@ -1,5 +1,6 @@
 package com.hirain.aiagent.core;
 
+import com.hirain.aiagent.ai.langchain4j.tool.ToolRegistry;
 import com.hirain.aiagent.core.component.LoopTerminator;
 import com.hirain.aiagent.core.component.ModelCaller;
 import com.hirain.aiagent.core.component.PostProcessor;
@@ -49,6 +50,7 @@ public final class AgentConfig {
     private final List<PostProcessor> postProcessors;
     private final LoopTerminator terminator;
     private final ResultCollector resultCollector;
+    private final ToolRegistry toolRegistry;  // 可选，仅用于 trace 记录 dispatch target
 
     private AgentConfig(Builder b) {
         this.personaId = b.personaId;
@@ -68,6 +70,7 @@ public final class AgentConfig {
         this.postProcessors = Collections.unmodifiableList(b.postProcessors);
         this.terminator = b.terminator;
         this.resultCollector = b.resultCollector;
+        this.toolRegistry = b.toolRegistry;
     }
 
     // ── 读取器 ──
@@ -88,6 +91,7 @@ public final class AgentConfig {
     public List<PostProcessor> postProcessors() { return postProcessors; }
     public LoopTerminator terminator() { return terminator; }
     public ResultCollector resultCollector() { return resultCollector; }
+    public ToolRegistry toolRegistry() { return toolRegistry; }
 
     // ── Builder ──
 
@@ -112,6 +116,7 @@ public final class AgentConfig {
         private List<PostProcessor> postProcessors = List.of();
         private LoopTerminator terminator;
         private ResultCollector resultCollector;
+        private ToolRegistry toolRegistry;
 
         public Builder(String personaId) {
             this.personaId = personaId;
@@ -135,6 +140,7 @@ public final class AgentConfig {
         public Builder postProcessors(List<PostProcessor> v) { this.postProcessors = v; return this; }
         public Builder terminator(LoopTerminator v) { this.terminator = v; return this; }
         public Builder resultCollector(ResultCollector v) { this.resultCollector = v; return this; }
+        public Builder toolRegistry(ToolRegistry v) { this.toolRegistry = v; return this; }
 
         public AgentConfig build() {
             if (personaId == null) throw new IllegalStateException("personaId is required");

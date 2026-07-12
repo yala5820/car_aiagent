@@ -29,7 +29,7 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * 验证 ContextOrchestrator 通过 ContextTraceRecorder 创建 prepare/assemble span，
- * 且父 span 均为 agent.loop。
+ * 且 prepare 父为 agent.loop，assemble 父为 agent.iteration。
  */
 public class ContextProductionTraceHierarchyTest {
 
@@ -103,18 +103,25 @@ public class ContextProductionTraceHierarchyTest {
                         .vehicleStatusProvider(() -> "{\"speed\":0}")
                         .build());
 
-        // 创建 agent.loop span 作为父 span
+        // 创建 agent.loop span 作为 prepare 的父 span
         io.opentelemetry.api.trace.Span loopSpan = testSession.traceSession.tracer()
                 .spanBuilder("agent.loop").startSpan();
         try (io.opentelemetry.context.Scope scope = loopSpan.makeCurrent()) {
             ContextPrepareResult pr = orch.prepare(session, ContextCancelChecker.neverCancelled());
             assertTrue("prepare should succeed", pr.isSuccess());
 
-            ContextBudgetPolicy policy = com.hirain.aiagent.context.ModelContextWindowProfiles.qwenTurboDemo();
-            ContextAssemblyRequest req2 = new ContextAssemblyRequest(
-                    pr.frame(), 0, policy, ContextCancelChecker.neverCancelled(), false, session);
-            ContextAssemblyResult ar = orch.assemble(req2);
-            assertTrue("assemble should succeed", ar.success());
+            // 创建 agent.iteration span 作为 assemble 的父容器
+            io.opentelemetry.api.trace.Span iterSpan = testSession.traceSession.tracer()
+                    .spanBuilder("agent.iteration").startSpan();
+            try (io.opentelemetry.context.Scope iterScope = iterSpan.makeCurrent()) {
+                ContextBudgetPolicy policy = com.hirain.aiagent.context.ModelContextWindowProfiles.qwenTurboDemo();
+                ContextAssemblyRequest req2 = new ContextAssemblyRequest(
+                        pr.frame(), 0, policy, ContextCancelChecker.neverCancelled(), false, session);
+                ContextAssemblyResult ar = orch.assemble(req2);
+                assertTrue("assemble should succeed", ar.success());
+            } finally {
+                iterSpan.end();
+            }
         } finally {
             loopSpan.end();
         }
@@ -126,10 +133,14 @@ public class ContextProductionTraceHierarchyTest {
         assertEquals("context.prepare parent should be agent.loop",
                 loopSpan.getSpanContext().getSpanId(), prepareSpan.getParentSpanId());
 
+        // 需要从 exporter 中取出 iteration span
+        SpanData iterSpanData = findSpan(testSession.exporter.spans, "agent.iteration");
+        assertNotNull("agent.iteration span should exist", iterSpanData);
+
         SpanData assembleSpan = findSpan(testSession.exporter.spans, "context.assemble");
         assertNotNull("context.assemble span should exist", assembleSpan);
-        assertEquals("context.assemble parent should be agent.loop",
-                loopSpan.getSpanContext().getSpanId(), assembleSpan.getParentSpanId());
+        assertEquals("context.assemble parent should be agent.iteration",
+                iterSpanData.getSpanId(), assembleSpan.getParentSpanId());
 
         // 验证预算和 Provider 统计属性
         assertTrue("prepare span should have provider.count",

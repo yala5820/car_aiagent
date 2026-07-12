@@ -20,11 +20,29 @@ public class AgentTraceRecorder {
     private final TraceSession session;
     private final TraceAttributeWriter writer;
     private final TraceMessageFormatter formatter;
+    // memory span 专用 parent context（通常为 agent.loop 的 Context，在 orchestrator 中设置）
+    private Context memoryParentContext;
 
     public AgentTraceRecorder(TraceSession session) {
         this.session = session;
         this.writer = session != null ? session.writer() : null;
         this.formatter = new TraceMessageFormatter();
+    }
+
+    /**
+     * 设置 memory span 的父 Context（在进入迭代循环前调用一次）。
+     * 确保 memory 操作 span 挂在 agent.loop 下而非 iteration 下。
+     */
+    public void setMemoryParentContext(Context parent) {
+        this.memoryParentContext = parent;
+    }
+
+    /** 创建 agent.iteration span，作为本轮迭代的容器。 */
+    public Span startIteration(int number, Context parent) {
+        if (session == null) return null;
+        Span span = session.startChildSpan(TraceSpanNames.AGENT_ITERATION, parent);
+        span.setAttribute(TraceAttributeKeys.AGENT_ITERATION, number);
+        return span;
     }
 
     public Span startPromptAssembly(String persona,
@@ -164,17 +182,25 @@ public class AgentTraceRecorder {
 
     public void finishTool(Span span, String result, SafetyVerdict verdict) {
         if (span == null) return;
+        // verdict==null 表示工具异常（exception 路径），此时判定为失败
         boolean vetoed = verdict != null && verdict.isVetoed();
-        writer.putBoolean(span, TraceAttributeKeys.TOOL_SUCCESS, !vetoed);
+        boolean success = verdict != null && verdict.isAllowed();
+        writer.putBoolean(span, TraceAttributeKeys.TOOL_SUCCESS, success);
         writer.putBoolean(span, TraceAttributeKeys.TOOL_SAFETY_VETO, vetoed);
         if (vetoed) {
             writer.putString(span, TraceAttributeKeys.TOOL_SAFETY_VETO_REASON, verdict.reason());
         }
         writer.putResult(span, TraceAttributeKeys.TOOL_OUTPUT, result);
+        if (!success) {
+            span.setStatus(StatusCode.ERROR, vetoed ? "safety_veto" : "tool_failed");
+        }
     }
 
     public Span startMemory(String operation, int inputChars) {
-        return startMemory(operation, inputChars, io.opentelemetry.context.Context.current());
+        Context parent = memoryParentContext != null
+                ? memoryParentContext
+                : io.opentelemetry.context.Context.current();
+        return startMemory(operation, inputChars, parent);
     }
 
     /** Parent-aware 重载。 */
@@ -219,6 +245,81 @@ public class AgentTraceRecorder {
                 : throwable.getClass().getSimpleName());
         writer.putString(span, TraceAttributeKeys.ERROR_TYPE, throwable.getClass().getName());
         writer.putString(span, TraceAttributeKeys.ERROR_MESSAGE, throwable.getMessage());
+    }
+
+    // ── Tool 子阶段 span ──
+
+    /** 创建 tool.safety_check 子 span（parent = Context.current() = tool.execute）。 */
+    public Span startToolSafetyCheck() {
+        if (session == null) return null;
+        return session.startChildSpan(TraceSpanNames.TOOL_SAFETY_CHECK,
+                io.opentelemetry.context.Context.current());
+    }
+
+    /** 结束 safety_check span，记录 guard 数量和 veto 信息。 */
+    public void finishToolSafetyCheck(Span span, int guardCount,
+                                       boolean vetoed, String vetoReason) {
+        if (span == null) return;
+        span.setAttribute(TraceAttributeKeys.TOOL_SAFETY_GUARD_COUNT, guardCount);
+        span.setAttribute(TraceAttributeKeys.TOOL_SAFETY_VETO, vetoed);
+        if (vetoed && vetoReason != null) {
+            writer.putString(span, TraceAttributeKeys.TOOL_SAFETY_VETO_REASON, vetoReason);
+        }
+        span.end();
+    }
+
+    /** 创建 tool.dispatch 子 span。仅在安全通过后调用。 */
+    public Span startToolDispatch(String toolName) {
+        if (session == null) return null;
+        Span span = session.startChildSpan(TraceSpanNames.TOOL_DISPATCH,
+                io.opentelemetry.context.Context.current());
+        span.setAttribute(TraceAttributeKeys.TOOL_NAME, toolName);
+        return span;
+    }
+
+    /** 结束 dispatch span（基础版）。 */
+    public void finishToolDispatch(Span span, boolean success,
+                                    String dispatchTarget, long durationMs) {
+        if (span == null) return;
+        span.setAttribute(TraceAttributeKeys.TOOL_DISPATCH_SUCCESS, success);
+        if (dispatchTarget != null) {
+            span.setAttribute(TraceAttributeKeys.TOOL_DISPATCH_TARGET, dispatchTarget);
+        }
+        span.setAttribute(TraceAttributeKeys.TOOL_DISPATCH_DURATION_MS, durationMs);
+        span.end();
+    }
+
+    /** 结束 dispatch span（增强版 — 含目标类/方法/阶段诊断）。 */
+    public void finishToolDispatch(Span span, boolean success,
+                                    String targetClass, String targetMethod,
+                                    long durationMs,
+                                    boolean argumentParseSuccess, boolean invokeSuccess) {
+        if (span == null) return;
+        span.setAttribute(TraceAttributeKeys.TOOL_DISPATCH_SUCCESS, success);
+        if (targetClass != null) {
+            span.setAttribute(TraceAttributeKeys.TOOL_DISPATCH_TARGET_CLASS, targetClass);
+        }
+        if (targetMethod != null) {
+            span.setAttribute(TraceAttributeKeys.TOOL_DISPATCH_TARGET_METHOD, targetMethod);
+        }
+        span.setAttribute(TraceAttributeKeys.TOOL_DISPATCH_DURATION_MS, durationMs);
+        span.setAttribute(TraceAttributeKeys.TOOL_ARGUMENT_PARSE_SUCCESS, argumentParseSuccess);
+        span.setAttribute(TraceAttributeKeys.TOOL_INVOKE_SUCCESS, invokeSuccess);
+        span.end();
+    }
+
+    /** 创建 tool.result_writeback 子 span。 */
+    public Span startToolWriteback() {
+        if (session == null) return null;
+        return session.startChildSpan(TraceSpanNames.TOOL_RESULT_WRITEBACK,
+                io.opentelemetry.context.Context.current());
+    }
+
+    /** 结束 writeback span。 */
+    public void finishToolWriteback(Span span, boolean writtenToMemory) {
+        if (span == null) return;
+        span.setAttribute(TraceAttributeKeys.TOOL_WRITEBACK_TO_MEMORY, writtenToMemory);
+        span.end();
     }
 
     private String formatToolObjects(List<?> toolSpecsOrNames) {
