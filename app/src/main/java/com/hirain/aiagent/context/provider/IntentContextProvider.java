@@ -1,19 +1,24 @@
 package com.hirain.aiagent.context.provider;
 
 import com.hirain.aiagent.context.ContextBuildInput;
+import com.hirain.aiagent.context.ContextLifecycle;
+import com.hirain.aiagent.context.ContextPriority;
 import com.hirain.aiagent.context.ContextProvider;
 import com.hirain.aiagent.context.ContextProviderResult;
-import com.hirain.aiagent.context.ContextSection;
-import com.hirain.aiagent.context.ContextSectionType;
+import com.hirain.aiagent.context.ContextTrustLevel;
+import com.hirain.aiagent.context.ContextVisibility;
+import com.hirain.aiagent.context.TextContextContribution;
 import com.hirain.aiagent.intentrouter.IntentResult;
 import com.hirain.aiagent.intentrouter.IntentTag;
 import com.hirain.aiagent.runtime.RequestSession;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
  * 意图上下文 Provider — 输出 IntentRouter 的意图识别结果。
+ * 贡献标记为 POLICY_ONLY，不进入模型消息，仅用于 ToolGroupSelector 和 Trace 诊断。
  */
 public class IntentContextProvider implements ContextProvider {
 
@@ -23,8 +28,13 @@ public class IntentContextProvider implements ContextProvider {
     }
 
     @Override
-    public ContextSectionType type() {
-        return ContextSectionType.INTENT;
+    public ContextLifecycle lifecycle() {
+        return ContextLifecycle.REQUEST_STATIC;
+    }
+
+    @Override
+    public boolean required(RequestSession session, ContextBuildInput input) {
+        return false;
     }
 
     @Override
@@ -44,14 +54,16 @@ public class IntentContextProvider implements ContextProvider {
                 + "- confidence: " + confidence + "\n"
                 + "- matchedKeywords: " + keywords + "\n"
                 + "- debugReason: " + debugReason;
-        int charCount = content.length();
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("intent_tag", intentTag);
         metadata.put("confidence", confidence);
         metadata.put("matched_keywords", keywords);
 
-        ContextSection section = new ContextSection(
-                type(), name(), true, content, charCount, false, metadata);
-        return ContextProviderResult.success(name(), section);
+        TextContextContribution contribution = new TextContextContribution(
+                "intent", ContextVisibility.POLICY_ONLY, ContextTrustLevel.TRUSTED_DATA,
+                ContextPriority.OPTIONAL, ContextLifecycle.REQUEST_STATIC, false,
+                name(), TextContextContribution.TARGET_CONTEXT_DATA,
+                content, metadata);
+        return ContextProviderResult.success(name(), List.of(contribution));
     }
 }

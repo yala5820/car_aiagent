@@ -19,9 +19,16 @@ public final class ToolGroup {
     private final String riskLevel;
     private final boolean enabled;
 
+    private static final java.util.Set<String> VALID_RISK_LEVELS =
+            java.util.Set.of("LOW", "MEDIUM", "HIGH");
+
     public ToolGroup(ToolGroupId groupId, String groupName, String description,
                      List<String> toolNames, List<String> requiredContextKeys,
                      String riskLevel, boolean enabled) {
+        if (riskLevel == null || !VALID_RISK_LEVELS.contains(riskLevel)) {
+            throw new IllegalArgumentException(
+                    "riskLevel must be LOW, MEDIUM, or HIGH, got: " + riskLevel);
+        }
         this.groupId = groupId;
         this.groupName = groupName;
         this.description = description;
@@ -38,4 +45,15 @@ public final class ToolGroup {
     public List<String> requiredContextKeys() { return requiredContextKeys; }
     public String riskLevel() { return riskLevel; }
     public boolean enabled() { return enabled; }
+
+    /** 上下文标记组：无工具但有 requiredContextKeys（如 BASIC_STATUS_GROUP）。 */
+    public boolean isContextMarker() {
+        return toolNames.isEmpty() && !requiredContextKeys.isEmpty();
+    }
+
+    /** 聚合组：COMMON_VEHICLE_GROUP 或 ALL_SAFE_DEMO_GROUP。 */
+    public boolean isAggregation() {
+        return groupId == ToolGroupId.COMMON_VEHICLE_GROUP
+                || groupId == ToolGroupId.ALL_SAFE_DEMO_GROUP;
+    }
 }

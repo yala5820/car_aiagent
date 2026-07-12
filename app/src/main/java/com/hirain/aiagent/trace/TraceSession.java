@@ -43,10 +43,30 @@ public class TraceSession implements AutoCloseable {
 
     // ── 子 span 创建 ──
 
-    /** 创建 LLM 调用子 span（遵循 OpenInference 语义） */
+    // ── 旧方法（向后兼容，以 rootContext 为父） ──
+
+    /** 创建 LLM 调用子 span（遵循 OpenInference 语义），以 rootContext 为父。 */
     public Span startLlmSpan(String modelName, int inputMessageCount) {
+        return startLlmSpan(modelName, inputMessageCount, rootContext);
+    }
+
+    /** 创建工具执行子 span，以 rootContext 为父。 */
+    public Span startToolSpan(String toolName, String arguments) {
+        return startToolSpan(toolName, arguments, rootContext);
+    }
+
+    /** 创建通用内部子 span，以 rootContext 为父。 */
+    public Span startChildSpan(String spanName) {
+        return startChildSpan(spanName, rootContext);
+    }
+
+    // ── Parent-aware 新方法（Phase 1 新增，不改变旧调用行为） ──
+
+    /** 创建 LLM 调用子 span（遵循 OpenInference 语义），使用显式 parent Context。 */
+    public Span startLlmSpan(String modelName, int inputMessageCount, Context parent) {
+        Context safeParent = parent != null ? parent : rootContext;
         Span span = tracer.spanBuilder(TraceSpanNames.GEN_AI_CHAT)
-                .setParent(rootContext)
+                .setParent(safeParent)
                 .setSpanKind(io.opentelemetry.api.trace.SpanKind.INTERNAL)
                 .startSpan();
         writer.putString(span, TraceAttributeKeys.GEN_AI_MODEL, modelName);
@@ -54,10 +74,11 @@ public class TraceSession implements AutoCloseable {
         return span;
     }
 
-    /** 创建工具执行子 span */
-    public Span startToolSpan(String toolName, String arguments) {
+    /** 创建工具执行子 span，使用显式 parent Context。 */
+    public Span startToolSpan(String toolName, String arguments, Context parent) {
+        Context safeParent = parent != null ? parent : rootContext;
         Span span = tracer.spanBuilder(TraceSpanNames.TOOL_EXECUTE)
-                .setParent(rootContext)
+                .setParent(safeParent)
                 .setSpanKind(io.opentelemetry.api.trace.SpanKind.INTERNAL)
                 .startSpan();
         writer.putString(span, TraceAttributeKeys.TOOL_NAME, toolName);
@@ -65,11 +86,12 @@ public class TraceSession implements AutoCloseable {
         return span;
     }
 
-    /** 创建通用内部子 span。 */
-    public Span startChildSpan(String spanName) {
+    /** 创建通用内部子 span，使用显式 parent Context。父 Context 为 null 时默认 rootContext。 */
+    public Span startChildSpan(String spanName, Context parent) {
+        Context safeParent = parent != null ? parent : rootContext;
         String name = spanName != null ? spanName : "trace.child";
         return tracer.spanBuilder(name)
-                .setParent(rootContext)
+                .setParent(safeParent)
                 .setSpanKind(io.opentelemetry.api.trace.SpanKind.INTERNAL)
                 .startSpan();
     }

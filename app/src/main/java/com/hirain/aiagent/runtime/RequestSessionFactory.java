@@ -27,6 +27,20 @@ public class RequestSessionFactory {
     public RequestSession create(AgentRequest request,
                                  TraceContext traceContext, IntentResult intentResult,
                                  ToolGroupSelectionResult toolGroupSelectionResult) {
+        String sessionId = request != null ? emptyToNull(request.getSessionId()) : null;
+        return create(request, traceContext, intentResult, toolGroupSelectionResult, sessionId);
+    }
+
+    /**
+     * 创建 RequestSession，使用已解析的 resolvedSessionId。
+     * <p>
+     * 设计原因：Phase 0 起，TEXT 主路径的 sessionId 应由 Runtime 预先解析，
+     * 不再由 Factory 从 request 中透传（避免缺失 sessionId 时静默为 null）。
+     */
+    public RequestSession create(AgentRequest request,
+                                 TraceContext traceContext, IntentResult intentResult,
+                                 ToolGroupSelectionResult toolGroupSelectionResult,
+                                 String resolvedSessionId) {
         // ── intentResult 空值降级（request 可能为 null） ──
         if (intentResult == null) {
             String safeText = request != null ? nonEmpty(request.getText(), "") : "";
@@ -35,6 +49,8 @@ public class RequestSessionFactory {
         }
 
         // ── toolGroupSelectionResult 空值降级 ──
+        // 生产主路径的全量兜底由 AgentRuntime.selectToolGroupsSafely() 保证，
+        // Factory 这里是最后防线，保留轻量降级（CHAT_ONLY_GROUP + 空 toolNames）。
         if (toolGroupSelectionResult == null) {
             toolGroupSelectionResult = ToolGroupSelectionResult.fallback("missing_tool_group_selection");
         }
@@ -50,8 +66,10 @@ public class RequestSessionFactory {
         // ── 规范化 requestId ──
         String requestId = nonEmpty(request.getRequestId(), idGenerator.newRequestId());
 
-        // ── sessionId：缺失时不创建新的业务 sessionId ──
-        String sessionId = emptyToNull(request.getSessionId());
+        // ── sessionId：优先使用已解析的 resolvedSessionId，否则从 request 读取 ──
+        String sessionId = resolvedSessionId != null
+                ? resolvedSessionId
+                : (request != null ? emptyToNull(request.getSessionId()) : null);
 
         // ── userId：从请求中读取，缺失时为 default_user ──
         String userId = nonEmpty(request.getUserId(), "default_user");
@@ -63,21 +81,25 @@ public class RequestSessionFactory {
         String clientMessageId = emptyToNull(request.getClientMessageId());
         String userInput = nonEmpty(request.getText(), "");
 
-        // ── 构建 orchestratorContext（不包含 intentResult / toolGroupSelectionResult） ──
+        // ── 构建 orchestratorContext ──
+        // 写入顺序说明：
+        // 1. 先写入 caller extraContext（低优先级）
+        // 2. 再写入 traceContext 数据（中优先级）
+        // 3. 最后写入 canonical 身份字段（高优先级），确保 extraContext 不可覆盖 Runtime 解析结果
         Map<String, Object> context = new HashMap<>();
-        context.put("user_id", userId);
-        if (sessionId != null) {
-            context.put("session_id", sessionId);
-        }
-        context.put("persona_id", normalizedPersonaId);
-        if (clientMessageId != null) {
-            context.put("client_message_id", clientMessageId);
-        }
         if (request.getExtraContext() != null) {
             context.putAll(request.getExtraContext());
         }
         if (traceContext != null) {
             context.putAll(traceContext.toContextData());
+        }
+        context.put("user_id", userId);
+        context.put("persona_id", normalizedPersonaId);
+        if (clientMessageId != null) {
+            context.put("client_message_id", clientMessageId);
+        }
+        if (sessionId != null) {
+            context.put("session_id", sessionId);
         }
 
         long now = timeProvider.nowMillis();

@@ -1,12 +1,15 @@
 package com.hirain.aiagent.context.provider;
 
 import com.hirain.aiagent.context.ContextBuildInput;
+import com.hirain.aiagent.context.ContextErrorCode;
+import com.hirain.aiagent.context.ContextLifecycle;
+import com.hirain.aiagent.context.ContextPriority;
 import com.hirain.aiagent.context.ContextProvider;
 import com.hirain.aiagent.context.ContextProviderResult;
-import com.hirain.aiagent.context.ContextSection;
-import com.hirain.aiagent.context.ContextSectionType;
+import com.hirain.aiagent.context.ContextTrustLevel;
+import com.hirain.aiagent.context.ContextVisibility;
+import com.hirain.aiagent.context.ToolContextContribution;
 import com.hirain.aiagent.runtime.RequestSession;
-import com.hirain.aiagent.toolgroup.ToolGroup;
 import com.hirain.aiagent.toolgroup.ToolGroupId;
 import com.hirain.aiagent.toolgroup.ToolGroupRegistry;
 import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
@@ -15,11 +18,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import dev.langchain4j.agent.tool.ToolSpecification;
+
 /**
- * 工具组上下文 Provider — 输出选中工具组和工具名列表（轻量方案，不渲染完整 ToolSpecification）。
- * <p>
- * 一期只渲染 selected group 描述 + selected tool names，
- * 不读取完整 {@code ToolSpecification.description} 或参数 schema。
+ * 工具组上下文 Provider — 输出选中工具组的 ToolSpecification 列表。
+ * CHAT_ONLY 时返回 MODE_NONE 空集合。
  */
 public class ToolGroupContextProvider implements ContextProvider {
 
@@ -29,8 +32,16 @@ public class ToolGroupContextProvider implements ContextProvider {
     }
 
     @Override
-    public ContextSectionType type() {
-        return ContextSectionType.TOOL_GROUP;
+    public ContextLifecycle lifecycle() {
+        return ContextLifecycle.REQUEST_STATIC;
+    }
+
+    @Override
+    public boolean required(RequestSession session, ContextBuildInput input) {
+        // 非 CHAT_ONLY 时 required
+        ToolGroupSelectionResult sel = session != null ? session.toolGroupSelectionResult() : null;
+        if (sel == null || sel.selectionReason() == null) return true;
+        return !"CHAT_ONLY".equals(sel.selectionReason());
     }
 
     @Override
@@ -41,67 +52,47 @@ public class ToolGroupContextProvider implements ContextProvider {
         List<String> toolNames = selection != null
                 ? selection.selectedToolNames() : List.of();
 
-        // ToolGroupRegistry 为空时降级
-        ToolGroupRegistry registry = input.toolGroupRegistry();
-        if (registry == null) {
-            return fallbackResult(toolNames);
+        // CHAT_ONLY: 返回 MODE_NONE 空集合 SUCCESS
+        if (selection != null && "CHAT_ONLY".equals(selection.selectionReason())) {
+            return ContextProviderResult.success(name(), List.of(
+                    new ToolContextContribution("tool_group", ContextVisibility.MODEL_VISIBLE,
+                            ContextTrustLevel.TRUSTED_SYSTEM, ContextPriority.CRITICAL,
+                            ContextLifecycle.REQUEST_STATIC, false, name(),
+                            ToolContextContribution.MODE_NONE, List.of(), Map.of())));
         }
 
-        String content = buildContent(groupIds, toolNames, registry);
-        int charCount = content.length();
+        // 非 CHAT_ONLY: 从 ToolRegistry 解析规格
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("selected_group_count", groupIds.size());
         metadata.put("selected_tool_count", toolNames.size());
         metadata.put("selection_reason", selection != null ? selection.selectionReason() : "");
 
-        ContextSection section = new ContextSection(
-                type(), name(), true, content, charCount, false, metadata);
-        return ContextProviderResult.success(name(), section);
+        List<ToolSpecification> specs;
+        try {
+            specs = resolveToolSpecs(toolNames, input);
+        } catch (Exception e) {
+            return ContextProviderResult.failure(name(), e.getMessage(),
+                    ContextErrorCode.TOOL_SPEC_RESOLUTION_FAILED);
+        }
+
+        return ContextProviderResult.success(name(), List.of(
+                new ToolContextContribution("tool_group", ContextVisibility.MODEL_VISIBLE,
+                        ContextTrustLevel.TRUSTED_SYSTEM, ContextPriority.CRITICAL,
+                        ContextLifecycle.REQUEST_STATIC, true, name(),
+                        specs.isEmpty() ? ToolContextContribution.MODE_NONE
+                                : ToolContextContribution.MODE_SELECTED,
+                        specs, metadata)));
     }
 
-    private ContextProviderResult fallbackResult(List<String> toolNames) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("【工具组上下文】\n");
-        sb.append("- selectedToolCount: ").append(toolNames.size()).append("\n");
-        sb.append("- selectedToolNames:\n");
-        for (String name : toolNames) {
-            sb.append("  - ").append(name).append("\n");
+    private static List<ToolSpecification> resolveToolSpecs(List<String> toolNames,
+                                                            ContextBuildInput input) {
+        com.hirain.aiagent.ai.langchain4j.tool.ToolRegistry registry = input.toolRegistry();
+        if (registry == null) {
+            throw new RuntimeException("ToolRegistry is null");
         }
-        sb.append("(group descriptions not available)");
-        String content = sb.toString();
-        ContextSection section = new ContextSection(
-                type(), name(), true, content, content.length(), false, new LinkedHashMap<>());
-        return ContextProviderResult.fallback(name(), section,
-                "ToolGroupRegistry is null, only tool names available");
-    }
-
-    private static String buildContent(List<ToolGroupId> groupIds, List<String> toolNames,
-                                        ToolGroupRegistry registry) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("【工具组上下文】\n");
-        sb.append("- selectedGroupIds: ");
-        for (int i = 0; i < groupIds.size(); i++) {
-            if (i > 0) sb.append(",");
-            sb.append(groupIds.get(i).name());
+        if (toolNames == null || toolNames.isEmpty()) {
+            return List.of();
         }
-        sb.append("\n");
-        sb.append("- selectedToolCount: ").append(toolNames.size()).append("\n");
-        sb.append("- selectedToolNames:\n");
-        for (String name : toolNames) {
-            sb.append("  - ").append(name).append("\n");
-        }
-        sb.append("- groupDescriptions:\n");
-        for (ToolGroupId groupId : groupIds) {
-            ToolGroup group = registry.group(groupId);
-            if (group != null) {
-                sb.append("  - ").append(groupId.name()).append(": ")
-                        .append(group.groupName()).append(" / ")
-                        .append(group.description()).append(" / risk=")
-                        .append(group.riskLevel()).append("\n");
-            } else {
-                sb.append("  - ").append(groupId.name()).append(": (unknown)\n");
-            }
-        }
-        return sb.toString().trim();
+        return registry.toolSpecificationsByNames(toolNames);
     }
 }

@@ -4,6 +4,7 @@ import com.hirain.aiagent.core.SafetyVerdict;
 
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.context.Context;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,8 +33,23 @@ public class AgentTraceRecorder {
                                     List<? extends ChatMessage> chatMessages,
                                     int messageCount,
                                     List<?> toolSpecsOrNames) {
+        return startPromptAssembly(persona, iteration, transientMessages, chatMessages,
+                messageCount, toolSpecsOrNames, null);
+    }
+
+    /**
+     * Parent-aware 重载，使用显式 parent Context 创建 PROMPT_ASSEMBLY span。
+     * parent 为 null 时与旧方法行为一致（root parent）。
+     */
+    public Span startPromptAssembly(String persona,
+                                    int iteration,
+                                    List<? extends ChatMessage> transientMessages,
+                                    List<? extends ChatMessage> chatMessages,
+                                    int messageCount,
+                                    List<?> toolSpecsOrNames,
+                                    Context parentContext) {
         if (session == null) return null;
-        Span span = session.startChildSpan(TraceSpanNames.PROMPT_ASSEMBLY);
+        Span span = session.startChildSpan(TraceSpanNames.PROMPT_ASSEMBLY, parentContext);
         writer.putString(span, TraceAttributeKeys.AGENT_PERSONA, persona);
         writer.putLong(span, TraceAttributeKeys.AGENT_ITERATION, iteration);
         writer.putText(span, TraceAttributeKeys.PROMPT_TRANSIENT_MESSAGES,
@@ -49,8 +65,16 @@ public class AgentTraceRecorder {
     }
 
     public Span startLlmCall(String modelName, int iteration, int messageCount) {
+        return startLlmCall(modelName, iteration, messageCount, null);
+    }
+
+    /**
+     * Parent-aware 重载，使用显式 parent Context 创建 GEN_AI_CHAT span。
+     */
+    public Span startLlmCall(String modelName, int iteration, int messageCount,
+                              Context parentContext) {
         if (session == null) return null;
-        Span span = session.startChildSpan(TraceSpanNames.GEN_AI_CHAT);
+        Span span = session.startChildSpan(TraceSpanNames.GEN_AI_CHAT, parentContext);
         writer.putString(span, TraceAttributeKeys.GEN_AI_PROVIDER, "dashscope");
         writer.putString(span, TraceAttributeKeys.GEN_AI_MODEL, modelName);
         writer.putLong(span, TraceAttributeKeys.AGENT_ITERATION, iteration);
@@ -93,8 +117,14 @@ public class AgentTraceRecorder {
     }
 
     public Span startTool(ToolExecutionRequest request, int iteration) {
+        return startTool(request, iteration, null);
+    }
+
+    /** Parent-aware 重载。 */
+    public Span startTool(ToolExecutionRequest request, int iteration,
+                           Context parentContext) {
         if (session == null) return null;
-        Span span = session.startChildSpan(TraceSpanNames.TOOL_EXECUTE);
+        Span span = session.startChildSpan(TraceSpanNames.TOOL_EXECUTE, parentContext);
         writer.putLong(span, TraceAttributeKeys.AGENT_ITERATION, iteration);
         if (request != null) {
             writer.putString(span, TraceAttributeKeys.TOOL_NAME, request.name());
@@ -115,12 +145,18 @@ public class AgentTraceRecorder {
     }
 
     public Span startMemory(String operation, int inputChars) {
+        return startMemory(operation, inputChars, io.opentelemetry.context.Context.current());
+    }
+
+    /** Parent-aware 重载。 */
+    public Span startMemory(String operation, int inputChars,
+                             Context parentContext) {
         if (session == null) return null;
         String normalized = operation != null ? operation : "";
         String spanName = "compress".equals(normalized)
                 ? TraceSpanNames.MEMORY_COMPRESS
                 : TraceSpanNames.MEMORY_EXTRACT;
-        Span span = session.startChildSpan(spanName);
+        Span span = session.startChildSpan(spanName, parentContext);
         writer.putString(span, TraceAttributeKeys.MEMORY_OPERATION, normalized);
         writer.putLong(span, TraceAttributeKeys.MEMORY_INPUT_CHARS, Math.max(inputChars, 0));
         return span;

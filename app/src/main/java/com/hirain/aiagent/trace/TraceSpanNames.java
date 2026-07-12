@@ -10,6 +10,8 @@ public final class TraceSpanNames {
     public static final String MEMORY_EXTRACT = "memory.extract";
     public static final String MEMORY_COMPRESS = "memory.compress";
     public static final String RESPONSE_DISPATCH = "response.dispatch";
+    public static final String CONTEXT_PREPARE = "context.prepare";
+    public static final String CONTEXT_ASSEMBLE = "context.assemble";
 
     private TraceSpanNames() {
     }

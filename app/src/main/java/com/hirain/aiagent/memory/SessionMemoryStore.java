@@ -27,7 +27,7 @@ import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 public class SessionMemoryStore implements ChatMemoryStore {
 
     private static final String TAG = "SessionMemoryStore";
-    private static final int DB_VERSION = 2;
+    private static final int DB_VERSION = 3;
 
     private final SessionDbHelper dbHelper;
 
@@ -67,6 +67,23 @@ public class SessionMemoryStore implements ChatMemoryStore {
                     new Object[]{id, json});
         } catch (Exception e) {
             Log.e(TAG, "Failed to update messages for " + id, e);
+        }
+    }
+
+    /**
+     * 原子替换完整消息列表 — 使用单条 {@code INSERT OR REPLACE}。
+     * 失败时抛出 {@link MemoryPersistenceException}，不下吞异常。
+     */
+    public void replaceMessagesOrThrow(Object memoryId, List<ChatMessage> messages) {
+        String id = memoryId.toString();
+        try {
+            String json = ChatMessageSerializer.messagesToJson(messages);
+            SQLiteDatabase db = dbHelper.getWritableDatabase();
+            db.execSQL("INSERT OR REPLACE INTO session_messages (memory_id, messages) VALUES (?, ?)",
+                    new Object[]{id, json});
+        } catch (Exception e) {
+            throw new MemoryPersistenceException(id,
+                    "Failed to replace messages for " + id, e);
         }
     }
 
@@ -190,22 +207,53 @@ public class SessionMemoryStore implements ChatMemoryStore {
         }
     }
 
-    /** 删除指定 Session（消息+记录） */
+    /**
+     * 删除指定 Session（消息+记录）。
+     * <p>
+     * 设计原因：本轮将 deleteSession 定义为全局共享 session 删除，userId 仅用于调用方兼容。
+     * 若未来需要"只从某 user 的列表隐藏"，应新增单独接口，不复用此方法。
+     */
     public boolean deleteSession(String userId, String sessionId) {
-        SessionInfo existing = getSession(userId, sessionId);
-        if (existing == null) {
+        return deleteGlobalSession(sessionId);
+    }
+
+    /**
+     * 全局删除共享 session — 删除所有 user 的 metadata 和短期消息。
+     * <p>
+     * 设计原因：短期记忆归属于 sessionId，不归属于单个 userId。
+     * 删除一个 session 时，应清除该 session 的所有 metadata 行和短期消息。
+     *
+     * @return 如果 sessionId 存在且有数据被删除则返回 true；不存在或为空则返回 false
+     */
+    public boolean deleteGlobalSession(String sessionId) {
+        if (sessionId == null || sessionId.trim().isEmpty()) {
             return false;
         }
-        String memoryIdPrefix = SessionMemoryIds.buildPrefix(userId, sessionId);
+        String normalizedSessionId = sessionId.trim();
         SQLiteDatabase db = dbHelper.getWritableDatabase();
+        // 先查询是否存在（避免对不存在的 session 返回删除成功）
+        boolean exists = false;
+        try (Cursor cursor = db.rawQuery(
+                "SELECT 1 FROM sessions WHERE session_id = ? LIMIT 1",
+                new String[]{normalizedSessionId})) {
+            exists = cursor.moveToFirst();
+        } catch (Exception e) {
+            Log.w(TAG, "deleteGlobalSession check failed", e);
+        }
+        if (!exists) {
+            return false;
+        }
         db.beginTransaction();
         try {
-            db.execSQL("DELETE FROM session_messages WHERE memory_id LIKE ?",
-                    new Object[]{memoryIdPrefix + "%"});
-            db.execSQL("DELETE FROM sessions WHERE user_id = ? AND session_id = ?",
-                    new Object[]{userId, sessionId});
+            db.execSQL("DELETE FROM session_messages WHERE memory_id = ?",
+                    new Object[]{normalizedSessionId});
+            db.execSQL("DELETE FROM sessions WHERE session_id = ?",
+                    new Object[]{normalizedSessionId});
             db.setTransactionSuccessful();
             return true;
+        } catch (Exception e) {
+            Log.e(TAG, "deleteGlobalSession failed for " + sessionId, e);
+            return false;
         } finally {
             db.endTransaction();
         }
@@ -221,9 +269,14 @@ public class SessionMemoryStore implements ChatMemoryStore {
                 new Object[]{messageCount, tokenEstimate, compressionCount, userId, sessionId});
     }
 
-    /** 构建符合 ChatMemoryStore 约定的 memoryId */
+    /**
+     * 构建符合 ChatMemoryStore 约定的短期 memoryId。
+     * <p>
+     * 设计原因：短期记忆只按 sessionId 隔离，不再包含 userId。
+     * 同 session 内不同 userId、不同 personaId 共享短期上下文。
+     */
     public static String buildMemoryId(String userId, String sessionId) {
-        return userId + "_" + sessionId;
+        return SessionMemoryIds.shortTermMemoryId(sessionId);
     }
 
     public String currentMemoryId(String userId) {
@@ -291,6 +344,14 @@ public class SessionMemoryStore implements ChatMemoryStore {
                 db.execSQL("ALTER TABLE sessions ADD COLUMN persona_id TEXT DEFAULT 'chat'");
                 db.execSQL("ALTER TABLE sessions ADD COLUMN source_app TEXT");
                 db.execSQL("ALTER TABLE sessions ADD COLUMN updated_at INTEGER");
+            }
+            if (oldVersion < 3) {
+                // 短期 memory id 从 {userId}_{sessionId} 收敛为 sessionId。
+                // 旧记录保持不动（demo 阶段不做自动合并），新写入使用 session-scoped key。
+                db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS session_messages (" +
+                                "memory_id TEXT PRIMARY KEY, " +
+                                "messages TEXT NOT NULL)");
             }
         }
     }

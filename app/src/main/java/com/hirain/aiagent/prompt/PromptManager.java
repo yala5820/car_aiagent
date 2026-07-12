@@ -31,7 +31,7 @@ public class PromptManager {
     private final ConcurrentMap<String, PromptTemplate> cache = new ConcurrentHashMap<>();
 
     public PromptManager(Context context) {
-        this.context = context.getApplicationContext();
+        this.context = context != null ? context.getApplicationContext() : null;
     }
 
     /**

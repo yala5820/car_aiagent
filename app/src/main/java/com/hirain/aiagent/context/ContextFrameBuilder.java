@@ -36,10 +36,10 @@ public final class ContextFrameBuilder {
     private String timeContext;
     private String promptContext;
     private String renderedExtraContext;
-    private ContextMode mode = ContextMode.HYBRID_EXTRA_CONTEXT;
     private int tokenEstimate;
     private ContextDebugInfo debugInfo;
     private List<ContextSection> sections;
+    private List<ContextContribution> contributions;
 
     ContextFrameBuilder() {
     }
@@ -85,10 +85,10 @@ public final class ContextFrameBuilder {
     public ContextFrameBuilder timeContext(String value) { this.timeContext = value; return this; }
     public ContextFrameBuilder promptContext(String value) { this.promptContext = value; return this; }
     public ContextFrameBuilder renderedExtraContext(String value) { this.renderedExtraContext = value; return this; }
-    public ContextFrameBuilder mode(ContextMode value) { this.mode = value; return this; }
     public ContextFrameBuilder tokenEstimate(int value) { this.tokenEstimate = value; return this; }
     public ContextFrameBuilder debugInfo(ContextDebugInfo value) { this.debugInfo = value; return this; }
     public ContextFrameBuilder sections(List<ContextSection> value) { this.sections = value; return this; }
+    public ContextFrameBuilder contributions(List<ContextContribution> value) { this.contributions = value; return this; }
 
     /**
      * 构建 {@link ContextFrame}。
@@ -105,6 +105,6 @@ public final class ContextFrameBuilder {
                 selectedGroupIds, selectedToolNames,
                 effectivePersona, memorySummary, vehicleStateSnapshot,
                 timeContext, promptContext, renderedExtraContext,
-                mode, tokenEstimate, debugInfo, sections);
+                tokenEstimate, debugInfo, sections, contributions);
     }
 }

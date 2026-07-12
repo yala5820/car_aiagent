@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- 系统应用权限 Intentional，非 Context 改造引入 -->
+    <issue id="ProtectedPermissions" severity="ignore" />
+    <issue id="PermissionImpliesUnsupportedChromeOsHardware" severity="ignore" />
+    <issue id="QueryAllPackagesPermission" severity="ignore" />
+</lint>

@@ -7,12 +7,16 @@ import com.hirain.aiagent.memory.MemoryOrchestrator;
 import java.util.List;
 
 import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.UserMessage;
 
 /**
  * 记忆注入预处理器 — 在每轮 LLM 调用前注入长期记忆上下文。
  * <p>
  * 仅在首轮迭代（iteration = 0）时注入，避免重复。
+ * <p>
+ * 注意：Phase 4 起长期记忆唯一注入点已收敛到 AgentLoop 的 transient SystemMessage
+ * （{@code AgentLoopOrchestrator.buildSystemPromptMessage()}）。
+ * 此 preprocessor 仅保留给旧配置兼容，不能再把长期记忆拼入用户消息。
+ * TEXT / VOICE 主路径已不再使用此 preprocessor。
  */
 public class MemoryPreProcessor implements PreProcessor {
 
@@ -24,21 +28,8 @@ public class MemoryPreProcessor implements PreProcessor {
 
     @Override
     public List<ChatMessage> prepare(AgentLoopContext ctx) {
-        // 仅在首轮注入长期记忆
-        if (ctx.iteration() > 0) {
-            return List.of();
-        }
-
-        String userId = ctx.getContextData("user_id", String.class);
-        if (userId == null) userId = "default_user";
-
-        String longTermCtx = memoryOrchestrator.getUserContextDirect(userId) != null
-                ? memoryOrchestrator.getUserContextDirect(userId).getLongTermContext()
-                : "";
-
-        if (longTermCtx.isEmpty()) {
-            return List.of();
-        }
-        return List.of(UserMessage.from("【用户记忆参考】" + longTermCtx));
+        // Phase 4 起长期记忆唯一注入点已收敛到 AgentLoop 的 transient SystemMessage。
+        // 此 preprocessor 仅保留给旧配置兼容，不再注入长期记忆。
+        return List.of();
     }
 }

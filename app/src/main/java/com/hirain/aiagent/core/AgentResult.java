@@ -15,7 +15,15 @@ public final class AgentResult {
         SAFETY_VETO,
         TIMEOUT,
         INVALID_CONFIG,
-        INTERRUPTED
+        INTERRUPTED,
+        INVALID_INPUT,
+        CONTEXT_BUILD_FAILED,
+        CONTEXT_BUDGET_EXCEEDED,
+        REQUIRED_PROVIDER_FAILED,
+        TOOL_SPEC_RESOLUTION_FAILED,
+        MESSAGE_SEQUENCE_INVALID,
+        MEMORY_COMPACTION_FAILED,
+        CANCELLED
     }
 
     private final boolean success;

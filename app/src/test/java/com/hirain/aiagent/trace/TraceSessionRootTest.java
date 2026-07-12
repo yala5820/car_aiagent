@@ -1,7 +1,9 @@
 package com.hirain.aiagent.trace;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.trace.Span;
@@ -65,7 +67,12 @@ public class TraceSessionRootTest {
         child.end();
         session.close();
 
-        assertEquals(TraceSpanNames.RESPONSE_DISPATCH, exporter.spans.get(0).getName());
+        SpanData childData = exporter.spans.get(0);
+        assertNotNull("Child span data should exist", childData);
+        assertEquals(TraceSpanNames.RESPONSE_DISPATCH, childData.getName());
+        // 旧无 parent 方法仍以 rootContext 为父，所以 parentSpanId 应该是 root span 的 spanId
+        assertTrue("Old startChildSpan should have non-empty parentSpanId",
+                childData.getParentSpanId() != null && childData.getParentSpanId().length() > 0);
         tracerProvider.close();
     }
 

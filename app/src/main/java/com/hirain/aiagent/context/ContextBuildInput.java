@@ -1,6 +1,7 @@
 package com.hirain.aiagent.context;
 
-import com.hirain.aiagent.memory.MemoryOrchestrator;
+import com.hirain.aiagent.ai.langchain4j.tool.ToolRegistry;
+import com.hirain.aiagent.memory.ContextMemoryGateway;
 import com.hirain.aiagent.prompt.PromptManager;
 import com.hirain.aiagent.runtime.SystemTimeProvider;
 import com.hirain.aiagent.runtime.TimeProvider;
@@ -14,51 +15,50 @@ import com.hirain.aiagent.toolgroup.ToolGroupRegistry;
  */
 public final class ContextBuildInput {
 
-    private final ContextMode mode;
     private final ToolGroupRegistry toolGroupRegistry;
     private final PromptManager promptManager;
-    private final MemoryOrchestrator memoryOrchestrator;
+    private final ContextMemoryGateway memoryGateway;
     private final VehicleStatusProvider vehicleStatusProvider;
     private final TimeProvider timeProvider;
     private final ContextBudgetManager budgetManager;
+    private final ToolRegistry toolRegistry;
+    private final ContextTokenEstimator tokenEstimator;
 
     private ContextBuildInput(Builder builder) {
-        this.mode = builder.mode;
         this.toolGroupRegistry = builder.toolGroupRegistry;
         this.promptManager = builder.promptManager;
-        this.memoryOrchestrator = builder.memoryOrchestrator;
+        this.memoryGateway = builder.memoryGateway;
         this.vehicleStatusProvider = builder.vehicleStatusProvider;
         this.timeProvider = builder.timeProvider;
         this.budgetManager = builder.budgetManager;
+        this.toolRegistry = builder.toolRegistry;
+        this.tokenEstimator = builder.tokenEstimator;
     }
 
     public static Builder builder() {
         return new Builder();
     }
 
-    public ContextMode mode() { return mode; }
     public ToolGroupRegistry toolGroupRegistry() { return toolGroupRegistry; }
     public PromptManager promptManager() { return promptManager; }
-    public MemoryOrchestrator memoryOrchestrator() { return memoryOrchestrator; }
+    public ContextMemoryGateway memoryGateway() { return memoryGateway; }
     public VehicleStatusProvider vehicleStatusProvider() { return vehicleStatusProvider; }
     public TimeProvider timeProvider() { return timeProvider; }
     public ContextBudgetManager budgetManager() { return budgetManager; }
+    public ToolRegistry toolRegistry() { return toolRegistry; }
+    public ContextTokenEstimator tokenEstimator() { return tokenEstimator; }
 
     public static final class Builder {
-        private ContextMode mode = ContextMode.HYBRID_EXTRA_CONTEXT;
         private ToolGroupRegistry toolGroupRegistry;
         private PromptManager promptManager;
-        private MemoryOrchestrator memoryOrchestrator;
+        private ContextMemoryGateway memoryGateway;
         private VehicleStatusProvider vehicleStatusProvider;
         private TimeProvider timeProvider = new SystemTimeProvider();
         private ContextBudgetManager budgetManager = ContextBudgetManager.defaultBudget();
+        private ToolRegistry toolRegistry;
+        private ContextTokenEstimator tokenEstimator = new HeuristicContextTokenEstimator();
 
         private Builder() {}
-
-        public Builder mode(ContextMode value) {
-            if (value != null) this.mode = value;
-            return this;
-        }
 
         public Builder toolGroupRegistry(ToolGroupRegistry value) {
             this.toolGroupRegistry = value;
@@ -70,8 +70,8 @@ public final class ContextBuildInput {
             return this;
         }
 
-        public Builder memoryOrchestrator(MemoryOrchestrator value) {
-            this.memoryOrchestrator = value;
+        public Builder memoryGateway(ContextMemoryGateway value) {
+            this.memoryGateway = value;
             return this;
         }
 
@@ -87,6 +87,16 @@ public final class ContextBuildInput {
 
         public Builder budgetManager(ContextBudgetManager value) {
             if (value != null) this.budgetManager = value;
+            return this;
+        }
+
+        public Builder toolRegistry(ToolRegistry value) {
+            this.toolRegistry = value;
+            return this;
+        }
+
+        public Builder tokenEstimator(ContextTokenEstimator value) {
+            if (value != null) this.tokenEstimator = value;
             return this;
         }
 

@@ -36,4 +36,28 @@ public final class TestRequestSessions {
                                 IntentConfidence.HIGH,
                                 false));
     }
+
+    /** CHAT_ONLY 会话，用于验证无工具场景。 */
+    public static RequestSession chatOnlySession(String requestId, String sessionId,
+                                                  String userId, String personaId,
+                                                  String clientMessageId, String text) {
+        AgentRequest request = new AgentRequest();
+        request.setRequestId(requestId);
+        request.setSessionId(sessionId);
+        request.setUserId(userId);
+        request.setPersonaId(personaId);
+        request.setClientMessageId(clientMessageId);
+        request.setInputType("TEXT");
+        request.setText(text);
+        return new RequestSessionFactory(() -> "generated", () -> 1000L)
+                .create(request, null,
+                        IntentResult.of(IntentTag.CHAT, IntentConfidence.HIGH,
+                                List.of(), text, "TEXT", "CHAT_ONLY"),
+                        ToolGroupSelectionResult.of(
+                                List.of(),
+                                List.of(),
+                                "CHAT_ONLY",
+                                IntentConfidence.HIGH,
+                                false));
+    }
 }

@@ -5,6 +5,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 
 import com.hirain.aiagent.AgentRequest;
 import com.hirain.aiagent.intentrouter.IntentConfidence;
@@ -125,5 +126,26 @@ public class RequestSessionFactoryTest {
         assertEquals("user-A", session.orchestratorContext().get("user_id"));
         assertEquals("warm", session.orchestratorContext().get("persona_id"));
         assertEquals("client-9", session.orchestratorContext().get("client_message_id"));
+    }
+
+    @Test
+    public void create_withNullSelection_usesLightweightFallback() {
+        RequestSessionFactory factory = new RequestSessionFactory(() -> "req-1", () -> 1000L);
+        AgentRequest request = new AgentRequest();
+        request.setInputType("TEXT");
+        request.setText("你好");
+
+        RequestSession session = factory.create(request, null,
+                IntentResult.of(IntentTag.CHAT, IntentConfidence.LOW,
+                        List.of(), "你好", "TEXT", "test"),
+                null); // 传入 null selection
+
+        assertNotNull(session.toolGroupSelectionResult());
+        assertEquals("missing_tool_group_selection",
+                session.toolGroupSelectionResult().selectionReason());
+        // 轻量防线：CHAT_ONLY_GROUP + 空 tools，非全量兜底
+        assertEquals(List.of(ToolGroupId.CHAT_ONLY_GROUP),
+                session.toolGroupSelectionResult().selectedGroupIds());
+        assertTrue(session.toolGroupSelectionResult().selectedToolNames().isEmpty());
     }
 }

@@ -1,44 +1,52 @@
 package com.hirain.aiagent.context.provider;
 
 import com.hirain.aiagent.context.ContextBuildInput;
+import com.hirain.aiagent.context.ContextLifecycle;
+import com.hirain.aiagent.context.ContextPriority;
 import com.hirain.aiagent.context.ContextProvider;
 import com.hirain.aiagent.context.ContextProviderResult;
-import com.hirain.aiagent.context.ContextSection;
-import com.hirain.aiagent.context.ContextSectionType;
+import com.hirain.aiagent.context.ContextTrustLevel;
+import com.hirain.aiagent.context.ContextVisibility;
+import com.hirain.aiagent.context.MessageContextContribution;
+import com.hirain.aiagent.memory.SpeakerMessageFormatter;
 import com.hirain.aiagent.runtime.RequestSession;
 
-import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
+import dev.langchain4j.data.message.UserMessage;
+
 /**
- * 用户输入上下文 Provider — 记录原始和规范化后的用户输入。
- * <p>
- * HYBRID 模式下 renderable=false，避免把用户输入重复注入给 LLM。
+ * 用户输入上下文 Provider — 生成唯一 CURRENT_USER MessageContextContribution。
  */
 public class UserInputContextProvider implements ContextProvider {
 
     @Override
-    public String name() {
-        return "UserInputContextProvider";
-    }
+    public String name() { return "UserInputContextProvider"; }
 
     @Override
-    public ContextSectionType type() {
-        return ContextSectionType.USER_INPUT;
-    }
+    public ContextLifecycle lifecycle() { return ContextLifecycle.REQUEST_STATIC; }
+
+    @Override
+    public boolean required(RequestSession session, ContextBuildInput input) { return true; }
 
     @Override
     public ContextProviderResult provide(RequestSession session, ContextBuildInput input) {
         String rawInput = session.userInput() != null ? session.userInput() : "";
+        String userId = session.userId() != null ? session.userId() : "default_user";
         String normalizedInput = rawInput.trim();
-        Map<String, Object> metadata = new LinkedHashMap<>();
-        metadata.put("raw_user_input", rawInput);
-        metadata.put("normalized_user_input", normalizedInput);
-        metadata.put("input_length", rawInput.length());
 
-        // HYBRID 模式：不渲染用户输入，避免重复注入
-        ContextSection section = new ContextSection(
-                type(), name(), false, "", 0, false, metadata);
-        return ContextProviderResult.success(name(), section);
+        String formattedText = SpeakerMessageFormatter.formatUserMessage(userId, rawInput);
+        UserMessage currentUserMessage = UserMessage.from(formattedText);
+
+        MessageContextContribution contribution = new MessageContextContribution(
+                "user_input", ContextVisibility.MODEL_VISIBLE, ContextTrustLevel.TRUSTED_DATA,
+                ContextPriority.CRITICAL, ContextLifecycle.REQUEST_STATIC, true,
+                name(), MessageContextContribution.SOURCE_CURRENT_USER,
+                List.of(currentUserMessage),
+                Map.of("raw_user_input", rawInput,
+                        "normalized_user_input", normalizedInput,
+                        "input_length", rawInput.length()));
+        return ContextProviderResult.success(name(), List.of(contribution));
     }
 }

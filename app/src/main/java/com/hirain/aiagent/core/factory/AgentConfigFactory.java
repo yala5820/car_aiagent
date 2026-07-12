@@ -12,8 +12,6 @@ import com.hirain.aiagent.core.postprocessor.NoOpPostProcessor;
 import com.hirain.aiagent.core.postprocessor.SceneActionMergePostProcessor;
 import com.hirain.aiagent.core.postprocessor.VlWarningPostProcessor;
 import com.hirain.aiagent.core.preprocessor.ActiveControlPreProcessor;
-import com.hirain.aiagent.core.preprocessor.ContextExtraPreProcessor;
-import com.hirain.aiagent.core.preprocessor.MemoryPreProcessor;
 import com.hirain.aiagent.core.preprocessor.SceneContextPreProcessor;
 import com.hirain.aiagent.core.preprocessor.TimeContextPreProcessor;
 import com.hirain.aiagent.core.preprocessor.VehicleStatusPreProcessor;
@@ -70,9 +68,9 @@ public class AgentConfigFactory {
                 .maxIterations(10)
                 .maxMemoryMessages(50)
                 .memoryPolicy(AgentConfig.MemoryPolicy.PERSISTENT)
-                .chatMemoryStoreId("ChatMemory")
+                // session-scoped 主路径由 MemoryOrchestrator.chatMemoryForSession 决定；此字段仅保留给 legacy 路径
+                .chatMemoryStoreId("FallbackChatMemory")
                 .preProcessors(List.of(
-                        new MemoryPreProcessor(memoryOrchestrator),
                         new VehicleStatusPreProcessor(promptManager, statusProvider),
                         new TimeContextPreProcessor()))
                 .modelCaller(new Lc4jModelCaller(buildQwenTurbo()))
@@ -139,7 +137,9 @@ public class AgentConfigFactory {
                                                  VehicleSpeedManager speedManager,
                                                  String personaId) {
         String template = switchPersonaTemplate(personaId);
-        String memoryId = "ChatMemory";
+        // session-scoped 主路径由 MemoryOrchestrator.chatMemoryForSession(sessionId, maxMessages) 决定；
+        // 此字段仅保留给 legacy / 非 TEXT 兼容路径
+        String memoryId = "FallbackChatMemory";
         return AgentConfig.builder(normalizeTextPersona(personaId))
                 .modelName("qwen-turbo")
                 .systemPromptTemplateName(template)
@@ -147,11 +147,7 @@ public class AgentConfigFactory {
                 .maxMemoryMessages(50)
                 .memoryPolicy(AgentConfig.MemoryPolicy.PERSISTENT)
                 .chatMemoryStoreId(memoryId)
-                .preProcessors(List.of(
-                        new ContextExtraPreProcessor(),
-                        new MemoryPreProcessor(memoryOrchestrator),
-                        new VehicleStatusPreProcessor(promptManager, statusProvider),
-                        new TimeContextPreProcessor()))
+                .preProcessors(List.of())
                 .modelCaller(new Lc4jModelCaller(buildQwenTurbo()))
                 .toolExecutor(toolRegistry::dispatch)
                 .toolSubset(null)

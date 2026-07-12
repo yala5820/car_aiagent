@@ -3,6 +3,7 @@ package com.hirain.aiagent.runtime;
 import static org.junit.Assert.assertEquals;
 
 import com.hirain.aiagent.AgentRequest;
+import com.hirain.aiagent.context.ContextPrepareResult;
 import com.hirain.aiagent.core.AgentResult;
 import com.hirain.aiagent.intentrouter.IntentConfidence;
 import com.hirain.aiagent.intentrouter.IntentResult;
@@ -26,7 +27,7 @@ public class AgentRuntimeToolGroupTraceTest {
         TestTraceSupport.TestSession testSession = TestTraceSupport.redactedSession();
 
         AgentRuntime runtime = new AgentRuntime(
-                (userInput, ctx) -> AgentResult.success("完成", 1, 1L, List.of()),
+                (session, prepareResult) -> AgentResult.success("完成", 1, 1L, List.of()),
                 (text, sourceInputType) -> IntentResult.of(IntentTag.VEHICLE_AC, IntentConfidence.HIGH,
                         List.of("空调"), text, sourceInputType, "matched:VEHICLE_AC"),
                 (intentResult, userInput) -> ToolGroupSelectionResult.of(

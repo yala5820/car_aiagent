@@ -1,17 +1,22 @@
 package com.hirain.aiagent.context.provider;
 
 import com.hirain.aiagent.context.ContextBuildInput;
+import com.hirain.aiagent.context.ContextLifecycle;
+import com.hirain.aiagent.context.ContextPriority;
 import com.hirain.aiagent.context.ContextProvider;
 import com.hirain.aiagent.context.ContextProviderResult;
-import com.hirain.aiagent.context.ContextSection;
-import com.hirain.aiagent.context.ContextSectionType;
+import com.hirain.aiagent.context.ContextTrustLevel;
+import com.hirain.aiagent.context.ContextVisibility;
+import com.hirain.aiagent.context.TextContextContribution;
 import com.hirain.aiagent.runtime.RequestSession;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
  * 运行时上下文 Provider — 输出 requestId/sessionId/userId/personaId/clientMessageId 等运行时元信息。
+ * 贡献标记为 POLICY_ONLY，不进入模型消息，仅用于 Trace/Policy 诊断。
  */
 public class RuntimeContextProvider implements ContextProvider {
 
@@ -21,8 +26,14 @@ public class RuntimeContextProvider implements ContextProvider {
     }
 
     @Override
-    public ContextSectionType type() {
-        return ContextSectionType.RUNTIME;
+    public ContextLifecycle lifecycle() {
+        return ContextLifecycle.REQUEST_STATIC;
+    }
+
+    @Override
+    public boolean required(RequestSession session, ContextBuildInput input) {
+        // TEXT 路径始终必需；校验身份在 provide 中完成
+        return true;
     }
 
     @Override
@@ -37,9 +48,12 @@ public class RuntimeContextProvider implements ContextProvider {
         metadata.put("client_message_id", session.clientMessageId());
         metadata.put("input_type", session.inputType());
 
-        ContextSection section = new ContextSection(
-                type(), name(), true, content, charCount, false, metadata);
-        return ContextProviderResult.success(name(), section);
+        TextContextContribution contribution = new TextContextContribution(
+                "runtime", ContextVisibility.POLICY_ONLY, ContextTrustLevel.TRUSTED_DATA,
+                ContextPriority.CRITICAL, ContextLifecycle.REQUEST_STATIC, true,
+                name(), TextContextContribution.TARGET_CONTEXT_DATA,
+                content, metadata);
+        return ContextProviderResult.success(name(), List.of(contribution));
     }
 
     private static String buildContent(RequestSession session) {

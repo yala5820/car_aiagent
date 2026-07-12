@@ -2,6 +2,7 @@ package com.hirain.aiagent.trace;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import com.hirain.aiagent.core.SafetyVerdict;
@@ -48,6 +49,9 @@ public class AgentTraceRecorderTest {
         String messages = data.getAttributes().get(AttributeKey.stringKey(TraceAttributeKeys.PROMPT_TRANSIENT_MESSAGES));
         assertFalse(messages.contains("13812345678"));
         assertTrue(messages.contains("138****5678"));
+        // 旧方法（不含 parent 参数）仍产生 root-parented span
+        assertNotNull("Old method should produce root-parented span (non-null parentSpanId)",
+                data.getParentSpanId());
     }
 
     @Test

@@ -62,6 +62,28 @@ public class MemoryCompressor {
      * @param trace          当前 Agent trace recorder；为 null 时保持原有无 trace 行为
      * @return 压缩后的消息列表（压缩过则新列表，否则原样返回）
      */
+    /**
+     * 生成压缩计划 — 确定哪些消息可以压缩，但不调用摘要模型。
+     * 返回提议消息列表：保留最近 COMPRESS_KEEP_LAST 轮 + SystemMessage。
+     */
+    public List<ChatMessage> planCompact(List<ChatMessage> messages, int targetTokens) {
+        if (messages == null || messages.size() <= COMPRESS_KEEP_LAST + 2) {
+            return new ArrayList<>(messages != null ? messages : List.of());
+        }
+        List<ChatMessage> result = new ArrayList<>();
+        for (ChatMessage msg : messages) {
+            if (msg instanceof SystemMessage) {
+                result.add(msg);
+                break;
+            }
+        }
+        int keepStart = Math.max(messages.size() - COMPRESS_KEEP_LAST * 2, 0);
+        for (int i = keepStart; i < messages.size(); i++) {
+            result.add(messages.get(i));
+        }
+        return result;
+    }
+
     public List<ChatMessage> compress(List<ChatMessage> messages, int currentTokens,
                                       AgentTraceRecorder trace) {
         Span span = trace != null

@@ -10,7 +10,7 @@ import java.util.List;
  * 基于 IntentResult 的默认 ToolGroup 选择器。
  * <p>
  * 将粗粒度 IntentTag 映射到候选 ToolGroup 列表。
- * BASIC_STATUS_GROUP 仅附加到车辆类意图；WEATHER、VISION_QA、CHAT 不附加。
+ * 无法判断意图时兜底返回 ALL_SAFE_DEMO_GROUP + 全量候选 toolName。
  */
 public class DefaultToolGroupSelector implements ToolGroupSelector {
 
@@ -23,7 +23,8 @@ public class DefaultToolGroupSelector implements ToolGroupSelector {
     @Override
     public ToolGroupSelectionResult select(IntentResult intentResult, String userInput) {
         if (intentResult == null || intentResult.intentTag() == null) {
-            return ToolGroupSelectionResult.fallback("fallback:null_intent");
+            return buildResult(List.of(ToolGroupId.ALL_SAFE_DEMO_GROUP),
+                    "fallback:null_intent_all_tools", IntentConfidence.NONE, true);
         }
         String text = textFor(intentResult, userInput);
         List<ToolGroupId> groupIds = groupIdsFor(intentResult.intentTag(), text);
@@ -33,8 +34,18 @@ public class DefaultToolGroupSelector implements ToolGroupSelector {
         IntentConfidence confidence = intentResult.confidence() != null
                 ? intentResult.confidence()
                 : IntentConfidence.NONE;
-        return ToolGroupSelectionResult.of(groupIds, registry.toolNamesFor(groupIds),
-                reason, confidence, fallback);
+        return buildResult(groupIds, reason, confidence, fallback);
+    }
+
+    /**
+     * 通过 registry 补齐 requiredContextKeys、highestRiskLevel、allToolsFallback、containsAggregationGroup，
+     * 确保 Context 能以统一方式读取元信息。
+     */
+    private ToolGroupSelectionResult buildResult(List<ToolGroupId> groupIds,
+                                                  String reason,
+                                                  IntentConfidence confidence,
+                                                  boolean fallbackUsed) {
+        return ToolGroupSelectionResult.enriched(registry, groupIds, reason, confidence, fallbackUsed);
     }
 
     private List<ToolGroupId> groupIdsFor(IntentTag tag, String text) {
@@ -65,7 +76,7 @@ public class DefaultToolGroupSelector implements ToolGroupSelector {
             default:
                 return hasWeakVehicleKeyword(text)
                         ? List.of(ToolGroupId.COMMON_VEHICLE_GROUP, ToolGroupId.BASIC_STATUS_GROUP)
-                        : List.of(ToolGroupId.CHAT_ONLY_GROUP);
+                        : List.of(ToolGroupId.ALL_SAFE_DEMO_GROUP);
         }
     }
 
@@ -73,7 +84,7 @@ public class DefaultToolGroupSelector implements ToolGroupSelector {
         if (tag == IntentTag.UNKNOWN) {
             return hasWeakVehicleKeyword(text)
                     ? "fallback:unknown_vehicle_keyword"
-                    : "fallback:unknown_chat";
+                    : "fallback:unknown_all_tools";
         }
         if (tag == IntentTag.CHAT && hasWeakVehicleKeyword(text)) {
             return "fallback:chat_vehicle_keyword";

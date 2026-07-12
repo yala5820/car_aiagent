@@ -1,20 +1,22 @@
 package com.hirain.aiagent.context.provider;
 
 import com.hirain.aiagent.context.ContextBuildInput;
+import com.hirain.aiagent.context.ContextLifecycle;
+import com.hirain.aiagent.context.ContextPriority;
 import com.hirain.aiagent.context.ContextProvider;
 import com.hirain.aiagent.context.ContextProviderResult;
-import com.hirain.aiagent.context.ContextSection;
-import com.hirain.aiagent.context.ContextSectionType;
+import com.hirain.aiagent.context.ContextTrustLevel;
+import com.hirain.aiagent.context.ContextVisibility;
+import com.hirain.aiagent.context.TextContextContribution;
 import com.hirain.aiagent.runtime.RequestSession;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
  * 人格上下文 Provider — 输出请求的 persona 信息。
- * <p>
- * 不使用 InputType/INTENT 等路由逻辑重新 normalize personaId，
- * 直接使用 {@link RequestSession#personaId()} 的值。
+ * 贡献标记为 POLICY_ONLY，不进入模型消息，仅用于 Trace/Policy 记录有效人格。
  */
 public class PersonaContextProvider implements ContextProvider {
 
@@ -24,8 +26,13 @@ public class PersonaContextProvider implements ContextProvider {
     }
 
     @Override
-    public ContextSectionType type() {
-        return ContextSectionType.PERSONA;
+    public ContextLifecycle lifecycle() {
+        return ContextLifecycle.REQUEST_STATIC;
+    }
+
+    @Override
+    public boolean required(RequestSession session, ContextBuildInput input) {
+        return false;
     }
 
     @Override
@@ -34,12 +41,14 @@ public class PersonaContextProvider implements ContextProvider {
         String content = "【人格上下文】\n"
                 + "- requestedPersonaId: " + personaId + "\n"
                 + "- effectivePersonaId: " + personaId;
-        int charCount = content.length();
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("persona_id", personaId);
 
-        ContextSection section = new ContextSection(
-                type(), name(), true, content, charCount, false, metadata);
-        return ContextProviderResult.success(name(), section);
+        TextContextContribution contribution = new TextContextContribution(
+                "persona", ContextVisibility.POLICY_ONLY, ContextTrustLevel.TRUSTED_DATA,
+                ContextPriority.NORMAL, ContextLifecycle.REQUEST_STATIC, false,
+                name(), TextContextContribution.TARGET_CONTEXT_DATA,
+                content, metadata);
+        return ContextProviderResult.success(name(), List.of(contribution));
     }
 }

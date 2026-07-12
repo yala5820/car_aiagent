@@ -1,191 +1,320 @@
 package com.hirain.aiagent.context;
 
+import com.hirain.aiagent.context.provider.CallerExtraContextProvider;
+
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Context;
 import com.hirain.aiagent.context.provider.IntentContextProvider;
-import com.hirain.aiagent.context.provider.MemoryContextProvider;
+import com.hirain.aiagent.context.provider.LongTermMemoryContextProvider;
 import com.hirain.aiagent.context.provider.PersonaContextProvider;
 import com.hirain.aiagent.context.provider.PromptContextProvider;
 import com.hirain.aiagent.context.provider.RuntimeContextProvider;
+import com.hirain.aiagent.context.provider.SessionMemoryContextProvider;
 import com.hirain.aiagent.context.provider.TimeContextProvider;
 import com.hirain.aiagent.context.provider.ToolGroupContextProvider;
 import com.hirain.aiagent.context.provider.UserInputContextProvider;
 import com.hirain.aiagent.context.provider.VehicleStateContextProvider;
 import com.hirain.aiagent.runtime.RequestSession;
+import com.hirain.aiagent.runtime.RequestSessionFactory;
+import dev.langchain4j.data.message.UserMessage;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
- * Context 构建总入口 — 按 Provider 顺序构建 section、渲染 extraContext、收集诊断信息。
+ * Context 构建总入口 — 实现 {@link ContextPreparer} 和 {@link ContextAssemblyGateway}。
  * <p>
- * 构造函数接受可注入 Provider 列表，{@link #defaultForText(ContextBuildInput)} 提供标准 9-Provider 链。
+ * Phase 2 新增 prepare() 和 assemble() 两条链路：
+ * <ul>
+ *   <li>prepare() — 只运行请求级静态 Provider，每个 RequestSession 只执行一次</li>
+ *   <li>assemble() — 每次迭代运行动态 Provider</li>
+ * </ul>
+ * 旧 build() 保留兼容，内部调用 prepare() 后生成旧格式结果。
  */
-public class ContextOrchestrator {
+public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGateway {
 
     private final ContextBuildInput input;
-    private final List<ContextProvider> providers;
+    private final List<ContextProvider> requestStaticProviders;
+    private final List<ContextProvider> iterationDynamicProviders;
 
-    public ContextOrchestrator(ContextBuildInput input, List<ContextProvider> providers) {
+    /**
+     * 全参数构造函数 — 分别指定请求级和迭代级 Provider。
+     */
+    public ContextOrchestrator(ContextBuildInput input,
+                                List<ContextProvider> requestStaticProviders,
+                                List<ContextProvider> iterationDynamicProviders) {
         this.input = input;
-        this.providers = providers;
+        this.requestStaticProviders = requestStaticProviders;
+        this.iterationDynamicProviders = iterationDynamicProviders;
     }
 
     /**
-     * 标准 TEXT 请求 Provider 链 — 包含全部 9 个 Provider。
+     * 旧二参构造函数（兼容现有测试）— 所有 Provider 视为 request-static。
+     */
+    public ContextOrchestrator(ContextBuildInput input,
+                                List<ContextProvider> providers) {
+        this(input, providers, List.of());
+    }
+
+    /**
+     * 标准 TEXT 请求 Provider 链 — request-static + iteration-dynamic 分拆。
      */
     public static ContextOrchestrator defaultForText(ContextBuildInput input) {
-        return new ContextOrchestrator(input, List.of(
-                new RuntimeContextProvider(),
-                new PersonaContextProvider(),
-                new UserInputContextProvider(),
-                new IntentContextProvider(),
-                new ToolGroupContextProvider(),
-                new MemoryContextProvider(),
-                new VehicleStateContextProvider(),
-                new TimeContextProvider(),
-                new PromptContextProvider()
-        ));
+        return new ContextOrchestrator(input,
+                // request-static
+                List.of(
+                        new RuntimeContextProvider(),
+                        new PersonaContextProvider(),
+                        new PromptContextProvider(),
+                        new UserInputContextProvider(),
+                        new IntentContextProvider(),
+                        new ToolGroupContextProvider(),
+                        new LongTermMemoryContextProvider(),
+                        new CallerExtraContextProvider()),
+                // iteration-dynamic
+                List.of(
+                        new SessionMemoryContextProvider(),
+                        new VehicleStateContextProvider(),
+                        new TimeContextProvider()));
     }
 
+    // ── prepare（请求级静态 Provider） ──
+
     /**
-     * 构建 Context：按序驱动 Provider、收集 section、渲染 extraContext。
+     * 请求级准备 — 创建 context.prepare span，运行 request-static Provider。
      */
-    public ContextBuildResult build(RequestSession session) {
-        if (session == null) {
-            ContextFrame emptyFrame = new ContextFrameBuilder()
-                    .mode(input.mode()).effectivePersonaId("chat")
-                    .renderedExtraContext("").build();
-            return ContextBuildResult.fallback(emptyFrame, "session_is_null");
-        }
-        long startMs = System.currentTimeMillis();
+    public ContextPrepareResult prepare(RequestSession session,
+                                         ContextCancelChecker cancelChecker) {
+        ContextTraceRecorder traceRecorder = session != null
+                ? new ContextTraceRecorder(session.traceContext()) : null;
+        Span prepareSpan = traceRecorder != null
+                ? traceRecorder.startPrepareSpan(io.opentelemetry.context.Context.current())
+                : null;
+        io.opentelemetry.context.Scope scope = prepareSpan != null
+                ? prepareSpan.makeCurrent() : null;
 
-        List<ContextSection> sections = new ArrayList<>();
-        List<String> providerNames = new ArrayList<>();
-        List<String> fallbackProviders = new ArrayList<>();
-        Map<String, String> providerErrors = new LinkedHashMap<>();
-
-        // ── 遍历 Provider 链 ──
-        for (ContextProvider provider : providers) {
-            try {
-                ContextProviderResult result = provider.provide(session, input);
-                providerNames.add(provider.name());
-
-                if (result.section() != null) {
-                    sections.add(result.section());
-                }
-                if (result.fallback()) {
-                    fallbackProviders.add(provider.name());
-                }
-                if (!result.success()) {
-                    providerErrors.put(provider.name(),
-                            result.errorReason() != null ? result.errorReason() : "unknown_error");
-                }
-            } catch (Exception e) {
-                providerNames.add(provider.name());
-                fallbackProviders.add(provider.name());
-                providerErrors.put(provider.name(),
-                        e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
+        try {
+            if (session == null) {
+                return ContextPrepareResult.failed(
+                        ContextErrorCode.CONTEXT_INTERNAL_ERROR, "session is null");
             }
+            if (cancelChecker != null && cancelChecker.isCancelled()) {
+                return ContextPrepareResult.cancelled("cancelled_before_prepare");
+            }
+
+            long startMs = System.currentTimeMillis();
+            List<ContextProviderOutcome> outcomes = new ArrayList<>();
+            List<ContextContribution> allContributions = new ArrayList<>();
+
+            for (ContextProvider provider : requestStaticProviders) {
+                try {
+                    ContextProviderResult result = provider.provide(session, input);
+                    allContributions.addAll(result.contributions());
+                    if (result.outcome() != null) {
+                        outcomes.add(result.outcome());
+                    }
+                    // required Provider 失败 → 中断 prep
+                    if (result.status() != ContextProviderStatus.SUCCESS && provider.required(session, input)) {
+                        if (prepareSpan != null) prepareSpan.setAttribute("required_provider_failed", provider.name());
+                        return ContextPrepareResult.failed(
+                                result.errorCode() != null ? result.errorCode()
+                                        : ContextErrorCode.REQUIRED_PROVIDER_FAILED,
+                                "Required provider failed: " + provider.name()
+                                        + " - " + (result.errorReason() != null
+                                        ? result.errorReason() : "unknown"));
+                    }
+                } catch (Exception e) {
+                    outcomes.add(new ContextProviderOutcome(
+                            provider.name(), ContextProviderStatus.FAILED,
+                            ContextErrorCode.REQUIRED_PROVIDER_FAILED,
+                            e.getMessage(), System.currentTimeMillis() - startMs));
+                    if (provider.required(session, input)) {
+                        if (prepareSpan != null) prepareSpan.setAttribute("required_provider_failed", provider.name());
+                        return ContextPrepareResult.failed(
+                                ContextErrorCode.REQUIRED_PROVIDER_FAILED,
+                                "Required provider threw exception: " + provider.name()
+                                        + " - " + e.getMessage());
+                    }
+                }
+                // 每 Provider 之间检查取消
+                if (cancelChecker != null && cancelChecker.isCancelled()) {
+                    return ContextPrepareResult.cancelled("cancelled_during_prepare");
+                }
+            }
+
+            // 记录 Provider 指标到 span
+            long successCount = outcomes.stream().filter(
+                    o -> o.status() == ContextProviderStatus.SUCCESS).count();
+            long fallbackCount = outcomes.stream().filter(
+                    o -> o.status() == ContextProviderStatus.FALLBACK).count();
+            long failedCount = outcomes.stream().filter(
+                    o -> o.status() == ContextProviderStatus.FAILED).count();
+            if (prepareSpan != null) {
+                prepareSpan.setAttribute("provider.count", requestStaticProviders.size());
+                prepareSpan.setAttribute("provider.success", (int) successCount);
+                prepareSpan.setAttribute("provider.fallback", (int) fallbackCount);
+                prepareSpan.setAttribute("provider.failed", (int) failedCount);
+                prepareSpan.setAttribute("contribution.count", allContributions.size());
+                prepareSpan.setAttribute("duration.ms", System.currentTimeMillis() - startMs);
+            }
+
+            // 构造 ContextFrame
+            ContextFrame frame = ContextFrameBuilder.fromSession(session)
+                    .effectivePersonaId(session.personaId())
+                    .contributions(allContributions)
+                    .build();
+
+            if (cancelChecker != null && cancelChecker.isCancelled()) {
+                return ContextPrepareResult.cancelled("cancelled_after_prepare");
+            }
+
+            // 从 Contribution 中提取 CURRENT_USER 的 UserMessage
+            UserMessage currentUserMsg = null;
+            for (ContextContribution c : allContributions) {
+                if (c instanceof MessageContextContribution
+                        && MessageContextContribution.SOURCE_CURRENT_USER
+                                .equals(((MessageContextContribution) c).messageSource())) {
+                    List<dev.langchain4j.data.message.ChatMessage> msgs =
+                            ((MessageContextContribution) c).messages();
+                    if (msgs != null && !msgs.isEmpty()
+                            && msgs.get(0) instanceof dev.langchain4j.data.message.UserMessage) {
+                        currentUserMsg = (dev.langchain4j.data.message.UserMessage) msgs.get(0);
+                    }
+                    break;
+                }
+            }
+            return ContextPrepareResult.success(frame, currentUserMsg, cancelChecker, outcomes);
+        } finally {
+            if (scope != null) scope.close();
+            if (prepareSpan != null) prepareSpan.end();
         }
-
-        // ── 预算裁剪：对每个 renderable section 按 sectionCharLimit 裁剪 ──
-        sections = trimSectionsByBudget(sections, input.budgetManager());
-
-        // ── FULL_CONTEXT 降级标记 ──
-        if (input.mode() == ContextMode.FULL_CONTEXT) {
-            fallbackProviders.add("full_context_deferred");
-        }
-
-        // ── 拼接 renderedExtraContext（二次按 totalCharLimit 裁剪） ──
-        String rendered = renderExtraContext(sections, input.mode(), input.budgetManager());
-        int tokenEst = input.budgetManager().estimateTokens(rendered);
-
-        // ── 构建 DebugInfo ──
-        long elapsed = System.currentTimeMillis() - startMs;
-        ContextDebugInfo debugInfo = new ContextDebugInfo(
-                providerNames, fallbackProviders, providerErrors,
-                sections.size(), !fallbackProviders.isEmpty(), elapsed);
-
-        // ── 提取各类型 section content ──
-        String memorySummary = findFirstContent(sections, ContextSectionType.MEMORY);
-        String vehicleStateSnapshot = findFirstContent(sections, ContextSectionType.VEHICLE_STATE);
-        String timeContext = findFirstContent(sections, ContextSectionType.TIME);
-        String promptContext = findFirstContent(sections, ContextSectionType.PROMPT);
-
-        // ── 构造 ContextFrame ──
-        ContextFrame frame = ContextFrameBuilder.fromSession(session)
-                .mode(input.mode())
-                .effectivePersonaId(session.personaId())
-                .renderedExtraContext(rendered)
-                .tokenEstimate(tokenEst)
-                .memorySummary(memorySummary)
-                .vehicleStateSnapshot(vehicleStateSnapshot)
-                .timeContext(timeContext)
-                .promptContext(promptContext)
-                .sections(sections)
-                .debugInfo(debugInfo)
-                .build();
-
-        // ── 写入 Trace ──
-        ContextTraceRecorder recorder = new ContextTraceRecorder(session.traceContext());
-        String firstError = !providerErrors.isEmpty()
-                ? providerErrors.values().iterator().next() : null;
-        recorder.record(true, input.mode(),
-                providers.size(), String.join(",", providerNames),
-                frame.selectedToolNames().size(), String.join(",", frame.selectedToolNames()),
-                sections.size(), tokenEst,
-                !fallbackProviders.isEmpty(), elapsed, firstError);
-
-        if (sections.isEmpty()) {
-            return ContextBuildResult.fallback(frame, "all_context_providers_failed");
-        }
-        return ContextBuildResult.success(frame, !fallbackProviders.isEmpty());
     }
 
-    // ── 渲染规则 ──
-
-    private static String renderExtraContext(List<ContextSection> sections, ContextMode mode,
-                                              ContextBudgetManager budgetManager) {
-        if (mode == ContextMode.OBSERVE_ONLY) {
-            return "";
-        }
-        // FULL_CONTEXT 一期降级为 HYBRID 行为
-        String rendered = sections.stream()
-                .filter(ContextSection::renderable)
-                .map(ContextSection::content)
-                .filter(text -> !text.isEmpty())
-                .collect(Collectors.joining("\n\n"));
-        // 汇总后按 totalCharLimit 二次裁剪
-        String trimmed = budgetManager.trim(rendered, budgetManager.totalCharLimit()).text();
-        return trimmed;
-    }
+    // ── assemble（迭代级动态 Provider + 消息装配） ──
 
     /**
-     * 对每个 section 按 sectionCharLimit 裁剪其 content，并更新 charCount/truncated。
-     * 不裁剪不可渲染的 section。
+     * 每轮迭代装配 — 运行 iteration-dynamic Provider 并调用 ContextMessageAssembler。
+     * Phase 2 仅建立方法骨架，Phase 3 影子装配才完整调用。
      */
-    private static List<ContextSection> trimSectionsByBudget(
-            List<ContextSection> sections, ContextBudgetManager budgetManager) {
-        return sections.stream()
-                .map(section -> {
-                    if (!section.renderable()) return section;
-                    ContextBudgetManager.TrimmedText result =
-                            budgetManager.trim(section.content(), budgetManager.sectionCharLimit());
-                    if (!result.truncated()) return section;
-                    return new ContextSection(section.type(), section.providerName(),
-                            section.renderable(), result.text(), result.text().length(),
-                            true, section.metadata());
-                })
-                .collect(Collectors.toList());
+    public ContextAssemblyResult assemble(ContextAssemblyRequest request) {
+        ContextTraceRecorder traceRecorder = request != null && request.session() != null
+                ? new ContextTraceRecorder(request.session().traceContext()) : null;
+        Span assembleSpan = traceRecorder != null
+                ? traceRecorder.startAssembleSpan(
+                        request != null ? request.iteration() : -1,
+                        io.opentelemetry.context.Context.current())
+                : null;
+        try {
+            int iteration = request != null ? request.iteration() : -1;
+            if (assembleSpan != null) assembleSpan.setAttribute("iteration", iteration);
+
+            // 检查取消
+            if (request != null && request.cancelChecker() != null
+                    && request.cancelChecker().isCancelled()) {
+                return ContextAssemblyResult.failure(
+                        ContextErrorCode.CONTEXT_CANCELLED,
+                        "cancelled_before_assemble",
+                        new ContextAssemblyDebugInfo(List.of(), 0, 0, "cancelled"));
+            }
+
+            // 运行动态提供者（传入真实 RequestSession）
+            List<ContextProviderOutcome> outcomes = new ArrayList<>();
+            List<ContextContribution> dynamicContributions = new ArrayList<>();
+            RequestSession reqSession = request != null ? request.session() : null;
+            if (reqSession == null) {
+                return ContextAssemblyResult.failure(
+                        ContextErrorCode.CONTEXT_INTERNAL_ERROR,
+                        "ContextAssemblyRequest session is null",
+                        new ContextAssemblyDebugInfo(List.of(), 0, 0, "null_session"));
+            }
+
+            for (ContextProvider provider : iterationDynamicProviders) {
+                try {
+                    ContextProviderResult result = provider.provide(reqSession, input);
+                    if (result.outcome() != null) {
+                        outcomes.add(result.outcome());
+                    }
+                    dynamicContributions.addAll(result.contributions());
+                    // required Provider 失败 → 中断 assemble
+                    if (result.status() != ContextProviderStatus.SUCCESS && provider.required(reqSession, input)) {
+                        return ContextAssemblyResult.failure(
+                                result.errorCode() != null ? result.errorCode()
+                                        : ContextErrorCode.REQUIRED_PROVIDER_FAILED,
+                                "Required provider failed: " + provider.name()
+                                        + " - " + (result.errorReason() != null
+                                        ? result.errorReason() : "unknown"),
+                                new ContextAssemblyDebugInfo(outcomes, 0, 0, "required_provider_failed"));
+                    }
+                } catch (Exception e) {
+                    outcomes.add(new ContextProviderOutcome(
+                            provider.name(), ContextProviderStatus.FAILED, null,
+                            e.getMessage(), 0));
+                    // 异常时也检查 required
+                    if (provider.required(reqSession, input)) {
+                        return ContextAssemblyResult.failure(
+                                ContextErrorCode.REQUIRED_PROVIDER_FAILED,
+                                "Required provider exception: " + provider.name()
+                                        + " - " + e.getMessage(),
+                                new ContextAssemblyDebugInfo(outcomes, 0, 0, "required_provider_exception"));
+                    }
+                }
+            }
+
+            // 每个动态 Provider 间及 Assembler 前检查取消
+            if (request.cancelChecker() != null && request.cancelChecker().isCancelled()) {
+                return ContextAssemblyResult.failure(
+                        ContextErrorCode.CONTEXT_CANCELLED,
+                        "cancelled_during_dynamic_providers",
+                        new ContextAssemblyDebugInfo(outcomes, 0, 0, "cancelled"));
+            }
+
+            // 合并静态 + 动态贡献
+            List<ContextContribution> allContributions = new ArrayList<>();
+            if (request.frame() != null) {
+                allContributions.addAll(request.frame().contributions());
+            }
+            allContributions.addAll(dynamicContributions);
+
+            // 调用 ContextMessageAssembler 生成消息
+            ContextFrame mergedFrame = ContextFrameBuilder.fromSession(reqSession)
+                    .contributions(allContributions)
+                    .build();
+            ContextTokenEstimator estimator = input.tokenEstimator();
+            ContextAssemblyResult assembleResult = ContextMessageAssembler.assemble(
+                    mergedFrame, request.budgetPolicy(), estimator);
+
+            // 合并 outcomes：Assembler 内部不创建 Provider outcome，将 assemble 阶段的 outcomes 附加到结果
+            if (assembleResult.success()
+                    && (assembleResult.providerOutcomes() == null
+                        || assembleResult.providerOutcomes().isEmpty())) {
+                assembleResult = ContextAssemblyResult.success(
+                        assembleResult.messages(), assembleResult.toolSpecifications(),
+                        assembleResult.budgetReport(), assembleResult.debugInfo(), outcomes);
+            }
+
+            if (assembleSpan != null) {
+                assembleSpan.setAttribute("message.count",
+                        assembleResult.messages() != null ? assembleResult.messages().size() : 0);
+                assembleSpan.setAttribute("tool.count",
+                        assembleResult.toolSpecifications() != null ? assembleResult.toolSpecifications().size() : 0);
+                assembleSpan.setAttribute("provider.outcome.count", outcomes.size());
+                if (assembleResult.budgetReport() != null) {
+                    assembleSpan.setAttribute("tokens.estimated",
+                            assembleResult.budgetReport().estimatedInputTokens());
+                    assembleSpan.setAttribute("tokens.max",
+                            assembleResult.budgetReport().maxInputTokens());
+                    assembleSpan.setAttribute("budget.within",
+                            assembleResult.budgetReport().withinBudget());
+                }
+                if (!assembleResult.success() && assembleResult.errorCode() != null) {
+                    assembleSpan.setAttribute("error.code", assembleResult.errorCode().name());
+                }
+            }
+
+            return assembleResult;
+        } finally {
+            if (assembleSpan != null) assembleSpan.end();
+        }
     }
 
-    private static String findFirstContent(List<ContextSection> sections, ContextSectionType type) {
-        return sections.stream()
-                .filter(s -> s.type() == type)
-                .findFirst()
-                .map(ContextSection::content)
-                .orElse("");
-    }
 }

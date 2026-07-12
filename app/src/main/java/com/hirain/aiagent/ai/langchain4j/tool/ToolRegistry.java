@@ -2,8 +2,10 @@ package com.hirain.aiagent.ai.langchain4j.tool;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -38,19 +40,68 @@ public class ToolRegistry {
     /** 完整的工具规格列表（按注册顺序） */
     private List<ToolSpecification> allSpecs = List.of();
 
-    /** 注册一个或多个工具管理器 */
+    /** 注册一个或多个工具管理器。拒绝同名工具覆盖。 */
     public void registerAll(Object... managers) {
         List<ToolSpecification> specs = new ArrayList<>();
+        Set<String> seenNames = new LinkedHashSet<>();
         for (Object mgr : managers) {
             ToolDispatcher dispatcher = new ToolDispatcher(mgr);
             List<ToolSpecification> mgrSpecs =
                     ToolSpecifications.toolSpecificationsFrom(mgr.getClass());
             for (ToolSpecification spec : mgrSpecs) {
+                if (!seenNames.add(spec.name())) {
+                    throw new IllegalArgumentException(
+                            "Duplicate tool name: " + spec.name());
+                }
                 dispatchers.put(spec.name(), dispatcher);
             }
             specs.addAll(mgrSpecs);
         }
         allSpecs = List.copyOf(specs);
+    }
+
+    /**
+     * 按名称查询一组工具规格，保持输入顺序。
+     *
+     * @param names 工具名称列表（去重保留顺序）
+     * @return 对应的 ToolSpecification 列表
+     * @throws ToolSpecNotFoundException 任一名称不存在时抛出
+     */
+    public List<ToolSpecification> toolSpecificationsByNames(List<String> names) {
+        List<ToolSpecification> result = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        if (names != null) {
+            for (String name : names) {
+                if (name != null && seen.add(name)) {
+                    ToolDispatcher d = dispatchers.get(name);
+                    if (d == null) {
+                        throw new ToolSpecNotFoundException(name);
+                    }
+                    // Find the matching spec from allSpecs
+                    ToolSpecification match = null;
+                    for (ToolSpecification spec : allSpecs) {
+                        if (name.equals(spec.name())) {
+                            match = spec;
+                            break;
+                        }
+                    }
+                    if (match != null) {
+                        result.add(match);
+                    } else {
+                        throw new ToolSpecNotFoundException(name);
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 返回全部已启用工具规格（Demo 阶段等价于全量）。
+     * 仅供已经确认 {@code allToolsFallback=true} 的分支使用。
+     */
+    public List<ToolSpecification> enabledToolSpecifications() {
+        return new ArrayList<>(allSpecs);
     }
 
     /**

@@ -50,9 +50,9 @@ public class UserMemoryContext {
         sessionManager.startNewSession(userId);
     }
 
-    /** 结束 Session */
+    /** 结束当前用户的 Session */
     public void endSession() {
-        sessionManager.endSession();
+        sessionManager.endSession(userId);
     }
 
     // ── 长期记忆 ──

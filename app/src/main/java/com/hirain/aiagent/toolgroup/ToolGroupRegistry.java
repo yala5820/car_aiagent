@@ -5,6 +5,9 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+
+import dev.langchain4j.agent.tool.ToolSpecification;
 
 /**
  * 工具组注册表 — 维护 ToolGroupId 到 ToolGroup 的映射。
@@ -167,5 +170,125 @@ public class ToolGroupRegistry {
             }
         }
         return List.copyOf(merged);
+    }
+
+    // ── 扩展查询接口 ──
+
+    /**
+     * 返回 registry 中所有 enabled 业务组（非聚合、非上下文标记）的唯一 toolName。
+     * 不包含 disabled 组和 BASIC_STATUS_GROUP（上下文标记组，无工具）。
+     */
+    public List<String> allToolNames() {
+        LinkedHashSet<String> merged = new LinkedHashSet<>();
+        for (ToolGroup group : groups.values()) {
+            if (!group.enabled()) continue;
+            if (isAggregationGroup(group.groupId())) continue;
+            if (isContextMarkerGroup(group.groupId())) continue;
+            merged.addAll(group.toolNames());
+        }
+        return List.copyOf(merged);
+    }
+
+    /**
+     * 按 groupIds 顺序合并去重 requiredContextKeys。
+     * 例如 AC_GROUP + BASIC_STATUS_GROUP → ["user_id", "vehicle_status"]。
+     */
+    public List<String> requiredContextKeysFor(List<ToolGroupId> groupIds) {
+        LinkedHashSet<String> merged = new LinkedHashSet<>();
+        for (ToolGroupId groupId : groupIds) {
+            ToolGroup group = groups.get(groupId);
+            if (group != null) {
+                merged.addAll(group.requiredContextKeys());
+            }
+        }
+        return List.copyOf(merged);
+    }
+
+    /**
+     * 计算最高风险等级。空列表返回 LOW。顺序：LOW < MEDIUM < HIGH。
+     */
+    public String highestRiskLevelFor(List<ToolGroupId> groupIds) {
+        int max = 0;
+        for (ToolGroupId groupId : groupIds) {
+            ToolGroup group = groups.get(groupId);
+            if (group == null) continue;
+            int level = riskLevelToInt(group.riskLevel());
+            if (level > max) max = level;
+        }
+        return intToRiskLevel(max);
+    }
+
+    /**
+     * 当 groupIds 中包含 COMMON_VEHICLE_GROUP 或 ALL_SAFE_DEMO_GROUP 时返回 true。
+     */
+    public boolean containsAggregationGroup(List<ToolGroupId> groupIds) {
+        for (ToolGroupId groupId : groupIds) {
+            if (isAggregationGroup(groupId)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 上下文标记组：无工具但有 requiredContextKeys（如 BASIC_STATUS_GROUP）。
+     */
+    public boolean isContextMarkerGroup(ToolGroupId groupId) {
+        ToolGroup group = groups.get(groupId);
+        return group != null && group.isContextMarker();
+    }
+
+    /**
+     * 聚合组：COMMON_VEHICLE_GROUP 或 ALL_SAFE_DEMO_GROUP。
+     */
+    public boolean isAggregationGroup(ToolGroupId groupId) {
+        ToolGroup group = groups.get(groupId);
+        return group != null && group.isAggregation();
+    }
+
+    // ── 内部辅助 ──
+
+    private static int riskLevelToInt(String risk) {
+        if ("HIGH".equals(risk)) return 2;
+        if ("MEDIUM".equals(risk)) return 1;
+        return 0; // LOW or unknown
+    }
+
+    private static String intToRiskLevel(int level) {
+        if (level >= 2) return "HIGH";
+        if (level >= 1) return "MEDIUM";
+        return "LOW";
+    }
+
+    // ── LangChain4j 一致性校验 ──
+
+    /**
+     * 与 LangChain4j ToolSpecification 做双向一致性校验。
+     * <p>
+     * missing：registry 中声明了但 ToolSpecification 中不存在的 toolName。
+     * ungrouped：ToolSpecification 中存在但 registry 中未覆盖的 toolName。
+     * 本阶段不强制 fail fast，仅返回校验结果供测试/日志使用。
+     */
+    public ToolGroupRegistryValidationResult validateAgainstToolSpecifications(
+            List<ToolSpecification> langchain4jSpecs) {
+        Set<String> specNames = new LinkedHashSet<>();
+        if (langchain4jSpecs != null) {
+            for (ToolSpecification spec : langchain4jSpecs) {
+                specNames.add(spec.name());
+            }
+        }
+        Set<String> registryNames = new LinkedHashSet<>(allToolNames());
+
+        List<String> missing = new ArrayList<>();
+        for (String name : registryNames) {
+            if (!specNames.contains(name)) missing.add(name);
+        }
+        List<String> ungrouped = new ArrayList<>();
+        for (String name : specNames) {
+            if (!registryNames.contains(name)) ungrouped.add(name);
+        }
+
+        if (missing.isEmpty() && ungrouped.isEmpty()) {
+            return ToolGroupRegistryValidationResult.empty();
+        }
+        return ToolGroupRegistryValidationResult.of(missing, ungrouped);
     }
 }

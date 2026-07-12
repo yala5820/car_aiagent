@@ -38,10 +38,10 @@ public final class ContextFrame {
     private final String timeContext;
     private final String promptContext;
     private final String renderedExtraContext;
-    private final ContextMode mode;
     private final int tokenEstimate;
     private final ContextDebugInfo debugInfo;
     private final List<ContextSection> sections;
+    private final List<ContextContribution> contributions;
 
     // Used only by ContextFrameBuilder
     ContextFrame(String requestId, String clientMessageId,
@@ -54,8 +54,9 @@ public final class ContextFrame {
                  String effectivePersonaId, String memorySummary,
                  String vehicleStateSnapshot, String timeContext,
                  String promptContext, String renderedExtraContext,
-                 ContextMode mode, int tokenEstimate,
-                 ContextDebugInfo debugInfo, List<ContextSection> sections) {
+                 int tokenEstimate,
+                 ContextDebugInfo debugInfo, List<ContextSection> sections,
+                 List<ContextContribution> contributions) {
         this.requestId = requestId;
         this.clientMessageId = clientMessageId;
         this.userId = userId;
@@ -78,11 +79,13 @@ public final class ContextFrame {
         this.timeContext = timeContext != null ? timeContext : "";
         this.promptContext = promptContext != null ? promptContext : "";
         this.renderedExtraContext = renderedExtraContext != null ? renderedExtraContext : "";
-        this.mode = mode;
         this.tokenEstimate = tokenEstimate;
         this.debugInfo = debugInfo;
         this.sections = sections != null
                 ? Collections.unmodifiableList(new ArrayList<>(sections))
+                : List.of();
+        this.contributions = contributions != null
+                ? Collections.unmodifiableList(new ArrayList<>(contributions))
                 : List.of();
     }
 
@@ -115,36 +118,8 @@ public final class ContextFrame {
     // ── 渲染结果 / 模式 / 预算 / 调试 ──
 
     public String renderedExtraContext() { return renderedExtraContext; }
-    public ContextMode mode() { return mode; }
     public int tokenEstimate() { return tokenEstimate; }
     public ContextDebugInfo debugInfo() { return debugInfo; }
     public List<ContextSection> sections() { return sections; }
-
-    // ── Orchestrator 上下文合并 ──
-
-    /**
-     * 将当前 ContextFrame 的元信息合并到 AgentLoopOrchestrator 上下文中。
-     * <p>
-     * 规则：
-     * <ul>
-     *   <li>不覆盖 baseContext 已有的 {@code extra_context}，同时保留一份到 {@code caller_extra_context}</li>
-     *   <li>写入 {@code context_frame}、{@code context_mode}、{@code context_rendered_extra}</li>
-     *   <li>写入 {@code selected_tool_names}、{@code selected_group_ids}</li>
-     * </ul>
-     */
-    public Map<String, Object> toOrchestratorContext(Map<String, Object> baseContext) {
-        Map<String, Object> safeBase = baseContext != null ? baseContext : new HashMap<>();
-        Map<String, Object> merged = new HashMap<>(safeBase);
-        merged.put("context_frame", this);
-        merged.put("context_mode", mode.name());
-        merged.put("context_rendered_extra", renderedExtraContext);
-        merged.put("selected_tool_names", selectedToolNames);
-        merged.put("selected_group_ids", selectedGroupIds.stream()
-                .map(Enum::name)
-                .collect(Collectors.toList()));
-        if (safeBase.containsKey("extra_context")) {
-            merged.put("caller_extra_context", safeBase.get("extra_context"));
-        }
-        return Collections.unmodifiableMap(merged);
-    }
+    public List<ContextContribution> contributions() { return contributions; }
 }

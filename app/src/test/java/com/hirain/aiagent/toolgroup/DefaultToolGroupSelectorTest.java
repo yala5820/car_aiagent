@@ -72,15 +72,15 @@ public class DefaultToolGroupSelectorTest {
     }
 
     @Test
-    public void select_unknownWithoutVehicleKeywordReturnsChatOnly() {
+    public void select_unknownWithoutVehicleKeywordReturnsAllSafeDemo() {
         IntentResult intent = IntentResult.unknown("随便聊聊", "TEXT", "empty_text");
 
         ToolGroupSelectionResult result = selector.select(intent, "随便聊聊");
 
-        assertEquals(List.of(ToolGroupId.CHAT_ONLY_GROUP), result.selectedGroupIds());
-        assertTrue(result.selectedToolNames().isEmpty());
-        assertEquals("fallback:unknown_chat", result.selectionReason());
+        assertEquals(List.of(ToolGroupId.ALL_SAFE_DEMO_GROUP), result.selectedGroupIds());
+        assertEquals("fallback:unknown_all_tools", result.selectionReason());
         assertTrue(result.fallbackUsed());
+        assertTrue(result.allToolsFallback());
     }
 
     @Test
@@ -164,5 +164,67 @@ public class DefaultToolGroupSelectorTest {
                 result.selectedToolNames().contains(expectedTool));
         assertEquals("intent:" + tag.name(), result.selectionReason());
         assertFalse(result.fallbackUsed());
+    }
+
+    @Test
+    public void select_viaToolGroupSelectionInput_roundTripsInputTypeAndPersona() {
+        IntentResult intent = IntentResult.of(IntentTag.VEHICLE_AC, IntentConfidence.HIGH,
+                List.of("空调"), "打开空调", "VOICE", "matched:VEHICLE_AC");
+
+        ToolGroupSelectionInput input = ToolGroupSelectionInput.builder()
+                .intentResult(intent)
+                .userInput("打开空调")
+                .inputType("VOICE")
+                .userId("user-1")
+                .sessionId("sess-99")
+                .personaId("assistant")
+                .build();
+
+        ToolGroupSelectionResult result = selector.select(input);
+
+        // 选择结果仍然正确
+        assertEquals(List.of(ToolGroupId.AC_GROUP, ToolGroupId.BASIC_STATUS_GROUP),
+                result.selectedGroupIds());
+        assertTrue(result.selectedToolNames().contains("set_ac_status"));
+        // 输入对象自身字段透传正确
+        assertEquals("VOICE", input.inputType());
+        assertEquals("assistant", input.personaId());
+        assertEquals("user-1", input.userId());
+        assertEquals("sess-99", input.sessionId());
+    }
+
+    // ── Phase 3: 全量兜底 ──
+
+    @Test
+    public void select_nullIntentResult_returnsAllSafeDemoGroup() {
+        ToolGroupSelectionResult result = selector.select((IntentResult) null, "");
+
+        assertEquals(List.of(ToolGroupId.ALL_SAFE_DEMO_GROUP), result.selectedGroupIds());
+        assertEquals("fallback:null_intent_all_tools", result.selectionReason());
+        assertTrue(result.allToolsFallback());
+    }
+
+    @Test
+    public void select_vehicleAc_containsCorrectMetadata() {
+        IntentResult intent = IntentResult.of(IntentTag.VEHICLE_AC, IntentConfidence.HIGH,
+                List.of("空调"), "打开空调", "TEXT", "matched:VEHICLE_AC");
+
+        ToolGroupSelectionResult result = selector.select(intent, "打开空调");
+
+        assertTrue(result.requiredContextKeys().contains("user_id"));
+        assertEquals("MEDIUM", result.highestRiskLevel());
+        assertFalse(result.allToolsFallback());
+        assertFalse(result.containsAggregationGroup());
+    }
+
+    @Test
+    public void select_unknownWithoutKeyword_hasAllToolsFallbackTrue() {
+        IntentResult intent = IntentResult.unknown("什么", "TEXT", "empty_text");
+
+        ToolGroupSelectionResult result = selector.select(intent, "什么");
+
+        assertTrue(result.allToolsFallback());
+        // 全量兜底时 selectedToolNames 不应为空
+        assertFalse(result.selectedToolNames().isEmpty());
     }
 }

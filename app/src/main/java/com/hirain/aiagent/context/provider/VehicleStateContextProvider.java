@@ -1,57 +1,65 @@
 package com.hirain.aiagent.context.provider;
 
 import com.hirain.aiagent.context.ContextBuildInput;
+import com.hirain.aiagent.context.ContextLifecycle;
+import com.hirain.aiagent.context.ContextPriority;
 import com.hirain.aiagent.context.ContextProvider;
 import com.hirain.aiagent.context.ContextProviderResult;
-import com.hirain.aiagent.context.ContextSection;
-import com.hirain.aiagent.context.ContextSectionType;
+import com.hirain.aiagent.context.ContextProviderStatus;
+import com.hirain.aiagent.context.ContextTrustLevel;
+import com.hirain.aiagent.context.ContextVisibility;
+import com.hirain.aiagent.context.TextContextContribution;
 import com.hirain.aiagent.runtime.RequestSession;
 
-import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
-/**
- * 车辆状态快照 Provider — HYBRID 模式不渲染，避免与 VehicleStatusPreProcessor 重复注入。
- */
 public class VehicleStateContextProvider implements ContextProvider {
 
     @Override
-    public String name() {
-        return "VehicleStateContextProvider";
-    }
+    public String name() { return "VehicleStateContextProvider"; }
 
     @Override
-    public ContextSectionType type() {
-        return ContextSectionType.VEHICLE_STATE;
+    public ContextLifecycle lifecycle() { return ContextLifecycle.ITERATION_DYNAMIC; }
+
+    @Override
+    public boolean required(RequestSession session, ContextBuildInput input) {
+        if (session == null || input == null || input.toolGroupRegistry() == null) return false;
+        com.hirain.aiagent.toolgroup.ToolGroupSelectionResult sel = session.toolGroupSelectionResult();
+        if (sel == null) return false;
+        java.util.List<String> contextKeys = input.toolGroupRegistry()
+                .requiredContextKeysFor(sel.selectedGroupIds());
+        return contextKeys.contains("vehicle_status");
     }
 
     @Override
     public ContextProviderResult provide(RequestSession session, ContextBuildInput input) {
-        Map<String, Object> metadata = new LinkedHashMap<>();
         String snapshot = "";
+        ContextProviderStatus status = ContextProviderStatus.SUCCESS;
+        String errorDetail = null;
 
         if (input.vehicleStatusProvider() != null) {
             try {
                 snapshot = input.vehicleStatusProvider().getVehicleStatus();
-                metadata.put("vehicle_snapshot_available", true);
             } catch (Exception e) {
                 snapshot = "";
-                metadata.put("vehicle_snapshot_available", false);
-                String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-                return ContextProviderResult.fallback(name(),
-                        new ContextSection(type(), name(), false, "", 0, false, metadata),
-                        "vehicle_status_provider_exception: " + errorMsg);
+                status = ContextProviderStatus.FALLBACK;
+                errorDetail = "vehicle_status_provider_exception: " + e.getMessage();
             }
         } else {
-            metadata.put("vehicle_snapshot_available", false);
-            return ContextProviderResult.fallback(name(),
-                    new ContextSection(type(), name(), false, "", 0, false, metadata),
-                    "vehicle_status_provider_not_configured");
+            status = ContextProviderStatus.FALLBACK;
+            errorDetail = "vehicle_status_provider_not_configured";
         }
 
-        // HYBRID 模式：不渲染车辆状态，避免与 VehicleStatusPreProcessor 重复注入
-        ContextSection section = new ContextSection(
-                type(), name(), false, snapshot, snapshot.length(), false, metadata);
-        return ContextProviderResult.success(name(), section);
+        TextContextContribution contribution = new TextContextContribution(
+                "vehicle_state", ContextVisibility.MODEL_VISIBLE, ContextTrustLevel.TRUSTED_DATA,
+                ContextPriority.NORMAL, ContextLifecycle.ITERATION_DYNAMIC, false,
+                name(), TextContextContribution.TARGET_CONTEXT_DATA,
+                snapshot, Map.of());
+
+        if (status == ContextProviderStatus.FALLBACK) {
+            return ContextProviderResult.fallback(name(), errorDetail, List.of(contribution));
+        }
+        return ContextProviderResult.success(name(), List.of(contribution));
     }
 }

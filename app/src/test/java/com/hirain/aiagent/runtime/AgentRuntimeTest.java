@@ -34,8 +34,13 @@ public class AgentRuntimeTest {
     public void execute_callsExecutorWithNormalizedContext() {
         AtomicReference<String> input = new AtomicReference<>();
         AtomicReference<Map<String, Object>> context = new AtomicReference<>();
-        AgentExecutor executor = (userInput, ctx) -> {
-            input.set(userInput);
+        AgentExecutor executor = (session, prepareResult) -> {
+            input.set(session.userInput());
+            // Phase 6: AgentExecutor 不再经过 toOrchestratorContext，直接使用 prepareResult
+            java.util.Map<String, Object> ctx = new java.util.HashMap<>();
+            if (prepareResult.frame() != null) {
+                ctx.put("user_id", session.userId());
+            }
             context.set(ctx);
             return AgentResult.success("完成", 1, 10L, List.of());
         };
@@ -52,22 +57,18 @@ public class AgentRuntimeTest {
         assertEquals("完成", result.output());
         assertEquals("打开空调", input.get());
         assertEquals("default_user", context.get().get("user_id"));
-        assertSame(traceContext, context.get().get(TraceContext.TRACE_CONTEXT_KEY));
         assertEquals("req-fixed", result.requestId());
         assertEquals(3000L, result.timestampMs());
-        assertEquals("HYBRID_EXTRA_CONTEXT", context.get().get("context_mode"));
-        assertTrue(context.get().containsKey("context_frame"));
-        assertTrue(context.get().containsKey("context_rendered_extra"));
     }
 
     @Test
     public void execute_mapsExecutorExceptionToExceptionResult() {
-        AgentExecutor failingExecutor = (userInput, ctx) -> {
+        AgentExecutor failingExecutor = (session, prepareResult) -> {
             throw new RuntimeException("模拟失败");
         };
         AgentRuntime runtime = new AgentRuntime(failingExecutor, () -> "req-fixed", () -> 3000L);
 
-        RuntimeResult result = runtime.execute(runtime.startSession(new AgentRequest(), null));
+        RuntimeResult result = runtime.execute(runtime.startSession(createRequest("测试"), null));
 
         assertEquals("EXCEPTION", result.errorType());
         assertNotNull(result.errorDetail());
@@ -75,7 +76,7 @@ public class AgentRuntimeTest {
 
     @Test
     public void timeoutResult_createsTimeoutResultWithSessionIds() {
-        AgentRuntime runtime = new AgentRuntime((userInput, ctx) ->
+        AgentRuntime runtime = new AgentRuntime((session, prepareResult) ->
                 AgentResult.success("ok", 1, 10L, List.of()), () -> "req-fixed", () -> 3000L);
         AgentRequest request = new AgentRequest();
         request.setInputType("TEXT");
@@ -94,7 +95,7 @@ public class AgentRuntimeTest {
                 IntentResult.of(IntentTag.VEHICLE_AC, IntentConfidence.HIGH,
                         List.of("空调"), text, sourceInputType, "matched:VEHICLE_AC");
         AgentRuntime runtime = new AgentRuntime(
-                (userInput, ctx) -> AgentResult.success("完成", 1, 10L, List.of()),
+                (session, prepareResult) -> AgentResult.success("完成", 1, 10L, List.of()),
                 router,
                 () -> "req-fixed",
                 () -> 3000L);
@@ -116,12 +117,12 @@ public class AgentRuntimeTest {
             throw new IllegalStateException("router failed");
         };
         AgentRuntime runtime = new AgentRuntime(
-                (userInput, ctx) -> AgentResult.success("继续执行", 1, 10L, List.of()),
+                (session, prepareResult) -> AgentResult.success("继续执行", 1, 10L, List.of()),
                 router,
                 () -> "req-fixed",
                 () -> 3000L);
 
-        RequestSession session = runtime.startSession(new AgentRequest(), null);
+        RequestSession session = runtime.startSession(createRequest("测试"), null);
         RuntimeResult result = runtime.execute(session);
 
         assertEquals(IntentTag.UNKNOWN, session.intentResult().intentTag());
@@ -137,7 +138,7 @@ public class AgentRuntimeTest {
                 IntentResult.of(IntentTag.WEATHER, IntentConfidence.MEDIUM,
                         List.of("天气"), text, sourceInputType, "matched:WEATHER");
         AgentRuntime runtime = new AgentRuntime(
-                (userInput, ctx) -> AgentResult.success("ok", 1, 10L, List.of()),
+                (session, prepareResult) -> AgentResult.success("ok", 1, 10L, List.of()),
                 router,
                 () -> "req-1",
                 () -> 2000L);
@@ -174,7 +175,8 @@ public class AgentRuntimeTest {
                 false);
         AtomicReference<Map<String, Object>> context = new AtomicReference<>();
         AgentRuntime runtime = new AgentRuntime(
-                (userInput, ctx) -> {
+                (session, prepareResult) -> {
+                    java.util.Map<String, Object> ctx = new java.util.HashMap<>();
                     context.set(ctx);
                     return AgentResult.success("完成", 1, 10L, List.of());
                 },
@@ -192,11 +194,7 @@ public class AgentRuntimeTest {
         assertEquals(List.of(ToolGroupId.AC_GROUP, ToolGroupId.BASIC_STATUS_GROUP),
                 session.toolGroupSelectionResult().selectedGroupIds());
         assertTrue(result.success());
-        // ContextFrame.toOrchestratorContext 现在会写入 selected_tool_names 和 selected_group_ids
-        assertTrue(context.get().containsKey("selected_tool_names"));
-        assertTrue(context.get().containsKey("selected_group_ids"));
-        assertTrue(context.get().containsKey("context_rendered_extra"));
-        assertEquals("HYBRID_EXTRA_CONTEXT", context.get().get("context_mode"));
+        // Phase 6: Context 独占链路，prepareResult 直接驱动 AgentLoop
     }
 
     @Test
@@ -205,22 +203,43 @@ public class AgentRuntimeTest {
             throw new IllegalStateException("selector failed");
         };
         AgentRuntime runtime = new AgentRuntime(
-                (userInput, ctx) -> AgentResult.success("继续执行", 1, 10L, List.of()),
+                (session, prepareResult) -> AgentResult.success("继续执行", 1, 10L, List.of()),
                 (text, sourceInputType) -> IntentResult.of(IntentTag.CHAT, IntentConfidence.LOW,
                         List.of(), text, sourceInputType, "fallback_chat"),
                 failingSelector,
                 () -> "req-fixed",
                 () -> 3000L);
 
-        RequestSession session = runtime.startSession(new AgentRequest(), null);
+        RequestSession session = runtime.startSession(createRequest("测试"), null);
         RuntimeResult result = runtime.execute(session);
 
-        assertEquals(List.of(ToolGroupId.CHAT_ONLY_GROUP),
+        assertEquals(List.of(ToolGroupId.ALL_SAFE_DEMO_GROUP),
                 session.toolGroupSelectionResult().selectedGroupIds());
-        assertEquals("tool_group_selector_exception",
+        assertEquals("tool_group_selector_exception_all_tools",
                 session.toolGroupSelectionResult().selectionReason());
+        assertTrue(session.toolGroupSelectionResult().allToolsFallback());
         assertTrue(session.toolGroupSelectionResult().fallbackUsed());
         assertTrue(result.success());
+    }
+
+    @Test
+    public void startSession_toolGroupSelectorReturnsNull_returnsAllToolsFallback() {
+        ToolGroupSelector nullReturningSelector = (intentResult, userInput) -> null;
+        AgentRuntime runtime = new AgentRuntime(
+                (session, prepareResult) -> AgentResult.success("继续执行", 1, 10L, List.of()),
+                (text, sourceInputType) -> IntentResult.of(IntentTag.CHAT, IntentConfidence.LOW,
+                        List.of(), text, sourceInputType, "fallback_chat"),
+                nullReturningSelector,
+                () -> "req-fixed",
+                () -> 3000L);
+
+        RequestSession session = runtime.startSession(createRequest("测试"), null);
+
+        assertEquals(List.of(ToolGroupId.ALL_SAFE_DEMO_GROUP),
+                session.toolGroupSelectionResult().selectedGroupIds());
+        assertEquals("tool_group_selector_null_all_tools",
+                session.toolGroupSelectionResult().selectionReason());
+        assertTrue(session.toolGroupSelectionResult().allToolsFallback());
     }
 
     @Test
@@ -240,7 +259,33 @@ public class AgentRuntimeTest {
         assertEquals("warm", session.orchestratorContext().get("persona_id"));
     }
 
+    @Test
+    public void startSession_toolGroupSelectorException_reasonContainsAllTools() {
+        ToolGroupSelector failingSelector = (intentResult, userInput) -> {
+            throw new IllegalStateException("selector failed");
+        };
+        AgentRuntime runtime = new AgentRuntime(
+                (session, prepareResult) -> AgentResult.success("继续执行", 1, 10L, List.of()),
+                (text, sourceInputType) -> IntentResult.of(IntentTag.CHAT, IntentConfidence.LOW,
+                        List.of(), text, sourceInputType, "fallback_chat"),
+                failingSelector,
+                () -> "req-fixed",
+                () -> 3000L);
+
+        RequestSession session = runtime.startSession(createRequest("测试"), null);
+        assertTrue(session.toolGroupSelectionResult().selectionReason()
+                .contains("_all_tools"));
+        assertTrue(session.toolGroupSelectionResult().allToolsFallback());
+    }
+
     // ── Test helpers ──
+
+    private static AgentRequest createRequest(String text) {
+        AgentRequest req = new AgentRequest();
+        req.setInputType("TEXT");
+        req.setText(text);
+        return req;
+    }
 
     private static SpanData findSpan(List<SpanData> spans, String name) {
         for (SpanData span : spans) {

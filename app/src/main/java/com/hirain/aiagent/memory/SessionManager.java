@@ -128,6 +128,16 @@ public class SessionManager {
         return true;
     }
 
+    /**
+     * 将 sessionId 缓存为 userId 的 active session（不操作 DB）。
+     * <p>
+     * 设计原因：resolveSessionId 收到显式 sessionId 且 metadata 已创建后，
+     * 需要更新 in-memory 缓存使 userId->activeSession 指针一致。
+     */
+    public void cacheSession(String userId, String sessionId) {
+        activeSessions.put(userId, new ActiveSessionState(sessionId, System.currentTimeMillis()));
+    }
+
     // ── 兼容旧读取器 ──
 
     public String currentSessionId() { return currentSessionId(currentUserId.get()); }

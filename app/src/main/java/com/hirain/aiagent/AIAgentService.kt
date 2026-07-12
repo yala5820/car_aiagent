@@ -49,10 +49,11 @@ import com.hirain.aiagent.tools.vehicle.speed.VehicleSpeedManager
 import com.hirain.aiagent.tools.vehicle.window.VehicleWindowManager
 import com.hirain.aiagent.VirtualStateMachine.VehicleStateMachine
 import com.hirain.aiagent.context.ContextBuildInput
-import com.hirain.aiagent.context.ContextMode
+
 import com.hirain.aiagent.context.ContextOrchestrator
 import com.hirain.aiagent.runtime.RuntimeCancelChecker
 import com.hirain.aiagent.runtime.SystemTimeProvider
+import com.hirain.aiagent.core.TextAgentLoopOrchestrator
 import com.hirain.aiagent.tools.vision.vl.VlManager
 import com.hirain.aiagent.AgentRequest
 import com.hirain.aiagent.AgentResponse
@@ -102,7 +103,7 @@ class AIAgentService : Service() {
     private var mNagativeTTSplaying = false;
     private lateinit var sceneMatcher: SceneMatch
 
-    private lateinit var textOrchestrator: AgentLoopOrchestrator
+    private lateinit var textOrchestrator: TextAgentLoopOrchestrator
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var mChating = false
@@ -374,36 +375,40 @@ class AIAgentService : Service() {
                 statusProvider, speedManager),
             this, promptManager!!, memoryOrchestrator, toolRegistry.toolSpecifications)
 
-        // ── TEXT Persona Orchestrator（单一实例，Persona 通过 context 动态变更） ──
-        textOrchestrator = AgentLoopOrchestrator(
-            AgentConfigFactory.createTextPersona(
-                this, promptManager!!, memoryOrchestrator,
-                toolRegistry, statusProvider, speedManager, "chat"
-            ),
-            this, promptManager!!,
-            memoryOrchestrator, toolRegistry.toolSpecifications
-        )
-
-        // ── ContextOrchestrator 初始化 ──
+        // ── ContextOrchestrator 初始化（必须在 textOrchestrator 前创建，因为需要注入作为 ContextAssemblyGateway） ──
         contextOrchestrator = ContextOrchestrator.defaultForText(
             ContextBuildInput.builder()
-                .mode(ContextMode.HYBRID_EXTRA_CONTEXT)
                 .toolGroupRegistry(com.hirain.aiagent.toolgroup.ToolGroupRegistry.defaultRegistry())
                 .promptManager(promptManager!!)
-                .memoryOrchestrator(memoryOrchestrator)
+                .memoryGateway(memoryOrchestrator)
+                .toolRegistry(toolRegistry)
                 .vehicleStatusProvider { statusProvider.getVehicleStatus() }
                 .timeProvider(SystemTimeProvider())
                 .build()
         )
 
-        // ── AgentRuntime 初始化 ──
+        // ── TEXT Persona Orchestrator（专用 AgentLoop：只接收 ContextMemoryGateway + ContextAssemblyGateway） ──
+        textOrchestrator = TextAgentLoopOrchestrator(
+            AgentConfigFactory.createTextPersona(
+                this, promptManager!!, memoryOrchestrator,
+                toolRegistry, statusProvider, speedManager, "chat"
+            ),
+            memoryOrchestrator,  // implements ContextMemoryGateway
+            contextOrchestrator   // implements ContextAssemblyGateway
+        )
+
+        // ── AgentRuntime 初始化（注入 memoryOrchestrator 作为 SessionIdResolver） ──
         agentRuntime = AgentRuntime(
-            AgentExecutor { userInput, context ->
-                textOrchestrator.execute(userInput, context)
+            AgentExecutor { session, prepareResult ->
+                // Phase 5：直接调用 TEXT 独占入口，ChatRequest 由 ContextAssemblyResult 驱动
+                textOrchestrator.execute(session, prepareResult)
             },
             contextOrchestrator,
+            memoryOrchestrator,
             RuntimeCancelChecker { runtimeSession ->
-                activeRequestRegistry.get(runtimeSession.requestId())?.isCancelled == true
+                activeRequestRegistry.get(runtimeSession.requestId())?.let {
+                    it.state() != com.hirain.aiagent.runtime.ActiveRequest.TerminalState.RUNNING
+                } ?: false
             }
         )
         runtimeResponseMapper = RuntimeResponseMapper()
@@ -799,8 +804,12 @@ class AIAgentService : Service() {
             }
             "ClearChatMemory", "@#%^ClearChatMemory" -> {
                 mainHandler.post {
-                    memoryOrchestrator.startNewSession(request.sessionId ?: "default_user")
-                    chatOrchestrator.cleanMemory()
+                    // 清除当前共享 session 的短期消息，不创建新 session
+                    val userId = normalizeUserId(request)
+                    val sessionId = request.sessionId
+                        ?: memoryOrchestrator.resolveSessionId(
+                            userId, null, request.text, request.personaId, request.sourceApp)
+                    memoryOrchestrator.clearSessionMemory(sessionId)
                 }
             }
             else -> Log.w("TAG", "Unknown control command: $command")

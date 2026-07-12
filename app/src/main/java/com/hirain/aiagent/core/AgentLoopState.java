@@ -19,18 +19,23 @@ public class AgentLoopState {
     private final AtomicInteger currentIteration = new AtomicInteger(0);
 
     /**
-     * 尝试启动。允许从任何非 RUNNING 状态启动（IDLE / COMPLETED / ERROR / TIMEOUT）。
-     * 只有真正并发运行时返回 false。
+     * 尝试启动。使用 CAS 保证原子性，允许从任何非 RUNNING 状态启动（IDLE / COMPLETED / ERROR / TIMEOUT）。
+     * 两线程同时抢占时只能一个成功。
      */
     public boolean tryStart() {
-        if (state.get() == State.RUNNING.ordinal()) {
-            return false;
+        while (true) {
+            int current = state.get();
+            if (current == State.RUNNING.ordinal()) {
+                return false;
+            }
+            if (state.compareAndSet(current, State.RUNNING.ordinal())) {
+                startTimeMs.set(System.currentTimeMillis());
+                endTimeMs.set(0);
+                currentIteration.set(0);
+                return true;
+            }
+            // CAS 失败 → 重试（另一线程改变了 state）
         }
-        state.set(State.RUNNING.ordinal());
-        startTimeMs.set(System.currentTimeMillis());
-        endTimeMs.set(0);
-        currentIteration.set(0);
-        return true;
     }
 
     public void markCompleted() {

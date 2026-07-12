@@ -1,23 +1,24 @@
 package com.hirain.aiagent.context.provider;
 
 import com.hirain.aiagent.context.ContextBuildInput;
+import com.hirain.aiagent.context.ContextLifecycle;
+import com.hirain.aiagent.context.ContextPriority;
 import com.hirain.aiagent.context.ContextProvider;
 import com.hirain.aiagent.context.ContextProviderResult;
-import com.hirain.aiagent.context.ContextSection;
-import com.hirain.aiagent.context.ContextSectionType;
+import com.hirain.aiagent.context.ContextTrustLevel;
+import com.hirain.aiagent.context.ContextVisibility;
+import com.hirain.aiagent.context.TextContextContribution;
 import com.hirain.aiagent.runtime.RequestSession;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 /**
- * 时间上下文 Provider — HYBRID 模式不渲染，避免与 TimeContextPreProcessor 重复注入。
- * <p>
- * 使用 TimeProvider.nowMillis() 生成 yyyy-MM-dd HH:mm:ss 格式的调试值。
- * 每次调用在方法内局部创建 SimpleDateFormat，避免 static 实例的线程安全问题。
+ * 时间上下文 Provider — 提供当前时间，输出 CONTEXT_DATA 贡献。
  */
 public class TimeContextProvider implements ContextProvider {
 
@@ -27,8 +28,13 @@ public class TimeContextProvider implements ContextProvider {
     }
 
     @Override
-    public ContextSectionType type() {
-        return ContextSectionType.TIME;
+    public ContextLifecycle lifecycle() {
+        return ContextLifecycle.ITERATION_DYNAMIC;
+    }
+
+    @Override
+    public boolean required(RequestSession session, ContextBuildInput input) {
+        return false;
     }
 
     @Override
@@ -41,9 +47,11 @@ public class TimeContextProvider implements ContextProvider {
         metadata.put("timestamp_ms", nowMs);
         metadata.put("formatted_time", formattedTime);
 
-        // HYBRID 模式：不渲染时间上下文，避免与 TimeContextPreProcessor 重复注入
-        ContextSection section = new ContextSection(
-                type(), name(), false, formattedTime, formattedTime.length(), false, metadata);
-        return ContextProviderResult.success(name(), section);
+        TextContextContribution contribution = new TextContextContribution(
+                "time", ContextVisibility.MODEL_VISIBLE, ContextTrustLevel.TRUSTED_DATA,
+                ContextPriority.OPTIONAL, ContextLifecycle.ITERATION_DYNAMIC, false,
+                name(), TextContextContribution.TARGET_CONTEXT_DATA,
+                formattedTime, metadata);
+        return ContextProviderResult.success(name(), List.of(contribution));
     }
 }
