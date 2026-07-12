@@ -13,11 +13,15 @@ import dev.langchain4j.data.message.UserMessage;
 /**
  * 纯消息装配组件 — 将 Contribution 转换为 LangChain4j ChatMessage 和 ToolSpecification 列表。
  * <p>
- * 不访问数据库、时间、车辆、Trace 或模型。固定消息顺序为：
+ * 不访问数据库、时间、车辆、Trace 或模型。
+ * iteration 参数控制是否包含 SOURCE_CURRENT_USER（iteration=0 时包含，>0 时不包含）。
+ * <p>
+ * 固定消息顺序为：
  * <ol>
  *   <li>SystemMessage（仅 TRUSTED_SYSTEM + SYSTEM 目标）</li>
- *   <li>Context Data UserMessage（长期记忆、车辆状态、时间、caller extra 合并为一条）</li>
- *   <li>Session ChatMemory（含当前 UserMessage、历史对话、工具交换）</li>
+ *   <li>Context Data UserMessage（长期记忆、车辆状态、时间、caller extra 合并，使用 ContextDataFormatter）</li>
+ *   <li>SessionMemory 消息序列</li>
+ *   <li>iteration=0 时：Current UserMessage（来自 SOURCE_CURRENT_USER）</li>
  * </ol>
  */
 public final class ContextMessageAssembler {
@@ -26,26 +30,29 @@ public final class ContextMessageAssembler {
 
     /**
      * 从 ContextFrame 的 contributions 装配最终消息和工具规格。
-     * <p>
-     * 固定消息顺序：唯一 SystemMessage -> Context Data UserMessage（存在时）-> SessionMemory Contribution 消息序列。
      *
-     * @param frame        上下文快照（含所有 Contribution，其中必须包含 SOURCE_SESSION_MEMORY MessageContribution）
+     * @param frame        上下文快照（含所有 Contribution）
      * @param budgetPolicy 预算策略
+     * @param tokenEstimator Token 估算器
+     * @param iteration    当前迭代次数：0 表示包含 SOURCE_CURRENT_USER，>0 表示不包含
      * @return 装配结果
      */
     public static ContextAssemblyResult assemble(ContextFrame frame,
                                                    ContextBudgetPolicy budgetPolicy,
-                                                   ContextTokenEstimator tokenEstimator) {
+                                                   ContextTokenEstimator tokenEstimator,
+                                                   int iteration) {
         if (frame == null) {
             return ContextAssemblyResult.failure(ContextErrorCode.CONTEXT_INTERNAL_ERROR,
                     "ContextFrame is null", new ContextAssemblyDebugInfo(List.of(), 0, 0, "null frame"));
         }
 
+        boolean includeCurrentUser = (iteration == 0);
+
         List<ContextContribution> contributions = frame.contributions();
         List<ContextProviderOutcome> outcomes = new ArrayList<>();
         List<ChatMessage> messages = new ArrayList<>();
         List<ToolSpecification> toolSpecs = new ArrayList<>();
-        List<String> contextDataParts = new ArrayList<>();
+        List<TextContextContribution> contextDataContribs = new ArrayList<>();
         Map<String, ToolSpecification> toolSpecMap = new LinkedHashMap<>();
 
         // 提取 TOOL_SPECIFICATIONS Contribution
@@ -91,7 +98,6 @@ public final class ContextMessageAssembler {
                         messages.add(SystemMessage.from(content));
                         systemAdded = true;
                     } else {
-                        // 重复 System Contribution 不允许
                         return ContextAssemblyResult.failure(
                                 ContextErrorCode.MESSAGE_SEQUENCE_INVALID,
                                 "Duplicate System contribution: provider="
@@ -109,7 +115,7 @@ public final class ContextMessageAssembler {
                     new ContextAssemblyDebugInfo(outcomes, 0, 0, "missing system"));
         }
 
-        // Context Data: 模型可见的 CONTEXT_DATA 文本合并为一条 UserMessage
+        // Context Data: 收集模型可见的 CONTEXT_DATA 文本贡献，使用 ContextDataFormatter 格式化
         for (ContextContribution contrib : contributions) {
             if (contrib instanceof TextContextContribution) {
                 TextContextContribution textContrib = (TextContextContribution) contrib;
@@ -117,16 +123,17 @@ public final class ContextMessageAssembler {
                         && textContrib.visibility() == ContextVisibility.MODEL_VISIBLE) {
                     String content = textContrib.content();
                     if (content != null && !content.isEmpty()) {
-                        contextDataParts.add(content);
+                        contextDataContribs.add(textContrib);
                     }
                 }
             }
         }
-        if (!contextDataParts.isEmpty()) {
-            messages.add(UserMessage.from(String.join("\n\n", contextDataParts)));
+        String contextDataText = ContextDataFormatter.format(contextDataContribs);
+        if (!contextDataText.isEmpty()) {
+            messages.add(UserMessage.from(contextDataText));
         }
 
-        // SessionMemory Contribution: 从 Frame 提取 SOURCE_SESSION_MEMORY 消息序列
+        // SessionMemory Contribution
         boolean sessionMemoryAdded = false;
         for (ContextContribution contrib : contributions) {
             if (contrib instanceof MessageContextContribution) {
@@ -155,6 +162,39 @@ public final class ContextMessageAssembler {
                     new ContextAssemblyDebugInfo(outcomes, 0, 0, "missing session_memory"));
         }
 
+        // Current UserMessage（仅 iteration=0 时）
+        if (includeCurrentUser) {
+            MessageContextContribution currentUser = null;
+            for (ContextContribution contrib : contributions) {
+                if (contrib instanceof MessageContextContribution) {
+                    MessageContextContribution msgContrib = (MessageContextContribution) contrib;
+                    if (MessageContextContribution.SOURCE_CURRENT_USER.equals(msgContrib.messageSource())) {
+                        if (currentUser != null) {
+                            return ContextAssemblyResult.failure(
+                                    ContextErrorCode.MESSAGE_SEQUENCE_INVALID,
+                                    "Duplicate CURRENT_USER contribution",
+                                    new ContextAssemblyDebugInfo(outcomes, 0, 0, "dup current_user"));
+                        }
+                        currentUser = msgContrib;
+                    }
+                }
+            }
+            if (currentUser == null) {
+                return ContextAssemblyResult.failure(
+                        ContextErrorCode.MESSAGE_SEQUENCE_INVALID,
+                        "No CURRENT_USER contribution found for iteration=0",
+                        new ContextAssemblyDebugInfo(outcomes, 0, 0, "missing current_user"));
+            }
+            List<ChatMessage> cuMsgs = currentUser.messages();
+            if (cuMsgs == null || cuMsgs.size() != 1 || !(cuMsgs.get(0) instanceof UserMessage)) {
+                return ContextAssemblyResult.failure(
+                        ContextErrorCode.MESSAGE_SEQUENCE_INVALID,
+                        "CURRENT_USER contribution must contain exactly one UserMessage",
+                        new ContextAssemblyDebugInfo(outcomes, 0, 0, "invalid current_user"));
+            }
+            messages.add(cuMsgs.get(0));
+        }
+
         // 校验
         try {
             ContextMessageSequenceValidator.validate(messages);
@@ -178,4 +218,3 @@ public final class ContextMessageAssembler {
                 outcomes);
     }
 }
-

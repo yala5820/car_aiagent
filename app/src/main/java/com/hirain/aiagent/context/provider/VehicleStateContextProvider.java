@@ -51,8 +51,12 @@ public class VehicleStateContextProvider implements ContextProvider {
             errorDetail = "vehicle_status_provider_not_configured";
         }
 
+        boolean isRequired = required(session, input);
+        ContextVisibility visibility = isRequired
+                ? ContextVisibility.MODEL_VISIBLE : ContextVisibility.POLICY_ONLY;
+
         TextContextContribution contribution = new TextContextContribution(
-                "vehicle_state", ContextVisibility.MODEL_VISIBLE, ContextTrustLevel.TRUSTED_DATA,
+                "vehicle_state", visibility, ContextTrustLevel.TRUSTED_DATA,
                 ContextPriority.NORMAL, ContextLifecycle.ITERATION_DYNAMIC, false,
                 name(), TextContextContribution.TARGET_CONTEXT_DATA,
                 snapshot, Map.of());

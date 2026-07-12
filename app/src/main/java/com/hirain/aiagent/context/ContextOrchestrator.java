@@ -113,6 +113,10 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
                     if (result.outcome() != null) {
                         outcomes.add(result.outcome());
                     }
+                    // Provider event
+                    traceRecorder.recordProviderEvent(prepareSpan, result,
+                            provider.name(), provider.lifecycle().name(),
+                            provider.required(session, input));
                     // required Provider 失败 → 中断 prep
                     if (result.status() != ContextProviderStatus.SUCCESS && provider.required(session, input)) {
                         if (prepareSpan != null) prepareSpan.setAttribute("required_provider_failed", provider.name());
@@ -128,6 +132,15 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
                             provider.name(), ContextProviderStatus.FAILED,
                             ContextErrorCode.REQUIRED_PROVIDER_FAILED,
                             e.getMessage(), System.currentTimeMillis() - startMs));
+                    // Provider event for exception
+                    if (prepareSpan != null) {
+                        prepareSpan.addEvent("context.provider.output",
+                                io.opentelemetry.api.common.Attributes.builder()
+                                    .put("provider.name", provider.name())
+                                    .put("provider.status", "FAILED")
+                                    .put("provider.error_reason", e.getMessage())
+                                    .build());
+                    }
                     if (provider.required(session, input)) {
                         if (prepareSpan != null) prepareSpan.setAttribute("required_provider_failed", provider.name());
                         return ContextPrepareResult.failed(
@@ -235,6 +248,10 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
                         outcomes.add(result.outcome());
                     }
                     dynamicContributions.addAll(result.contributions());
+                    // Provider event
+                    traceRecorder.recordProviderEvent(assembleSpan, result,
+                            provider.name(), provider.lifecycle().name(),
+                            provider.required(reqSession, input));
                     // required Provider 失败 → 中断 assemble
                     if (result.status() != ContextProviderStatus.SUCCESS && provider.required(reqSession, input)) {
                         return ContextAssemblyResult.failure(
@@ -249,6 +266,15 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
                     outcomes.add(new ContextProviderOutcome(
                             provider.name(), ContextProviderStatus.FAILED, null,
                             e.getMessage(), 0));
+                    // Provider event for exception
+                    if (assembleSpan != null) {
+                        assembleSpan.addEvent("context.provider.output",
+                                io.opentelemetry.api.common.Attributes.builder()
+                                    .put("provider.name", provider.name())
+                                    .put("provider.status", "FAILED")
+                                    .put("provider.error_reason", e.getMessage())
+                                    .build());
+                    }
                     // 异常时也检查 required
                     if (provider.required(reqSession, input)) {
                         return ContextAssemblyResult.failure(
@@ -281,7 +307,7 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
                     .build();
             ContextTokenEstimator estimator = input.tokenEstimator();
             ContextAssemblyResult assembleResult = ContextMessageAssembler.assemble(
-                    mergedFrame, request.budgetPolicy(), estimator);
+                    mergedFrame, request.budgetPolicy(), estimator, request.iteration());
 
             // 合并 outcomes：Assembler 内部不创建 Provider outcome，将 assemble 阶段的 outcomes 附加到结果
             if (assembleResult.success()
@@ -309,6 +335,13 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
                 if (!assembleResult.success() && assembleResult.errorCode() != null) {
                     assembleSpan.setAttribute("error.code", assembleResult.errorCode().name());
                 }
+            }
+
+            // 记录装配消息内容到 span
+            if (assembleResult.success()) {
+                traceRecorder.recordAssembledMessages(assembleSpan,
+                        assembleResult.messages(), assembleResult.toolSpecifications());
+                traceRecorder.recordAssembleMessagesAsEvents(assembleSpan, assembleResult.messages());
             }
 
             return assembleResult;

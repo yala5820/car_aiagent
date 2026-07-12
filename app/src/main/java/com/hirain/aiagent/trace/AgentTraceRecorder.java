@@ -116,6 +116,35 @@ public class AgentTraceRecorder {
         }
     }
 
+    /** 记录完整 LLM 请求内容到 gen_ai.chat span。 */
+    public void recordLlmRequest(Span span, String modelName, int iteration,
+                                  List<ChatMessage> messages,
+                                  List<ToolSpecification> toolSpecs) {
+        if (span == null) return;
+        span.setAttribute("gen_ai.request.model", modelName != null ? modelName : "");
+        span.setAttribute("gen_ai.request.iteration", iteration);
+        if (messages != null) {
+            span.setAttribute("gen_ai.request.message_count", messages.size());
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < messages.size(); i++) {
+                ChatMessage m = messages.get(i);
+                sb.append("[").append(i).append("][").append(m.type()).append("] ")
+                  .append(m).append("\n");
+            }
+            span.setAttribute("gen_ai.request.messages", sb.toString());
+        }
+        if (toolSpecs != null) {
+            span.setAttribute("gen_ai.request.tool_count", toolSpecs.size());
+            StringBuilder sb = new StringBuilder();
+            for (ToolSpecification ts : toolSpecs) {
+                sb.append("name=").append(ts.name())
+                  .append(" desc=").append(ts.description() != null ? ts.description() : "")
+                  .append("\n");
+            }
+            span.setAttribute("gen_ai.request.tool_specs", sb.toString());
+        }
+    }
+
     public Span startTool(ToolExecutionRequest request, int iteration) {
         return startTool(request, iteration, null);
     }

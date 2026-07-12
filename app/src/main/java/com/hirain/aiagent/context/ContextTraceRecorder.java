@@ -4,6 +4,13 @@ import com.hirain.aiagent.trace.TraceAttributeKeys;
 import com.hirain.aiagent.trace.TraceContext;
 import com.hirain.aiagent.trace.TraceSpanNames;
 
+import java.util.List;
+
+import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.data.message.ChatMessage;
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.context.Context;
 
@@ -95,5 +102,76 @@ public class ContextTraceRecorder {
         span.setAttribute("tokens.max", maxTokens);
         span.setAttribute("budget.within", withinBudget);
         span.setAttribute("compression.recommended", compressionRecommended);
+    }
+
+    // ── Provider Event ──
+
+    /**
+     * 向 span 添加 Provider 输出的 event。
+     * 每执行一个 Provider 调用一次，记录 Provider 名称、状态、生命周期、contribution 信息。
+     */
+    public void recordProviderEvent(Span span, ContextProviderResult result,
+                                     String providerName, String lifecycle, boolean required) {
+        if (span == null || result == null) return;
+        AttributesBuilder attrs = Attributes.builder()
+                .put("provider.name", providerName)
+                .put("provider.lifecycle", lifecycle)
+                .put("provider.required", required)
+                .put("provider.status", result.status() != null ? result.status().name() : "UNKNOWN")
+                .put("provider.contribution_count", result.contributions().size());
+        if (result.errorCode() != null) {
+            attrs.put("provider.error_code", result.errorCode().name());
+        }
+        if (result.errorReason() != null) {
+            attrs.put("provider.error_reason", result.errorReason());
+        }
+        span.addEvent("context.provider.output", attrs.build());
+    }
+
+    // ── 装配消息记录 ──
+
+    /**
+     * 将最终装配消息和工具规格写入 span attribute。
+     * 格式为 [index][role] content\n，工具为 name= desc= params=\n。
+     */
+    public void recordAssembledMessages(Span span, List<ChatMessage> messages,
+                                         List<ToolSpecification> toolSpecs) {
+        if (span == null) return;
+        if (messages != null && !messages.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < messages.size(); i++) {
+                ChatMessage m = messages.get(i);
+                sb.append("[").append(i).append("][").append(m.type()).append("] ")
+                  .append(m).append("\n");
+            }
+            span.setAttribute("context.assembled_messages", sb.toString());
+        }
+        if (toolSpecs != null && !toolSpecs.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            for (ToolSpecification ts : toolSpecs) {
+                sb.append("name=").append(ts.name())
+                  .append(" desc=").append(ts.description() != null ? ts.description() : "")
+                  .append(" params=")
+                  .append(ts.parameters() != null ? ts.parameters().toString() : "{}")
+                  .append("\n");
+            }
+            span.setAttribute("context.assembled_tool_specs", sb.toString());
+        }
+    }
+
+    /**
+     * 为每条最终消息添加 context.message event。
+     * 每条消息含 index、role、content 属性。
+     */
+    public void recordAssembleMessagesAsEvents(Span span, List<ChatMessage> messages) {
+        if (span == null || messages == null) return;
+        for (int i = 0; i < messages.size(); i++) {
+            ChatMessage m = messages.get(i);
+            AttributesBuilder attrs = Attributes.builder()
+                    .put("message.index", i)
+                    .put("message.role", m.type().toString())
+                    .put("message.content", m.toString());
+            span.addEvent("context.message", attrs.build());
+        }
     }
 }

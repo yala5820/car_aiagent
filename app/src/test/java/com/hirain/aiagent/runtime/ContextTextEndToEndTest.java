@@ -215,9 +215,15 @@ public class ContextTextEndToEndTest {
         assertEquals(1, captured.size());
         ChatRequest chatReq = captured.get(0);
         List<ChatMessage> msgs = chatReq.messages();
-        // 消息顺序：System → Context Data → 当前 User
+        // 消息顺序：System → Context Data → SessionMemory → CurrentUser
         assertEquals("First message must be SystemMessage",
                 dev.langchain4j.data.message.SystemMessage.class, msgs.get(0).getClass());
+        // 最后一条消息必须包含当前用户输入
+        ChatMessage lastMsg = msgs.get(msgs.size() - 1);
+        assertTrue("Last message should be current user",
+                lastMsg instanceof dev.langchain4j.data.message.UserMessage);
+        assertTrue("Last message should contain the user's input",
+                ((dev.langchain4j.data.message.UserMessage) lastMsg).singleText().contains("你好"));
     }
 
     @Test
@@ -532,5 +538,47 @@ public class ContextTextEndToEndTest {
                 m instanceof ToolExecutionResultMessage
                         && ((ToolExecutionResultMessage) m).text().contains("CANCELLED"));
         assertTrue("Cancelled tool should have CANCELLED text", hasCancelled);
+    }
+
+    @Test
+    public void chatOnly_noVehicleState() {
+        FakeMemoryGateway mg = new FakeMemoryGateway();
+        CapturingModelCaller caller = new CapturingModelCaller();
+        ContextOrchestrator orch = createOrchestrator(testPrompt(), defaultToolRegistry(), mg);
+        TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
+                configWith(caller, req -> "{}"), mg, orch);
+
+        RequestSession session = com.hirain.aiagent.context.TestRequestSessions.chatOnlySession(
+                "req-1", "conv-1", "user-a", "chat", "cl-1", "你好");
+        ContextPrepareResult pr = orch.prepare(session, ContextCancelChecker.neverCancelled());
+        AgentResult result = loop.execute(session, pr);
+
+        assertTrue(result.isSuccess());
+        List<ChatMessage> msgs = caller.capturedRequests().get(0).messages();
+        // CHAT_ONLY 不应包含车辆 JSON
+        boolean hasSpeed = msgs.stream().anyMatch(m ->
+                m.toString().contains("\"speed\""));
+        assertFalse("CHAT_ONLY should not contain vehicle JSON", hasSpeed);
+    }
+
+    @Test
+    public void acControl_containsVehicleState() {
+        FakeMemoryGateway mg = new FakeMemoryGateway();
+        CapturingModelCaller caller = new CapturingModelCaller();
+        ContextOrchestrator orch = createOrchestrator(testPrompt(), defaultToolRegistry(), mg);
+        TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
+                configWith(caller, req -> "{}"), mg, orch);
+
+        RequestSession session = com.hirain.aiagent.context.TestRequestSessions.textSession(
+                "req-1", "conv-1", "user-a", "chat", "cl-1", "打开空调");
+        ContextPrepareResult pr = orch.prepare(session, ContextCancelChecker.neverCancelled());
+        AgentResult result = loop.execute(session, pr);
+
+        assertTrue(result.isSuccess());
+        List<ChatMessage> msgs = caller.capturedRequests().get(0).messages();
+        // VEHICLE_AC 应包含车辆状态（speed）
+        boolean hasSpeed = msgs.stream().anyMatch(m ->
+                m.toString().contains("\"speed\""));
+        assertTrue("VEHICLE_AC should contain vehicle state", hasSpeed);
     }
 }

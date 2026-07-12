@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew.bat testDebugUnitTest --tests \"com.hirain.aiagent.runtime.RuntimeResponseMapperTest\")",
+      "Bash(./gradlew.bat testDebugUnitTest --tests \"com.hirain.aiagent.runtime.*\")",
+      "Bash(./gradlew.bat compileDebugKotlin)",
+      "Bash(./gradlew.bat testDebugUnitTest --tests \"com.hirain.aiagent.trace.AIAgentServiceTraceWiringTest\")",
+      "Bash(./gradlew.bat testDebugUnitTest --tests \"com.hirain.aiagent.core.AgentLoopOrchestratorTraceTest\")",
+      "Bash(./gradlew.bat testDebugUnitTest)",
+      "Bash(Select-String -Path \"app\\\\src\\\\main\\\\java\\\\com\\\\hirain\\\\aiagent\\\\AIAgentService.kt\" -Pattern \"private fun handleTextRequest|chatOrchestrator\\\\.execute|handleVoiceRequest|handleImageRequest|handleControlRequest\")",
+      "Bash(./gradlew.bat testDebugUnitTest --tests \"com.hirain.aiagent.intentrouter.*\")",
+      "Bash(./gradlew.bat :app:testDebugUnitTest --tests \"com.hirain.aiagent.runtime.*\")",
+      "Bash(./gradlew testDebugUnitTest)",
+      "Bash(./gradlew clean *)",
+      "Bash(awk '{t+=$1} END{print \"Tests:\", t}')",
+      "Bash(awk '{f+=$1} END{print \"Failures:\", f}')",
+      "Bash(./gradlew.bat clean *)",
+      "Bash(xargs grep \"failure\")",
+      "Bash(cd \"D:\\\\\\\\code\\\\\\\\android\\\\\\\\AndroidStudioProjects\\\\\\\\AIAgent\")",
+      "Bash(awk '!/renderedPrompt.length\\\\\\(\\\\\\)/ && !/prompt_template_name/' app/src/main/java/com/hirain/aiagent/context/provider/PromptContextProvider.java)",
+      "Bash(mv /tmp/prompt_fixed.java app/src/main/java/com/hirain/aiagent/context/provider/PromptContextProvider.java)",
+      "Bash(awk '!/memory_injected_by_context/ && !/memory_owner/' app/src/main/java/com/hirain/aiagent/context/provider/LongTermMemoryContextProvider.java)",
+      "Bash(mv /tmp/fixed.java app/src/main/java/com/hirain/aiagent/context/provider/LongTermMemoryContextProvider.java)",
+      "Bash(awk '!/memory_injected_by_context/ && !/memory_owner/' app/src/main/java/com/hirain/aiagent/context/provider/SessionMemoryContextProvider.java)",
+      "Bash(mv /tmp/fixed.java app/src/main/java/com/hirain/aiagent/context/provider/SessionMemoryContextProvider.java)",
+      "Bash(./gradlew.bat compileDebugJavaWithJavac --rerun-tasks)",
+      "Bash(./gradlew.bat compileDebugUnitTestJavaWithJavac --rerun-tasks)",
+      "Bash(./gradlew.bat testDebugUnitTest --tests \"com.hirain.aiagent.runtime.AgentRuntimeTest\" --tests \"com.hirain.aiagent.runtime.AgentRuntimeResolvedSessionTest\" --tests \"com.hirain.aiagent.runtime.AgentExecutorCompatibilityTest\" --rerun-tasks)",
+      "Bash(./gradlew.bat testDebugUnitTest --rerun-tasks)",
+      "Bash(./gradlew.bat testDebugUnitTest --tests \"com.hirain.aiagent.runtime.ContextTextEndToEndTest.explicitAcControl_selectedToolSpecs\" --rerun-tasks --info)",
+      "Bash(./gradlew.bat testDebugUnitTest --tests \"com.hirain.aiagent.runtime.ContextTextEndToEndTest.explicitAcControl_selectedToolSpecs\" --rerun-tasks)"
+    ]
+  }
+}

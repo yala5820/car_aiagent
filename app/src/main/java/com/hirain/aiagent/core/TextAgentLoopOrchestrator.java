@@ -165,6 +165,10 @@ public class TextAgentLoopOrchestrator {
                         ? trace.startLlmCall(config.modelName(), i, requestMessages.size(),
                                 io.opentelemetry.context.Context.current())
                         : null;
+                if (trace != null) {
+                    trace.recordLlmRequest(llmSpan, config.modelName(), i,
+                            requestMessages, requestTools);
+                }
                 Scope llmScope = llmSpan != null ? llmSpan.makeCurrent() : null;
                 ChatResponse response;
                 AiMessage aiMessage;

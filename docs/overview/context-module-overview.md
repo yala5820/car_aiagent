@@ -1,362 +1,275 @@
-# Context 模块现状总结
+# Context 模块现状与初始计划完成度总结
 
-**生成日期：** 2026-07-09
-**依据：** `docs/plan/` 计划文档 + `docs/act_summary/` 总结 + 实际代码
-
----
-
-## 一、一句话定位
-
-Context 模块是 AIAgent 在 **RequestSession 和 AgentLoopOrchestrator 之间的上下文装配层**。每次 TEXT 请求进来，它把散落在各处的信息（用户身份、意图、工具选择、车辆状态、时间、记忆归属等）统一采集、打包成 ContextFrame，然后把其中需要给 LLM 看的部分通过 PreProcessor 注入到首轮模型消息中。
+**更新日期：** 2026-07-12  
+**对照基线：** `docs/plan_overall/2026-07-11-context-full-control-implementation-plan.md`  
+**当前结论：** TEXT 模型输入统一控制的核心目标已经完成；初始六阶段计划未原样全部实现，预算裁剪、生产自动压缩和迁移债务彻底清理仍未完成。
 
 ---
 
-## 二、它在系统中的位置
+## 一、当前定位
 
-```
-AIDL 请求 → AIAgentService → AgentRuntime.startSession() → RequestSession
-                                  → AgentRuntime.execute()
-                                      → ContextOrchestrator.build() → ContextFrame
-                                      → RuntimeCancelChecker（检查取消）
-                                      → AgentExecutor.execute(session, contextFrame)
-                                          → AgentLoopOrchestrator（调 LLM）
-```
+Context 是 TEXT Agent 的模型输入控制层，而不是 Memory、Prompt、Tool 等能力模块的替代品。
 
-Context 模块的边界很清晰：
-- **上游**：AgentRuntime.startSession() 产生 RequestSession（含 IntentResult、ToolGroupSelectionResult）
-- **核心**：ContextOrchestrator.build(session) 产出 ContextFrame
-- **下游**：ContextFrame 通过 AgentExecutor 默认方法合并到 orchestratorContext map
-- **注入**：ContextExtraPreProcessor（PreProcessor 链首位）读取 context_rendered_extra，在首轮生成 UserMessage
+- Context 负责决定本轮 LLM 能看到哪些 `ChatMessage` 和 `ToolSpecification`，并负责调用 Provider、排序、校验、预算估算和失败控制。
+- PromptManager 继续负责模板加载与渲染。
+- Memory 模块继续负责短期记忆、长期记忆、持久化、提取和压缩能力。
+- ToolGroup/ToolRegistry 继续负责工具选择、规格查询和工具执行。
+- AgentLoop 继续负责模型调用、SafetyGuard、工具执行、结果写回和循环终止。
+
+当前完成的是 **TEXT 唯一输入权**，不是所有输入类型的统一接管。
 
 ---
 
-## 三、模块内部结构
+## 二、当前生产调用链
 
-### 3.1 核心数据模型
-
-| 类 | 作用 | 关键特征 |
-|----|------|---------|
-| `ContextMode` | 三种模式枚举 | OBSERVE_ONLY / HYBRID_EXTRA_CONTEXT / FULL_CONTEXT |
-| `ContextSectionType` | 10 种 section 类型 | RUNTIME / PERSONA / USER_INPUT / INTENT / TOOL_GROUP / MEMORY / VEHICLE_STATE / TIME / PROMPT / DEBUG |
-| `ContextSection` | 单段上下文片段 | 不可变，含 type / providerName / renderable / content / charCount / truncated / metadata |
-| `ContextFrame` | 最终上下文快照 | 不可变，20+ 字段，来自 RequestSession + 各 Provider |
-| `ContextFrameBuilder` | 构造 ContextFrame | fromSession(session) 是主要入口，不重新生成 ID |
-| `ContextBuildResult` | build() 返回值 | 含 frame / success / fallbackUsed / errorReason |
-| `ContextDebugInfo` | 构建诊断信息 | 含 providerNames / fallbackProviders / providerErrors / buildMs |
-| `ContextBuildInput` | Provider 依赖容器 | 含 mode / toolGroupRegistry / budgetManager / 各 Provider 接口 |
-
-### 3.2 Provider 体系
-
-#### ContextProvider 接口
-
-```java
-public interface ContextProvider {
-    String name();                    // Provider 名称
-    ContextSectionType type();        // 产出 section 的类型
-    ContextProviderResult provide(RequestSession session, ContextBuildInput input);
-}
+```text
+AIAgentService
+  -> AgentRuntime.startSession()
+       -> IntentRouter / ToolGroupSelector
+       -> RequestSession
+  -> AgentRuntime.execute()
+       -> 空 TEXT 校验
+       -> agent.loop span
+       -> ContextOrchestrator.prepare()
+            -> request-static Providers
+            -> ContextPrepareResult / ContextFrame
+       -> TextAgentLoopOrchestrator.execute()
+            -> ContextOrchestrator.assemble()（每轮）
+                 -> iteration-dynamic Providers
+                 -> ContextMessageAssembler
+                 -> ContextAssemblyResult
+            -> 预算与取消检查
+            -> ChatRequest(messages, toolSpecifications)
+            -> ModelCaller / SafetyGuard / ToolExecutor
+            -> Memory 写回
 ```
 
-#### ContextProviderResult 三种结果状态
-
-| 状态 | success() | fallback() | section 是否有效 |
-|------|-----------|------------|-----------------|
-| success | true | false | 有效 |
-| fallback | true | true | 有效（降级数据） |
-| failure | false | false | null |
-
-Provider 发生异常时由 ContextOrchestrator 的 catch 块捕获，记录到 debugInfo，不阻断其他 Provider。
-
-### 3.3 标准 9-Provider 链
-
-**按执行顺序：**
-
-| 序号 | Provider | 渲染到 LLM | 内容 |
-|------|----------|-----------|------|
-| 1 | RuntimeContextProvider | ✅ HYBRID | requestId / userId / sessionId / personaId / clientMessageId / inputType |
-| 2 | PersonaContextProvider | ✅ HYBRID | requestedPersonaId / effectivePersonaId |
-| 3 | UserInputContextProvider | ❌ | rawUserInput / normalizedUserInput / inputLength |
-| 4 | IntentContextProvider | ✅ HYBRID | intentTag / confidence / matchedKeywords / debugReason |
-| 5 | ToolGroupContextProvider | ✅ HYBRID | selectedGroupIds / selectedToolCount / selectedToolNames / groupDescriptions |
-| 6 | MemoryContextProvider | ❌ | memoryOwner / memoryInjectedByContext / sessionId |
-| 7 | VehicleStateContextProvider | ❌ | vehicleSnapshotAvailable + JSON 快照 |
-| 8 | TimeContextProvider | ❌ | 格式化时间字符串 |
-| 9 | PromptContextProvider | ❌ | promptOwner / promptTemplateName / promptInjectedByContext |
-
-❌ = renderable=false，在 HYBRID 模式下不进入 renderedExtraContext（因为这些内容已有其他模块负责注入）。
-
-### 3.4 渲染规则
-
-```java
-// renderExtraContext() 的核心逻辑
-sections.stream()
-    .filter(ContextSection::renderable)     // 只取 renderable=true
-    .map(ContextSection::content)
-    .filter(text -> !text.isEmpty())
-    .collect(Collectors.joining("\n\n"));    // 用空行拼接
-```
-
-三种模式的行为：
-
-| ContextMode | 是否构建 sections | renderedExtraContext | 备注 |
-|-------------|-----------------|---------------------|------|
-| OBSERVE_ONLY | ✅ | ""（空字符串） | 只构建和 Trace，不注入模型 |
-| HYBRID_EXTRA_CONTEXT | ✅ | renderable=true 的 section | 默认模式，当前生产使用 |
-| FULL_CONTEXT | ✅ | 同 HYBRID 行为 | 降级为 HYBRID，debugInfo 标记 full_context_deferred |
-
-### 3.5 预算管理
-
-`ContextBudgetManager` 提供粗粒度字符预算：
-
-| 预算项 | 默认值 |
-|--------|--------|
-| 单 section 上限 | 800 字符 |
-| memory 摘要上限 | 500 字符 |
-| tool 上下文上限 | 1200 字符 |
-| 总上限 | 3000 字符 |
-| token 估算 | ~2 字符/token |
-
-当前 `ContextOrchestrator` 在 build() 中调 `budgetManager.trim()` 做裁剪，并把 `tokenEstimate` 写入 ContextFrame 和 Trace。
-
-### 3.6 Trace 观测
-
-ContextOrchestrator 构建完成后，通过 `ContextTraceRecorder` 向 OpenTelemetry root span 写入 11 个属性：
-
-```
-agent.context.enabled            → true/false
-agent.context.mode               → HYBRID_EXTRA_CONTEXT / OBSERVE_ONLY / FULL_CONTEXT
-agent.context.provider_count     → 9
-agent.context.providers          → "RuntimeContextProvider,PersonaContextProvider,..."
-agent.context.selected_tool_count → 1
-agent.context.selected_tool_names → "set_ac_status"
-agent.context.section_count      → 9
-agent.context.token_estimate     → 12
-agent.context.fallback_used      → true/false
-agent.context.build_ms           → 3
-agent.context.error              → null 或错误信息
-```
+生产 TEXT 路径中，`ChatRequest.messages()` 和 `toolSpecifications()` 均直接来自 `ContextAssemblyResult`。`TextAgentLoopOrchestrator` 不再自行渲染 System Prompt、拼接消息或维护固定模型可见工具集合。
 
 ---
 
-## 四、对外接口
+## 三、当前模块结构
 
-### 4.1 被调用的接口
+### 3.1 强类型数据契约
 
-| 调用方 | 调什么 | 用途 |
-|--------|--------|------|
-| `AgentRuntime.execute()` | `contextOrchestrator.build(session)` | 构建 ContextFrame |
-| `AgentExecutor` （默认方法） | `contextFrame.toOrchestratorContext(base)` | 合并到 Orchestrator context map |
-| `ContextExtraPreProcessor` | 读取 `context_mode` + `context_rendered_extra` | 注入首轮消息 |
-| `AgentRuntime` 构造函数 | `ContextOrchestrator` 对象 | 依赖注入 |
+| 类型 | 作用 |
+|---|---|
+| `ContextContribution` | 所有上下文来源的统一抽象，声明来源、可见性、信任级别、优先级和生命周期 |
+| `TextContextContribution` | System Prompt、长期记忆、车辆、时间、caller extra 等文本上下文 |
+| `MessageContextContribution` | 当前用户消息和 Session ChatMemory 消息序列 |
+| `ToolContextContribution` | 真实 LangChain4j `ToolSpecification` 集合 |
+| `ContextPrepareResult` | 请求级 Provider 的准备结果、当前用户消息、取消检查器和静态 Frame |
+| `ContextAssemblyRequest` | 每轮装配输入，包含 Frame、迭代号、预算、取消状态和 RequestSession |
+| `ContextAssemblyResult` | 最终消息、工具规格、预算报告、Provider outcome 和稳定错误信息 |
 
-### 4.2 Context 模块依赖的外部模块
+### 3.2 Provider 生命周期与顺序
 
-| 依赖 | 注入方式 | 用途 |
-|------|---------|------|
-| `ToolGroupRegistry` | ContextBuildInput | 查工具组描述 |
-| `PromptManager` | ContextBuildInput | 记录 prompt 模板名（当前仅元信息） |
-| `MemoryOrchestrator` | ContextBuildInput | 记录记忆归属（当前仅元信息）；同时作为 SessionIdResolver 注入 AgentRuntime |
-| `VehicleStatusProvider` | ContextBuildInput | 获取车辆状态快照（来自 AIAgentService） |
-| `TimeProvider` | ContextBuildInput | 获取当前时间（Context 包内独立接口） |
-| `ContextBudgetManager` | ContextBuildInput | 预算管理（有默认值） |
-| `ActiveRequestRegistry` | RuntimeCancelChecker 匿名实现 | 检查取消状态 |
+**REQUEST_STATIC，一次请求只执行一次：**
 
-### 4.3 ContextFrame 输出的标准 Map Key
+1. `RuntimeContextProvider`
+2. `PersonaContextProvider`
+3. `PromptContextProvider`
+4. `UserInputContextProvider`
+5. `IntentContextProvider`
+6. `ToolGroupContextProvider`
+7. `LongTermMemoryContextProvider`
+8. `CallerExtraContextProvider`
 
-被 `AgentLoopOrchestrator` 和 `ContextExtraPreProcessor` 消费的上下文 map key：
+**ITERATION_DYNAMIC，每轮模型调用前重新读取：**
 
-| Key | 来源 | 消费方 |
-|-----|------|--------|
-| `context_frame` | ContextFrame 对象本身 | 调试/扩展用 |
-| `context_mode` | mode.name() | ContextExtraPreProcessor |
-| `context_rendered_extra` | renderedExtraContext 文本 | ContextExtraPreProcessor → 注入 LLM |
-| `caller_extra_context` | 调用方原 extra_context（保留用） | 兼容旧调用方 |
-| `selected_tool_names` | selectedToolNames 列表 | PreProcessor 链 / Trace |
-| `selected_group_ids` | selectedGroupIds 名称列表 | PreProcessor 链 / Trace |
+1. `SessionMemoryContextProvider`
+2. `VehicleStateContextProvider`
+3. `TimeContextProvider`
 
-注意：Context 模块**不覆盖** `extra_context` key，调用方原有的 extra_context 会被保留到 `caller_extra_context`。
+required Provider 只有返回 `SUCCESS` 才能继续；`FALLBACK` 和 `FAILED` 都会终止。optional Provider 可以降级并记录 outcome。
 
----
+### 3.3 最终消息顺序
 
-## 五、Context 在当前系统中实际发挥的作用
+`ContextMessageAssembler` 固定输出：
 
-### 5.1 真正在做的
+1. 唯一 `SystemMessage`，只接受受信 System Contribution。
+2. 可选 Context Data `UserMessage`，承载长期记忆、车辆状态、时间和 caller extra。
+3. Session ChatMemory 消息序列与当前 UserMessage。
 
-**1. 向 LLM 注入轻量运行时说明**
-
-每次 TEXT 请求的首轮模型消息中，会增加一段类似这样的文本：
-
-```
-【运行时上下文】
-- requestId: req-xxx
-- userId: driver-a
-- sessionId: conv-123
-- personaId: chat
-- inputType: TEXT
-
-【意图上下文】
-- intentTag: VEHICLE_AC
-- confidence: HIGH
-- matchedKeywords: 空调
-- debugReason: matched:VEHICLE_AC
-
-【工具组上下文】
-- selectedGroupIds: AC_GROUP,BASIC_STATUS_GROUP
-- selectedToolCount: 1
-- selectedToolNames:
-  - set_ac_status
-```
-
-这帮助 LLM 理解"当前请求是谁发的、他想干什么、有哪些工具可用"。
-
-**2. 统一上下文观测**
-
-11 个 Context Trace 字段让运维人员可以回答：这次请求跑了哪些 Provider、选中了什么工具、构建花了多久、有没有降级。
-
-**3. 在 Context 构建后、AgentLoop 前提供取消插入点**
-
-RuntimeCancelChecker 让 Service 层可以在 Context 构建完成但 LLM 还没调用的间隙检查取消状态，避免已取消的请求继续调 LLM 浪费资源。
-
-### 5.2 名义上在做但实际上效果有限的
-
-**1. "统一上下文管理"**
-
-实际上 Context 并没有"管理"memory、prompt、tool 等模块——它们还是各管各的。Context 只是从它们那读取了一份**只读快照**。MemoryOrchestrator 依然自己处理记忆读写和压缩，PromptManager 依然自己处理模板渲染。
-
-**2. "预算管理"**
-
-ContextBudgetManager 的字符截断从未实际触发过——当前 renderedExtraContext 只有不到 500 字符，远低于 3000 字符上限。它是一个"备而不用"的安全网。
-
-**3. "FULL_CONTEXT 模式"**
-
-枚举存在但降级为 HYBRID。memory / vehicle / time / prompt 这几个 Provider 目前只是观测量，不参与 LLM 注入。如果要真正切换到 FULL_CONTEXT，需要迁移现有的 PreProcessor 逻辑。
+Assembler 同时校验消息序列和 ToolExchange，拒绝重复 System、孤立 Tool Result、缺失当前用户和工具 schema 冲突。
 
 ---
 
-## 六、还未实现的功能
+## 四、初始计划完成情况
 
-### 6.1 完整工具描述渲染
+### Phase 1：强类型骨架与基础测试
 
-当前只把 selected tool names（如 `set_ac_status`）和 group 级描述传给 LLM，**不包含**每个工具的完整参数说明和 schema。
+**完成：**
 
-如果要实现，需要：
-- 向 ContextBuildInput 注入 ToolRegistry 或 List<ToolSpecification>
-- ToolGroupContextProvider 读取选中工具的 description + 参数 schema
-- 在预算管理中区分"工具名"和"完整工具说明"的开销
+- Contribution、生命周期、可见性、信任级别、优先级和 Provider outcome 已建立。
+- `ContextMessageAssembler` 与 `ContextMessageSequenceValidator` 已实现。
+- 唯一 System、固定消息顺序、当前用户唯一性、工具交换合法性已有测试。
+- Trace parent-aware API 和 parent/child 测试已建立。
 
-### 6.2 动态工具绑定
+**未按初始方案完成：**
 
-当前 `AgentLoopOrchestrator` 在构造时就确定了模型可见的 `effectiveToolSpecs`，做不到"每轮请求根据 ContextFrame 动态调整模型可见工具"。
+- 没有形成计划要求的 `context-shadow-baseline-matrix.md` 完整影子基线交付物。
+- 迁移最终采用直接恢复并切换 TEXT 链路，没有依赖完整影子比较流程推进。
 
-Context 已经知道本轮选中了哪些工具（`selectedToolNames`），但没有办法把这些信息转化为 LangChain4j 实际绑定的 `ToolSpecification` 列表。
+**判断：基本完成，影子基线部分未实现。**
 
-### 6.3 FULL_CONTEXT 模式
+### Phase 2：Provider 真实化与能力模块窄接口
 
-当前 FULL_CONTEXT 降级为 HYBRID。如果启用，需要梳理和迁移：
-- `MemoryPreProcessor` → Context 控制记忆注入粒度
-- `VehicleStatusPreProcessor` → Context 控制车辆状态渲染
-- `TimeContextPreProcessor` → Context 控制时间格式
-- `injectSystemPrompt` → Context 控制 system prompt 生成
+**完成：**
 
-### 6.4 精确 token 预算
+- Prompt、用户输入、长期记忆、短期记忆、车辆、时间、caller extra 均已成为真实 Provider。
+- 长期记忆按 `userId` 读取，短期记忆按原始 `sessionId` 读取。
+- `MemorySnapshot.sessionId()` 与 Store memoryId 边界已区分。
+- Tool Provider 从 ToolRegistry 解析真实 `ToolSpecification`。
+- CHAT_ONLY 返回零工具；明确选择严格解析；allToolsFallback 返回完整启用工具集合。
+- request-static 与 iteration-dynamic Provider 链已拆分。
 
-当前用字符数估算 token（2 字符 ≈ 1 token），不是精确的模型 tokenizer。中文、英文、JSON、工具 schema 的 token 密度不同，当前方案无法区分。
+**判断：核心目标已完成。**
 
-### 6.5 Provider 动态开关
+### Phase 3：影子装配与差异验证
 
-当前 9 个 Provider 是固定链，不支持根据请求类型或模式动态增删。比如 IMAGE 请求不需要 ToolGroupProvider，但当前没有这种按需加载机制。
+**已实现的最终能力：**
 
-### 6.6 LLM 驱动的 context 压缩
+- `AgentRuntime` 通过强类型 `ContextPrepareResult` 调用 TEXT executor。
+- AgentLoop 每轮调用 Context Assembly，取消检查贯穿 prepare、assemble、模型和工具边界。
+- 多轮工具消息可重新装配，动态 Provider 每轮刷新。
 
-当前明确禁止调用 LLM 做 context 压缩。MemoryCompressor 是独立的语义压缩机制，Context 模块没有自己的压缩。
+**没有实现：**
+
+- 没有保留完整的 `ContextShadowComparator`、Shadow Recorder、scenarioId 差异矩阵和迁移开关。
+- 没有经历“旧链路继续生产、Context 只影子比较”的完整中间态。
+
+后续恢复过程中选择了直接建立真实端到端测试并切换唯一输入权，因此最终架构不依赖影子设施，但这不等于初始 Phase 3 原样完成。
+
+**判断：最终能力已由其他路径实现，原计划的影子迁移机制未实现。**
+
+### Phase 4：预算、压缩能力与 Context Trace
+
+**完成：**
+
+- `ContextBudgetPolicy`、`ModelContextWindowProfiles.qwenTurboDemo()` 和低成本估算器已实现。
+- 当前 Demo 配置为 32768 上下文、2048 输出预留、1024 安全余量，最大输入 29696。
+- 消息和完整 Tool Schema 均参与保守 token 估算。
+- 超预算在模型调用前返回 `CONTEXT_BUDGET_EXCEEDED`。
+- 超预算不会调用模型、工具或 compaction，也不会写入 SessionMemory。
+- Memory compaction plan/result、原子 replace 和 cache eviction 所需接口已经建立。
+- `agent.loop -> context.prepare/context.assemble` 父子 Trace 已建立，并记录 Provider、消息、工具和预算指标。
+
+**未实现或未启用：**
+
+- 没有实现完整的按优先级裁剪、ConversationTurn/ToolExchange 原子裁剪和 optional Contribution 逐级删除策略。
+- token 估算器没有实现初始计划要求的静态内容摘要缓存和真实 usage 误差校准。
+- 生产 Context 不调用 `planSessionCompaction()` 或 `executeCompactionPlan()`，没有自动压缩、重读 ChatMemory 和二次 assemble。
+- `prompt.assembly` 旧 Trace 常量与 recorder 仍存在，尚未彻底被 `context.assemble` 清理替代。
+
+**判断：预算硬失败与 Trace 已完成；裁剪和生产压缩未完成。**
+
+### Phase 5：Context 独占切换
+
+**完成：**
+
+- TEXT 使用独立 `TextAgentLoopOrchestrator`，构造器强制依赖 `ContextAssemblyGateway`。
+- TEXT 的消息和工具只取自 `ContextAssemblyResult`。
+- TEXT Persona 配置不注册消息型 PreProcessor，旧 PreProcessor 不再参与 TEXT 模型输入。
+- Service 装配真实 PromptManager、Memory Gateway、ToolRegistry、车辆状态和 ContextOrchestrator。
+- 空 TEXT 在 Runtime 返回 `INVALID_INPUT`，不会进入 Context、模型或 Memory。
+- Session 切换隔离短期历史；同 Session 切换用户保留短期历史并切换长期记忆；Persona 切换更新 System Prompt。
+- CHAT_ONLY、明确工具、allToolsFallback、required 失败、预算、取消和多工具闭合已有真实链路测试。
+- 当前 UserMessage 只在预算和取消检查通过后写入一次。
+
+**没有按初始计划实现：**
+
+- Phase 5 原计划要求生产启用“一次压缩 -> 重读 ChatMemory -> 二次 assemble”，最终为了避免错误删除和扩大改动，该能力被明确停用。
+
+**判断：TEXT 唯一输入权已完成；生产自动压缩未完成。**
+
+### Phase 6：迁移债务删除与最终验收
+
+**已完成：**
+
+- `ContextMode`、旧 `ContextBuildResult`、`ContextExtraPreProcessor` 已删除。
+- TEXT 不再存在 HYBRID/OBSERVE/FULL 模式分支。
+- TEXT 不再注册 Vehicle/Time/Memory 消息型 PreProcessor。
+- 旧影子设施没有进入最终生产路径。
+- 完整 JVM 测试和 Debug APK 构建已通过。
+
+**尚未完成：**
+
+- `ContextSection`、`ContextSectionType`、`ContextDebugInfo` 和 `ContextFrame` 部分旧兼容字段仍保留。
+- `ContextBudgetManager` 的旧字符预算/decision API 仍保留，但不参与当前生产装配。
+- `ContextOrchestrator` 仍有兼容测试使用的二参构造器。
+- legacy `AgentLoopOrchestrator`、`buildSystemPromptMessage()`、固定工具和非 TEXT PreProcessor 仍存在；当前保留是为了冻结 SCENE/VL 等非 TEXT 路径。
+- `TraceSpanNames.PROMPT_ASSEMBLY` 和对应 recorder 尚未清零。
+- 没有完成初始计划要求的全仓旧引用为零。
+- Android 设备上的连续对话、SQLite、真实 ToolRegistry、取消/超时和 Phoenix Trace 验证尚未执行。
+
+**判断：关键生产旁路已删除，但技术债务清理和设备验收未完成。**
 
 ---
 
-## 七、遗留问题
+## 五、核心能力完成度
 
-### 7.1 Context 与 PreProcessor 的职责重叠
+| 能力 | 状态 | 说明 |
+|---|---|---|
+| TEXT ChatMessage 唯一生成权 | 已完成 | 所有模型消息来自 ContextAssemblyResult |
+| TEXT ToolSpecification 唯一生成权 | 已完成 | selected、CHAT_ONLY、allToolsFallback 均走 Tool Provider |
+| Prompt/Memory/Vehicle/Time/Caller Extra 接入 | 已完成 | 由真实 Provider 调用能力模块窄接口 |
+| Session 隔离 | 已完成 | sessionId 维度隔离短期历史 |
+| 用户切换语义 | 已完成 | 同 Session 保留短期历史，长期记忆按 userId 切换 |
+| Persona 切换 | 已完成 | 当前 System Prompt 随 persona 切换 |
+| required/optional Provider 契约 | 已完成 | required 仅 SUCCESS 放行 |
+| 消息序列与工具交换校验 | 已完成 | 非法序列在模型前失败 |
+| 预算估算与硬失败 | 已完成 | 超限零模型、零工具、零 compaction、零 Memory 写入 |
+| 优先级裁剪 | 未实现 | 当前不裁剪，直接超限失败 |
+| 生产自动压缩与二次装配 | 未实现 | Memory 能力接口存在，生产 Context 不调用 |
+| Context Trace | 基本完成 | prepare/assemble span 和父子关系已完成；旧 prompt.assembly 未清理 |
+| 迁移债务清零 | 部分完成 | 核心旁路已删除，兼容类型与非 TEXT legacy 仍保留 |
+| 非 TEXT 输入统一接管 | 未实现 | IMAGE/VOICE/CONTROL/SCENE/VL 不属于本轮范围 |
 
-当前 `ContextExtraPreProcessor` 是第一道 PreProcessor，负责把 `context_rendered_extra` 注入首轮消息。但它后面还有 `MemoryPreProcessor`、`VehicleStatusPreProcessor`、`TimeContextPreProcessor`。
-
-这些 PreProcessor 各自独立注入——Context 并不知道它们注入了什么，它们也不知道 Context 的存在。目前靠"Context 不重复注入"来避免冲突，但这不是架构上的解耦。
-
-### 7.2 Trace 属性常量是死代码
-
-`TraceAttributeKeys` 中新增了 11 个 `CONTEXT_*` 常量，但 `ContextTraceRecorder` 直接写的硬编码字符串 `"agent.context.*"`，没有引用这些常量。改命名时需要两处同步。
-
-### 7.3 调试信息字段分级缺失
-
-当前 ContextFrame 中部分字段（requestId、userId）可能同时进入模型可见区（renderedExtraContext）和 Trace。缺少分级机制来区分"仅 Trace 可见"和"也能给 LLM 看"。
-
-### 7.4 Context 对 IMAGE / VOICE / CONTROL 链路无影响
-
-当前 Context 只接入了 TEXT 链路。IMAGE、VOICE、CONTROL 请求完全不走 ContextOrchestrator，也没有 ContextFrame。如果要统一上下文管理，后续需要评估是否要扩展到这些入口。
-
-### 7.5 Memory 的压缩机制与 Context 无关
-
-MemoryCompressor 在 ChatMemory 超限时做语义压缩，是 Memory 模块的内部逻辑。Context 模块对其无控制能力，`MemoryContextProvider` 目前只记录"记忆归谁管"的元信息，不参与实际的记忆管理或压缩决策。
+综合判断：**TEXT Context 核心架构约 85% 完成；以“统一生成 TEXT 模型输入”为标准已经完成，以初始六阶段全部任务和清理项为标准尚未 100% 完成。**
 
 ---
 
-## 八、文件清单
+## 六、Trace 现状
 
-```
-app/src/main/java/com/hirain/aiagent/context/
-├── ContextMode.java                  # 三种模式枚举
-├── ContextSectionType.java           # 10 种 section 类型
-├── ContextSection.java               # 不可变上下文片段
-├── ContextFrame.java                 # 上下文快照 + toOrchestratorContext()
-├── ContextFrameBuilder.java          # 构造器，fromSession() 主入口
-├── ContextBuildInput.java            # 依赖容器 + Builder
-├── ContextBuildResult.java           # build() 返回值
-├── ContextBuildException.java        # 构建异常
-├── ContextProvider.java              # Provider 接口
-├── ContextProviderResult.java        # 三种结果状态
-├── ContextBudgetManager.java         # 字符预算 + token 估算
-├── ContextDebugInfo.java             # 诊断信息
-├── ContextTraceRecorder.java         # 写 Trace
-├── ContextOrchestrator.java          # 核心执行器
-├── VehicleStatusProvider.java        # 独立车辆状态接口
-└── provider/
-    ├── RuntimeContextProvider.java
-    ├── PersonaContextProvider.java
-    ├── UserInputContextProvider.java
-    ├── IntentContextProvider.java
-    ├── ToolGroupContextProvider.java
-    ├── MemoryContextProvider.java
-    ├── VehicleStateContextProvider.java
-    ├── TimeContextProvider.java
-    └── PromptContextProvider.java
+当前主要层级为：
 
-app/src/main/java/com/hirain/aiagent/core/preprocessor/
-└── ContextExtraPreProcessor.java     # 注入 Context 到首轮消息
-
-app/src/main/java/com/hirain/aiagent/runtime/
-├── AgentExecutor.java                 # +execute(session, contextFrame) 默认方法
-├── AgentRuntime.java                  # +ContextOrchestrator + RuntimeCancelChecker + SessionIdResolver
-└── RuntimeCancelChecker.java          # 只读取消检查接口
-
-app/src/main/java/com/hirain/aiagent/trace/
-└── TraceAttributeKeys.java            # +11 个 CONTEXT_* 常量
+```text
+agent.request
+  -> agent.loop
+       -> context.prepare
+       -> context.assemble
+       -> gen_ai.chat
+       -> tool.execute
+       -> memory.extract / memory.compress（由对应能力实际执行时产生）
+  -> response.dispatch
 ```
 
-测试文件（8 个）：
+`context.prepare` 记录 Provider 总数、成功/降级/失败数量和静态 Contribution 数量。  
+`context.assemble` 记录 iteration、消息数、工具数、Provider outcome、估算 token、最大 token、预算结果和错误码。
 
-```
-app/src/test/java/com/hirain/aiagent/context/
-├── ContextFrameBuilderTest.java       # 3 tests
-├── ContextBudgetManagerTest.java      # 2 tests
-├── ContextOrchestratorTest.java       # 5 tests
-├── ContextProviderFailureTest.java    # 2 tests
-├── ContextTraceRecorderTest.java      # 1 test
-├── TestRequestSessions.java           # 辅助类
-└── provider/
-    └── ToolGroupContextProviderTest.java # 1 test
+Provider 继续使用 outcome/属性表达，不为每个轻量 Provider 创建独立 span。Prompt、Memory、LLM、Tool 的业务 span 保留各自模块所有权。
 
-app/src/test/java/com/hirain/aiagent/runtime/
-└── AgentRuntimeContextTest.java       # 6 tests
+---
 
-app/src/test/java/com/hirain/aiagent/core/
-├── ContextExtraPreProcessorTest.java  # 3 tests
-└── AgentLoopOrchestratorContextInjectionTest.java # 1 test
-```
+## 七、当前验证状态
+
+截至 2026-07-12：
+
+- `testDebugUnitTest --rerun-tasks`：259 tests，0 failures，0 errors。
+- `assembleDebug --rerun-tasks`：成功。
+- 已覆盖真实 Context + Text Loop 的普通聊天、会话切换、用户切换、Persona、工具选择、全量 fallback、required 失败、预算和取消行为。
+- 尚未完成 Android/车机设备验证，因此不能宣称真实 SQLite、真实车控 ToolRegistry、网络超时和 Phoenix 导出已经完成生产验收。
+
+---
+
+## 八、后续建议
+
+Demo 阶段不建议继续扩大 Context 架构修改，优先进行设备联调。后续工作按优先级排序：
+
+1. 在车机执行 TEXT 连续对话、Session/User/Persona 切换、明确/模糊工具、取消与超时冒烟测试。
+2. 验证 SQLite SessionMemory、长期记忆切换和真实 ToolRegistry 行为。
+3. 在 Phoenix 验证 `agent.loop -> context.prepare/context.assemble -> gen_ai.chat/tool.execute` 父子关系。
+4. 根据真实超预算数据决定是否需要优先级裁剪和生产自动压缩；没有真实需求前不启用现有 compaction 接口。
+5. 在决定删除 SCENE/VL 等 legacy 路径后，再集中清理 ContextSection、旧 Budget API、旧 AgentLoop 和 `prompt.assembly`，避免为了形式上的零引用破坏冻结路径。
+
