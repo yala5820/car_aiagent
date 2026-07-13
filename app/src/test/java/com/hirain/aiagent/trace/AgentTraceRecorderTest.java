@@ -7,6 +7,7 @@ import static org.junit.Assert.assertTrue;
 
 import com.hirain.aiagent.core.SafetyVerdict;
 
+import dev.langchain4j.agent.tool.ToolSpecification;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.Tracer;
@@ -145,6 +146,49 @@ public class AgentTraceRecorderTest {
         assertTrue(data.getAttributes().get(AttributeKey.stringKey(TraceAttributeKeys.MEMORY_OUTPUT))
                 .contains("用户喜欢 24 度空调"));
         assertTrue(data.getAttributes().get(AttributeKey.longKey(TraceAttributeKeys.MEMORY_OUTPUT_CHARS)) > 0);
+    }
+
+    @Test
+    public void recordLlmRequest_includesCompleteToolSchema() {
+        TestSession session = new TestSession();
+        AgentTraceRecorder recorder = new AgentTraceRecorder(session.traceSession);
+
+        Span span = recorder.startLlmCall("qwen-turbo", 1, 2);
+
+        ToolSpecification spec1 = ToolSpecification.builder()
+                .name("get_weather")
+                .description("获取天气信息")
+                .build();
+        // 带 parameters 的 tool spec
+        ToolSpecification spec2 = ToolSpecification.builder()
+                .name("set_ac_temperature")
+                .description("设置空调温度")
+                .build();
+
+        recorder.recordLlmRequest(span, "qwen-turbo", 1,
+                List.of(dev.langchain4j.data.message.UserMessage.from("打开空调")),
+                List.of(spec1, spec2));
+        span.end();
+        session.close();
+
+        SpanData data = session.exporter.spans.get(0);
+        assertEquals(TraceSpanNames.GEN_AI_CHAT, data.getName());
+
+        String toolSpecs = data.getAttributes()
+                .get(AttributeKey.stringKey("gen_ai.request.tool_specs"));
+        assertNotNull("tool_specs should exist", toolSpecs);
+        assertTrue("tool_specs should contain name='get_weather'",
+                toolSpecs.contains("name=get_weather"));
+        assertTrue("tool_specs should contain description='获取天气信息'",
+                toolSpecs.contains("description=获取天气信息"));
+        assertTrue("tool_specs should contain tool count separator '---'",
+                toolSpecs.contains("---"));
+
+        String messages = data.getAttributes()
+                .get(AttributeKey.stringKey("gen_ai.request.messages"));
+        assertNotNull("request messages should exist", messages);
+        assertTrue("messages should contain user message",
+                messages.contains("打开空调"));
     }
 
     private static final class TestSession {

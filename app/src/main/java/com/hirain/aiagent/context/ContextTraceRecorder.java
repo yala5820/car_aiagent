@@ -266,26 +266,29 @@ public class ContextTraceRecorder {
         span.setAttribute(TraceAttributeKeys.MESSAGE_PROVIDER, c.providerName());
         int msgCount = c.messages() != null ? c.messages().size() : 0;
         span.setAttribute(TraceAttributeKeys.MESSAGE_COUNT, msgCount);
-        // 记录消息角色分布（如 "USER,ASSISTANT,TOOL"），不逐条写入完整内容（避免 double-dump）
         if (c.messages() != null && !c.messages().isEmpty()) {
+            // 记录角色分布作为辅助字段
             java.util.LinkedHashSet<String> roles = new java.util.LinkedHashSet<>();
+            StringBuilder fullContent = new StringBuilder();
+            int idx = 0;
             for (dev.langchain4j.data.message.ChatMessage m : c.messages()) {
-                if (m != null) roles.add(m.type().name());
+                if (m == null) continue;
+                roles.add(m.type().name());
+                // 按 [index][role] content\n 格式拼接完整正文
+                fullContent.append("[").append(idx).append("][")
+                        .append(m.type().name()).append("] ")
+                        .append(m).append("\n");
+                idx++;
             }
             span.setAttribute("message.roles", String.join(", ", roles));
-            // 写入摘要帮助排障：前 200 字符 + 截断标记
-            String firstMsg = c.messages().get(0).toString();
-            String summary = firstMsg.length() > 200
-                    ? firstMsg.substring(0, 200) + "... (truncated)"
-                    : firstMsg;
-            traceContext.session().writer().putText(span, "message.content_summary", summary);
+            // 完整正文（走 putText 保持脱敏/截断策略一致）
+            traceContext.session().writer().putText(span, "message.content", fullContent.toString());
         }
         span.end();
     }
 
     /**
-     * 记录 ToolContextContribution 的工具集 span。
-     * span 名称 = context.toolset，记录工具数量与名称。
+     * 记录 ToolContextContribution 的工具集 span。包含工具名、描述和参数 schema。
      */
     public void recordToolset(ToolContextContribution c) {
         if (traceContext == null || traceContext.session() == null) return;
@@ -297,11 +300,23 @@ public class ContextTraceRecorder {
         span.setAttribute(TraceAttributeKeys.TOOLSET_TOOL_COUNT, count);
         if (c.toolSpecifications() != null) {
             List<String> names = new java.util.ArrayList<>();
+            StringBuilder schemaSb = new StringBuilder();
             for (ToolSpecification ts : c.toolSpecifications()) {
-                if (ts != null) names.add(ts.name());
+                if (ts == null) continue;
+                names.add(ts.name());
+                // 补齐 name / description / parameters 三部分，可还原完整 schema
+                schemaSb.append("name=").append(ts.name()).append("\n");
+                if (ts.description() != null && !ts.description().isEmpty()) {
+                    schemaSb.append("description=").append(ts.description()).append("\n");
+                }
+                if (ts.parameters() != null) {
+                    schemaSb.append("parameters=").append(ts.parameters().toString()).append("\n");
+                }
+                schemaSb.append("---\n");
             }
             span.setAttribute(TraceAttributeKeys.TOOLSET_TOOL_NAMES,
                     String.join(", ", names));
+            traceContext.session().writer().putText(span, "toolset.schema", schemaSb.toString());
         }
         span.end();
     }

@@ -57,7 +57,8 @@ public class ContextProviderTraceTest {
         final Map<String, ToolSpecification> specs = new LinkedHashMap<>();
         JvmToolRegistry() {
             for (String n : ToolGroupRegistry.defaultRegistry().allToolNames())
-                specs.put(n, ToolSpecification.builder().name(n).build());
+                specs.put(n, ToolSpecification.builder().name(n)
+                        .description("Tool for " + n).build());
         }
         @Override public List<ToolSpecification> toolSpecificationsByNames(List<String> names) {
             if (names == null || names.isEmpty()) return List.of();
@@ -238,6 +239,32 @@ public class ContextProviderTraceTest {
             assertEquals("dynamic provider span parent should be context.assemble",
                     assembleSpan.getSpanId(), provSpan.getParentSpanId());
         }
+
+        // ── 7. 验证 provider span duration 反映真实执行（>0） ──
+        for (String provider : allStaticProviders()) {
+            SpanData provSpan = findSpan(spans, "context.provider." + provider);
+            assertNotNull("provider span should exist: " + provider, provSpan);
+            long durationMs = provSpan.getAttributes()
+                    .get(AttributeKey.longKey("provider.duration_ms"));
+            assertTrue("provider " + provider + " should have duration_ms >= 0",
+                    durationMs >= 0);
+        }
+
+        // ── 8. 验证 toolset schema 包含 name/description（有 parameters 时也包含） ──
+        String schemaStr = toolsetSpan.getAttributes()
+                .get(AttributeKey.stringKey("toolset.schema"));
+        assertNotNull("toolset should have schema", schemaStr);
+        assertTrue("toolset schema should contain 'name='", schemaStr.contains("name="));
+        assertTrue("toolset schema should contain 'description='", schemaStr.contains("description="));
+
+        // ── 9. 验证 message span 有完整正文（非摘要） ──
+        SpanData currUserMsg = findSpan(spans, "context.message.current_user");
+        assertNotNull("context.message.current_user should exist", currUserMsg);
+        String msgContent = currUserMsg.getAttributes()
+                .get(AttributeKey.stringKey("message.content"));
+        assertNotNull("message.content should exist (full content, not just summary)", msgContent);
+        assertTrue("message.content should contain user input text",
+                msgContent.contains("打开空调"));
     }
 
     private static List<String> allStaticProviders() {

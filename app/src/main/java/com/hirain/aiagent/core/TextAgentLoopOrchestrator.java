@@ -258,41 +258,61 @@ public class TextAgentLoopOrchestrator {
                                     toolResult = "[SAFETY VETO] " + verdict.reason();
                                     vetoCount++;
                                 } else {
-                                    // Stage 2: tool.dispatch
+                                    // Stage 2: tool.dispatch（接入真实 DispatchDiagnostics）
                                     Span dispatchSpan = trace != null ? trace.startToolDispatch(req.name()) : null;
                                     long dispatchStartMs = System.currentTimeMillis();
                                     String targetClass = getTargetClass(req.name());
                                     String targetMethod = getTargetMethod(req.name());
+                                    com.hirain.aiagent.ai.langchain4j.tool.ToolDispatcher.DispatchDiagnostics diag =
+                                            new com.hirain.aiagent.ai.langchain4j.tool.ToolDispatcher.DispatchDiagnostics();
                                     try {
-                                        toolResult = config.toolExecutor().execute(req);
+                                        // 优先走真实 dispatcher（获取阶段诊断），否则回退到 toolExecutor
+                                        com.hirain.aiagent.ai.langchain4j.tool.ToolDispatcher realDispatcher =
+                                                config.toolRegistry() != null
+                                                        ? config.toolRegistry().dispatcherFor(req.name())
+                                                        : null;
+                                        if (realDispatcher != null) {
+                                            toolResult = realDispatcher.dispatch(req, diag);
+                                        } else {
+                                            toolResult = config.toolExecutor().execute(req);
+                                            diag.argumentParseSuccess = true;
+                                            diag.invokeSuccess = true;
+                                        }
                                         if (trace != null) {
                                             trace.finishToolDispatch(dispatchSpan, true, targetClass, targetMethod,
                                                     System.currentTimeMillis() - dispatchStartMs,
-                                                    true, true);
+                                                    diag.argumentParseSuccess, diag.invokeSuccess);
                                         }
                                     } catch (Exception dispatchEx) {
                                         if (trace != null) {
                                             trace.finishToolDispatch(dispatchSpan, false, targetClass, targetMethod,
                                                     System.currentTimeMillis() - dispatchStartMs,
-                                                    false, false);
+                                                    diag.argumentParseSuccess, diag.invokeSuccess);
                                         }
                                         throw dispatchEx;
                                     }
                                 }
 
-                                // Stage 3: tool.result_writeback
+                                // Stage 3: tool.result_writeback（分步记录真实结果）
                                 Span writebackSpan = trace != null ? trace.startToolWriteback() : null;
+                                boolean memoryWriteSuccess = false;
+                                boolean loopCtxWriteSuccess = false;
                                 try {
                                     chatMemory.add(new ToolExecutionResultMessage(
                                             req.id(), req.name(),
                                             toolResult != null ? toolResult : "{}"));
+                                    memoryWriteSuccess = true;
                                     if (trace != null) {
                                         trace.finishTool(toolSpan, toolResult, verdict);
                                     }
                                     loopCtx.addToolResult(req.name(), req.arguments(),
                                             toolResult, verdict);
+                                    loopCtxWriteSuccess = true;
                                 } finally {
-                                    if (trace != null) trace.finishToolWriteback(writebackSpan, true);
+                                    if (trace != null) {
+                                        trace.finishToolWriteback(writebackSpan,
+                                                memoryWriteSuccess && loopCtxWriteSuccess);
+                                    }
                                 }
                             } catch (Exception e) {
                                 if (toolScope != null) {

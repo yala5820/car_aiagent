@@ -107,6 +107,12 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
             List<ContextContribution> allContributions = new ArrayList<>();
 
             for (ContextProvider provider : requestStaticProviders) {
+                // 进入每个 Provider 前先创建 provSpan 并 makeCurrent，span 包裹真实执行生命周期
+                Span provSpan = traceRecorder != null
+                        ? traceRecorder.startProviderSpan(provider.name(),
+                                io.opentelemetry.context.Context.current())
+                        : null;
+                io.opentelemetry.context.Scope provScope = provSpan != null ? provSpan.makeCurrent() : null;
                 long provStartMs = System.currentTimeMillis();
                 try {
                     ContextProviderResult result = provider.provide(session, input);
@@ -115,11 +121,6 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
                     if (result.outcome() != null) {
                         outcomes.add(result.outcome());
                     }
-                    // Provider span（替代旧 event 机制）
-                    Span provSpan = traceRecorder != null
-                            ? traceRecorder.startProviderSpan(provider.name(),
-                                    io.opentelemetry.context.Context.current())
-                            : null;
                     traceRecorder.finishProviderSpan(provSpan, result,
                             provider.lifecycle().name(), provider.required(session, input), provDurationMs);
                     // required Provider 失败 → 中断 prep
@@ -138,17 +139,13 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
                             provider.name(), ContextProviderStatus.FAILED,
                             ContextErrorCode.REQUIRED_PROVIDER_FAILED,
                             e.getMessage(), provDurationMs));
-                    // Provider span for exception
-                    Span errProvSpan = traceRecorder != null
-                            ? traceRecorder.startProviderSpan(provider.name(),
-                                    io.opentelemetry.context.Context.current())
-                            : null;
-                    if (errProvSpan != null) {
-                        errProvSpan.setAttribute("provider.name", provider.name());
-                        errProvSpan.setAttribute("provider.status", "FAILED");
-                        errProvSpan.setAttribute("provider.error_reason", e.getMessage());
-                        errProvSpan.setAttribute("provider.duration_ms", provDurationMs);
-                        errProvSpan.end();
+                    // 异常直接写入同一条 provSpan（不再新建 errProvSpan）
+                    if (provSpan != null) {
+                        provSpan.setAttribute("provider.name", provider.name());
+                        provSpan.setAttribute("provider.status", "FAILED");
+                        provSpan.setAttribute("provider.error_reason", e.getMessage());
+                        provSpan.setAttribute("provider.duration_ms", provDurationMs);
+                        provSpan.end();
                     }
                     if (provider.required(session, input)) {
                         if (prepareSpan != null) prepareSpan.setAttribute("required_provider_failed", provider.name());
@@ -157,6 +154,8 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
                                 "Required provider threw exception: " + provider.name()
                                         + " - " + e.getMessage());
                     }
+                } finally {
+                    if (provScope != null) provScope.close();
                 }
                 // 每 Provider 之间检查取消
                 if (cancelChecker != null && cancelChecker.isCancelled()) {
@@ -253,6 +252,12 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
             }
 
             for (ContextProvider provider : iterationDynamicProviders) {
+                // 进入每个 Provider 前先创建 provSpan 并 makeCurrent，span 包裹真实执行生命周期
+                Span provSpan = traceRecorder != null
+                        ? traceRecorder.startProviderSpan(provider.name(),
+                                io.opentelemetry.context.Context.current())
+                        : null;
+                io.opentelemetry.context.Scope provScope = provSpan != null ? provSpan.makeCurrent() : null;
                 long provStartMs = System.currentTimeMillis();
                 try {
                     ContextProviderResult result = provider.provide(reqSession, input);
@@ -261,11 +266,6 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
                         outcomes.add(result.outcome());
                     }
                     dynamicContributions.addAll(result.contributions());
-                    // Provider span（替代旧 event 机制）
-                    Span provSpan = traceRecorder != null
-                            ? traceRecorder.startProviderSpan(provider.name(),
-                                    io.opentelemetry.context.Context.current())
-                            : null;
                     traceRecorder.finishProviderSpan(provSpan, result,
                             provider.lifecycle().name(), provider.required(reqSession, input), provDurationMs);
                     // required Provider 失败 → 中断 assemble
@@ -283,17 +283,13 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
                     outcomes.add(new ContextProviderOutcome(
                             provider.name(), ContextProviderStatus.FAILED, null,
                             e.getMessage(), provDurationMs));
-                    // Provider span for exception
-                    Span errProvSpan = traceRecorder != null
-                            ? traceRecorder.startProviderSpan(provider.name(),
-                                    io.opentelemetry.context.Context.current())
-                            : null;
-                    if (errProvSpan != null) {
-                        errProvSpan.setAttribute("provider.name", provider.name());
-                        errProvSpan.setAttribute("provider.status", "FAILED");
-                        errProvSpan.setAttribute("provider.error_reason", e.getMessage());
-                        errProvSpan.setAttribute("provider.duration_ms", provDurationMs);
-                        errProvSpan.end();
+                    // 异常直接写入同一条 provSpan（不再新建 errProvSpan）
+                    if (provSpan != null) {
+                        provSpan.setAttribute("provider.name", provider.name());
+                        provSpan.setAttribute("provider.status", "FAILED");
+                        provSpan.setAttribute("provider.error_reason", e.getMessage());
+                        provSpan.setAttribute("provider.duration_ms", provDurationMs);
+                        provSpan.end();
                     }
                     // 异常时也检查 required
                     if (provider.required(reqSession, input)) {
@@ -303,6 +299,8 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
                                         + " - " + e.getMessage(),
                                 new ContextAssemblyDebugInfo(outcomes, 0, 0, "required_provider_exception"));
                     }
+                } finally {
+                    if (provScope != null) provScope.close();
                 }
             }
 

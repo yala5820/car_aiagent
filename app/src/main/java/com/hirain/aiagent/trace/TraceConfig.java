@@ -58,7 +58,7 @@ public final class TraceConfig {
                 .batchSize(64)
                 .batchTimeout(Duration.ofSeconds(2))
                 .redactSensitive(true)
-                .contentCaptureMode(ContentCaptureMode.REDACTED)
+                .contentCaptureMode(ContentCaptureMode.FULL_DEBUG)
                 .build();
     }
 
