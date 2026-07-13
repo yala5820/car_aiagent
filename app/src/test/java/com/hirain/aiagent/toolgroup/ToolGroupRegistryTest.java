@@ -127,7 +127,7 @@ public class ToolGroupRegistryTest {
         assertTrue(common.toolNames().contains("set_seat_fl_heat"));       // Seat
         assertTrue(common.toolNames().contains("set_door_lock"));         // Door
         assertTrue(common.toolNames().contains("set_chassis_mode"));       // Chassis
-        assertTrue(common.toolNames().contains("set_vehicle_spd"));        // Speed (in Chassis)
+        assertFalse(common.toolNames().contains("set_vehicle_spd"));       // 车速仅作为 Demo 状态，不再暴露 Tool
         assertTrue(common.toolNames().contains("set_frag_type"));          // Fragrance
         assertTrue(common.toolNames().contains("set_dms_drive_fatigue"));  // DMS
         // 不应包含非车控域
@@ -217,6 +217,7 @@ public class ToolGroupRegistryTest {
         assertTrue(all.contains("set_fl_window_status"));
         assertTrue(all.contains("getWeatherForecast"));
         assertTrue(all.contains("front_camera_interaction"));
+        assertFalse(all.contains("set_vehicle_spd"));
         // 纯聊天和基础状态组应无工具
         assertFalse(all.contains(""));
     }
@@ -477,11 +478,13 @@ public class ToolGroupRegistryTest {
 
         // 确保 toolName 唯一（无重复 @Tool name）
         assertEquals(allRealNames.size(), realSpecs.size());
+        assertFalse("set_vehicle_spd must not be exposed to the model",
+                allRealNames.contains("set_vehicle_spd"));
 
         ToolGroupRegistryValidationResult result =
                 registry.validateAgainstToolSpecifications(realSpecs);
 
-        // 全部 47 个一致
+        // 删除 set_vehicle_spd 后，Registry 与真实 Manager Tool 仍应全量一致
         assertTrue("Registry-Spec mismatch: " + result.summary(), result.valid());
     }
 }

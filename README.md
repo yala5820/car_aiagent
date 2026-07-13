@@ -12,7 +12,8 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 - 使用阿里云 DashScope 的 OpenAI 兼容 API（`qwen-turbo` / `qwen-flash` / `qwen-vl-max`）
 - 使用 LangChain4j 1.16.3 的消息、模型与 Tool Calling 原语，自研 Runtime / Context / AgentLoop 负责业务编排
 - 集中式反射工具调度（ToolRegistry + ToolDispatcher），消除样板代码
-- 组件化 Agent 循环（AgentLoopOrchestrator），7 个可插拔接口
+- 组件化 Agent 循环（AgentLoopOrchestrator / TextAgentLoopOrchestrator）
+- 独立确定性的车控安全审核（ToolSafetyEngine），在工具执行前结合标准化参数与车辆状态作出 ALLOW / DENY 决策
 - 外部化 Prompt 管理（`assets/prompts/` + PromptTemplate），支持 TEXT Persona 模板选择
 - 四层记忆系统（Session / 长期记忆 / 压缩 / 提取）
 - 全链路追踪（OpenTelemetry + Phoenix）
@@ -26,7 +27,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 | **Phase 1** | 16 个 Gradle 模块合并为单一 `app/` 模块，移除 UI 悬浮窗组件 |
 | **Phase 2** | 工具系统重构：ToolDispatcher + ToolRegistry，消除 450 行样板代码，修复 5 个 Bug |
 | **Phase 3** | Prompt 规范化：9 个 `.txt` 模板文件替代 150 行硬编码，PromptManager + PromptSelector |
-| **Phase 4** | Agent 主循环统一：AgentLoopOrchestrator + 7 组件接口 + SafetyGuard |
+| **Phase 4** | Agent 主循环统一：AgentLoopOrchestrator + 组件化执行管线（原 SafetyGuard 已由 ToolSafetyEngine 取代） |
 | **Phase 5** | 记忆系统：四层架构（Session/长期记忆/压缩/提取），3 张 SQLite 表 |
 | **Phase 6** | Trace 系统：OpenTelemetry + Phoenix 全链路追踪 |
 | **Phase 7** | AgentLoop Bug 修复：状态机重置、长期记忆刷新、onTurnComplete 去重 |
@@ -92,7 +93,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 │  │  ├─ ContextMessageAssembler                │            │
 │  │  ├─ 预算与消息序列校验                      │            │
 │  │  └─ ChatRequest(messages, toolSpecifications)│           │
-│  │     → ModelCaller → SafetyGuard → Tool     │            │
+│  │     → ModelCaller → ToolSafetyEngine → Tool│            │
 │  │     → PostProcessor → Terminator → Collector│            │
 │  ├─────────────────────────────────────────────┤            │
 │  │           Tool 调用层（集中式反射调度）         │            │
@@ -199,7 +200,7 @@ AIAgent/
 │   │   │   ├── toolgroup/                    # 工具分组与选择
 │   │   │   │   ├── ToolGroupId.java             # 13 个工具组枚举
 │   │   │   │   ├── ToolGroup.java               # 不可变工具组元数据
-│   │   │   │   ├── ToolGroupRegistry.java       # 注册表（defaultRegistry 全量 47 个 toolName 注册）
+│   │   │   │   ├── ToolGroupRegistry.java       # 注册表（defaultRegistry 全量 46 个 toolName 注册）
 │   │   │   │   ├── ToolGroupSelector.java       # 选择器接口
 │   │   │   │   ├── DefaultToolGroupSelector.java # 基于 IntentResult + 弱车载关键词的选择
 │   │   │   │   └── ToolGroupSelectionResult.java # 选择结果
@@ -249,16 +250,24 @@ AIAgent/
 │   │   │   │   ├── AgentLoopState.java         # 状态跟踪
 │   │   │   │   ├── AgentLoopContext.java       # 执行上下文
 │   │   │   │   ├── AgentResult.java            # 结构化结果
-│   │   │   │   ├── SafetyVerdict.java          # 安全审查结果
 │   │   │   │   ├── ToolExecutionRecord.java    # 工具执行快照
-│   │   │   │   ├── component/                  # 7 个可插拔接口
+│   │   │   │   ├── component/                  # Agent 循环组件接口
 │   │   │   │   ├── preprocessor/               # PreProcessor 实现
 │   │   │   │   ├── model/                      # 模型调用器
-│   │   │   │   ├── safety/                     # 安全审查实现
 │   │   │   │   ├── postprocessor/              # 后处理器实现
 │   │   │   │   ├── terminator/                 # 循环终止器
 │   │   │   │   ├── collector/                  # 结果收集器
 │   │   │   │   └── factory/                    # 人格工厂
+│   │   │   │
+│   │   │   ├── safety/                     # 独立 Tool 执行前安全审核
+│   │   │   │   ├── ToolSafetyEngine.java       # 统一审核入口与规则调度
+│   │   │   │   ├── SafetyCheckContext.java     # 工具名 + 标准化参数
+│   │   │   │   ├── SafetyDecision.java         # ALLOW / DENY + 稳定原因码
+│   │   │   │   ├── SafetyRule.java             # 单条规则接口
+│   │   │   │   ├── DefaultSafetyRules.java     # 工具名到规则列表的固定映射
+│   │   │   │   └── rules/                      # 车控业务安全规则
+│   │   │   │       ├── DoorUnlockSafetyRule.java
+│   │   │   │       └── ChassisModeSafetyRule.java
 │   │   │   │
 │   │   │   ├── memory/                     # 记忆系统
 │   │   │   │   ├── MemoryOrchestrator.java  # 协调器（含会话管理门面）
@@ -352,7 +361,7 @@ AIAgent/
 
 **文件：** `core/TextAgentLoopOrchestrator.java`
 
-TEXT 请求的唯一 Agent 执行入口。构造器只接收 `AgentConfig`、`ContextMemoryGateway` 和 `ContextAssemblyGateway`，不持有 PromptManager 或固定工具规格。每轮模型调用使用的消息和工具全部来自 `ContextAssemblyResult`：
+TEXT 请求的唯一 Agent 执行入口。构造器接收 `AgentConfig`、`ContextMemoryGateway`、`ContextAssemblyGateway` 和共享的 `ToolSafetyEngine`，不持有 PromptManager 或固定工具规格。每轮模型调用使用的消息和工具全部来自 `ContextAssemblyResult`：
 
 ```
 execute(session, prepareResult)
@@ -363,12 +372,12 @@ execute(session, prepareResult)
            → ContextAssemblyResult(messages, toolSpecifications, budgetReport)
       ② 预算 & 取消检查
       ③ ChatRequest(messages, toolSpecifications) → ModelCaller
-      ④ LLM 返回 ToolCall → SafetyGuard → ToolExecutor → continue
+      ④ LLM 返回 ToolCall → ToolSafetyEngine → ToolExecutor / 拒绝结果写回 → continue
       ⑤ LLM 返回文本 → PostProcessor → Terminator → ResultCollector → return
   → max iterations → AgentResult.error()
 ```
 
-`AgentConfig` 仍负责 ModelCaller、SafetyGuard、ToolExecutor、PostProcessor、Terminator 和 ResultCollector 等执行策略；Prompt、短期记忆、车辆状态、时间和工具规格不再由 TEXT PreProcessor 各自拼装，而是统一通过 Context Provider 进入最终请求。
+`AgentConfig` 负责 ModelCaller、ToolExecutor、PostProcessor、Terminator 和 ResultCollector 等执行策略；`ToolSafetyEngine` 由 Service 统一创建并注入各 AgentLoop，不随 Persona 改变。Prompt、短期记忆、车辆状态、时间和工具规格不再由 TEXT PreProcessor 各自拼装，而是统一通过 Context Provider 进入最终请求。
 
 **会话隔离：** `ContextMemoryGateway` 按 `sessionId` 选择 live ChatMemory，`SessionMemoryContextProvider` 每轮重新读取当前会话快照；create/switch/delete 会话会真实改变下一轮模型可见的短期历史。
 
@@ -438,7 +447,7 @@ execute(session, prepareResult)
 
 ### 4.8 Vehicle*Manager 系列（车控工具）
 
-8 个模块，共约 **40+ 个 @Tool 方法**，全部使用 `ToolRegistry` 统一调度。
+8 个车辆模块，其中 7 个模块共提供 **44 个 @Tool 方法**，全部使用 `ToolRegistry` 统一调度；`VehicleSpeedManager` 仅保留状态查询能力，不再向模型暴露修改车速的工具。
 每个 Manager 的 `@Tool` 方法**委托给 `VehicleStateMachine`** 执行状态变更和参数校验。
 
 | 模块 | 工具数 | 覆盖功能 |
@@ -449,7 +458,7 @@ execute(session, prepareResult)
 | VehicleAcManager | 15 | 空调开关、温度、风量、ECO、负离子、内外循环 |
 | VehicleChassisManager | 1 | 底盘模式（普通/越野/雪地） |
 | VehicleFragManager | 2 | 香氛类型、浓度 |
-| VehicleSpeedManager | 1 | 巡航车速 |
+| VehicleSpeedManager | 0 | 车辆速度状态查询（非模型 Tool） |
 | VehicleDMSManager | 3 | 驾驶员疲劳、分心、情绪 |
 
 ### 4.9 ActiveRequestRegistry（请求取消与终态管理）
@@ -519,16 +528,16 @@ handleTextRequest() → traceManager.startAgentRequest() → agentRuntime.startS
 
 **文件：** `toolgroup/`
 
-将当前 47 个 `@Tool` 方法按功能域分组。Selector 本身只生成选择结果，但 TEXT 生产链中的 `ToolGroupContextProvider` 会把候选工具名解析为真实 `ToolSpecification`，因此当前 ToolGroup 已实际参与控制 TEXT 请求的模型可见工具：
+将当前 46 个 `@Tool` 方法按功能域分组。Selector 本身只生成选择结果，但 TEXT 生产链中的 `ToolGroupContextProvider` 会把候选工具名解析为真实 `ToolSpecification`，因此当前 ToolGroup 已实际参与控制 TEXT 请求的模型可见工具：
 
 - 13 个 `ToolGroupId`：11 个基础/领域组 + `COMMON_VEHICLE_GROUP`（车辆聚合）+ `ALL_SAFE_DEMO_GROUP`（全量）
-- `ToolGroupRegistry.defaultRegistry()`：全量 47 个 toolName 注册，支持按 toolName 反查、多组合并去重
+- `ToolGroupRegistry.defaultRegistry()`：全量 46 个 toolName 注册，支持按 toolName 反查、多组合并去重
 - `DefaultToolGroupSelector`：11 种 IntentTag → ToolGroupId 映射，车辆意图附加 `BASIC_STATUS_GROUP`，UNKNOWN 含弱车载关键词时选 `COMMON_VEHICLE_GROUP`
 - `ToolGroupSelectionResult`：除 group/tool/reason/confidence 外，还携带 requiredContextKeys、风险级别、全量兜底和聚合组标记
 - `CHAT_ONLY_GROUP` 生成空工具集；明确意图生成所选组工具；UNKNOWN 无弱车载关键词时通过 `ALL_SAFE_DEMO_GROUP` 兜底全量工具
 - `ToolGroupContextProvider` 从 `ToolRegistry` 解析规格，最终由 `ContextMessageAssembler` 写入 `ChatRequest.toolSpecifications()`
 - 聚合组 `riskLevel` 遵循最高风险上浮规则（`COMMON_VEHICLE_GROUP` 和 `ALL_SAFE_DEMO_GROUP` 均为 HIGH）
-- ToolGroup 不负责执行工具；实际调用仍由 SafetyGuard + ToolRegistry / ToolDispatcher 完成
+- ToolGroup 不负责执行工具；实际调用由 ToolSafetyEngine 先审核，再由 ToolRegistry / ToolDispatcher 完成
 
 ### 4.14 ContextOrchestrator（上下文模块）
 
@@ -598,7 +607,22 @@ Service worker → Context.prepare → Runtime gate → iteration/assemble → m
 - 超出 Context 预算时返回 `CONTEXT_BUDGET_EXCEEDED`，不会调用模型，也不会写入当前用户消息
 - 当前尚未启用“裁剪 → Memory 压缩 → 重读 → 二次 assemble”的自动恢复流程
 
-### 4.15 SoaService（SOA 总线封装）
+### 4.15 ToolSafetyEngine（Tool 执行前安全审核）
+
+**文件：** `safety/`
+
+ToolSafetyEngine 是独立、轻量、确定性的车控安全审核入口。AgentLoop 在 ToolExecutor 执行前只调用一次 `check(ToolExecutionRequest)`；Engine 从请求中提取工具名称和标准化 JSON 参数，规则再按需从 `VehicleStateMachine` 读取车辆状态，不依赖完整的 `AgentLoopContext`。
+
+- `DefaultSafetyRules` 使用固定的 `Map<String, List<SafetyRule>>` 保存工具与规则的对应关系，后续新增十余条规则时仍可直接定位和测试
+- 已注册安全工具若配置为空规则列表、null 规则或非法工具名，会在 Engine 创建时直接失败，避免配置错误静默变成默认放行
+- 当前 `DoorUnlockSafetyRule` 只在解锁时生效，要求车速等于 0；上锁不受该规则限制
+- 当前 `ChassisModeSafetyRule` 要求车速等于 0，与座舱位置和 Persona 无关
+- 没有专用规则的低风险工具默认 ALLOW；有专用规则但参数、车速不可用或规则异常时返回稳定的 DENY 原因码
+- DENY 时不执行工具，而是把结构化拒绝结果作为 ToolResult 写回模型，由模型自然向用户说明原因
+- `VehicleStateMachine` 继续负责执行阶段的参数校验与状态收敛，安全模块只承担执行前业务判断
+- 虚拟车辆默认以静止状态（0 km/h）启动；行驶状态由 Demo 测试或后续车辆状态接入更新，不向模型暴露修改车速的 Tool
+
+### 4.16 SoaService（SOA 总线封装）
 
 **文件：** `infra/soa/SoaService.kt`
 
@@ -626,14 +650,15 @@ AIAgentService.onCreate()
     ├─ 启动 1 秒定时器：requestCapture()
     ├─ PromptManager(this)                 ← Prompt 模板管理器
     ├─ vehicleStateMachine = VehicleStateMachine() ← 虚拟车辆状态机
+    ├─ toolSafetyEngine = ToolSafetyEngine(vehicleStateMachine, defaultRules) ← 全 Persona 共享
     ├─ vl = VlManager(this, promptManager)
-    ├─ toolRegistry.registerAll(10 managers) ← 注册所有工具（Manager 注入 vehicleStateMachine）
+    ├─ toolRegistry.registerAll(9 tool providers) ← 注册 46 个模型工具（SpeedManager 不注册）
     ├─ memoryOrchestrator(...)             ← 记忆系统初始化
     ├─ traceManager = TraceManager(...)    ← Trace 系统初始化
-    ├─ chatOrchestrator = AgentLoopOrchestrator(...) ← 旧版对话引擎（VOICE 链路使用）
+    ├─ chatOrchestrator = AgentLoopOrchestrator(..., toolSafetyEngine) ← 兼容链路共用安全引擎
     ├─ conversationManager = ConversationManager(...)  ← 会话管理门面
     ├─ contextOrchestrator = ContextOrchestrator.defaultForText(...) ← Context 模块
-    ├─ textOrchestrator = TextAgentLoopOrchestrator(config, memoryOrch, contextOrch) ← TEXT 专用循环
+    ├─ textOrchestrator = TextAgentLoopOrchestrator(config, memoryOrch, contextOrch, toolSafetyEngine) ← TEXT 专用循环
     ├─ agentRuntime = AgentRuntime(
     │      AgentExecutor { session, prepared → textOrchestrator.execute(session, prepared) },
     │      contextOrchestrator,
@@ -680,9 +705,9 @@ agentRuntime.execute(runtimeSession)
               ├→ ChatRequest(messages, toolSpecifications)
               ├→ gen_ai.chat
               │    ├─ ToolCall → tool.execute
-              │    │    ├─ tool.safety_check
-              │    │    ├─ tool.dispatch
-              │    │    └─ tool.result_writeback → 下一轮重新 assemble
+               │    │    ├─ tool.safety_check → ALLOW / DENY
+               │    │    ├─ ALLOW → tool.dispatch
+               │    │    └─ 执行结果或拒绝结果写回 → 下一轮重新 assemble
               │    └─ 文本 → PostProcessor → Terminator → ResultCollector
               └→ AgentResult
     │
@@ -706,10 +731,11 @@ session.close() → scope.close() + rootSpan.end()
 | 对外 AIDL 协议 | 已完成 | 主请求、会话 CRUD、取消与 Listener 接口已落地；仍需调用方与车机联调 |
 | AgentRuntime | 基本完成 | TEXT 已统一经过 Session、Intent、ToolGroup、Context、取消与结果映射；VOICE/SCENE 等仍使用兼容链路 |
 | TEXT Context | 基本完成 | 8 静态 + 3 动态 Provider；消息和工具规格已由 Context 独占生成；长会话恢复与 Legacy 清理未完成 |
-| TEXT AgentLoop | 基本完成 | 多轮模型/工具循环、Safety、写回和终止链路已接通；真实网络取消仍是协作式而非硬中断 |
+| TEXT AgentLoop | 基本完成 | 多轮模型/工具循环、ToolSafetyEngine 审核、写回和终止链路已接通；真实网络取消仍是协作式而非硬中断 |
 | IntentRouter | Demo 完成 | 11 类关键词/正则意图，低成本且可解释；复杂自然语言仍依赖 fallback |
 | ToolGroup | Demo 完成 | 13 个工具组；通过 Context 实际限制 TEXT 可见工具；全量 fallback 仍保留 Demo 容错边界 |
-| ToolRegistry / Dispatcher | 基本完成 | 47 个 `@Tool` 统一反射注册和调度；工具失败聚合状态仍有少量 Trace 语义待统一 |
+| ToolRegistry / Dispatcher | 基本完成 | 46 个 `@Tool` 统一反射注册和调度；工具失败聚合状态仍有少量 Trace 语义待统一 |
+| Tool Safety Engine | Demo 完成 | 统一执行前入口、固定规则映射、稳定拒绝码和 LLM 自然解释链路已接通；当前仅覆盖车门解锁与底盘模式两类显式规则 |
 | Prompt / Persona | 基本完成 | 11 个模板；支持 chat/friendly/concise TEXT System Prompt；更复杂动态策略未实现 |
 | Session 记忆 | 基本完成 | SQLite 持久化、会话 CRUD 和模型可见历史切换已接通；固定 50 条窗口可能切断 ToolExchange |
 | 长期记忆 | 可用 | 提取、存储、按 userId 注入已接通；降级状态报告和衰减策略仍待完善 |

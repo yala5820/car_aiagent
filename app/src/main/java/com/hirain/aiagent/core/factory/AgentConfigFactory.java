@@ -17,18 +17,12 @@ import com.hirain.aiagent.core.preprocessor.TimeContextPreProcessor;
 import com.hirain.aiagent.core.preprocessor.VehicleStatusPreProcessor;
 import com.hirain.aiagent.core.preprocessor.VlWarningPreProcessor;
 import com.hirain.aiagent.core.postprocessor.MemoryPostProcessor;
-import com.hirain.aiagent.core.safety.AllowAllSafetyGuard;
-import com.hirain.aiagent.core.safety.CompositeSafetyGuard;
-import com.hirain.aiagent.core.safety.SpeedBasedDoorLockGuard;
-import com.hirain.aiagent.core.terminator.CompositeTerminator;
 import com.hirain.aiagent.core.terminator.NoToolCallTerminator;
-import com.hirain.aiagent.core.terminator.SafetyVetoTerminator;
 import com.hirain.aiagent.engines.scenematch.SceneMatch;
 import com.hirain.aiagent.memory.MemoryOrchestrator;
 import com.hirain.aiagent.prompt.PromptConstants;
 import com.hirain.aiagent.trace.TracingOkHttpInterceptor;
 import com.hirain.aiagent.prompt.PromptManager;
-import com.hirain.aiagent.tools.vehicle.speed.VehicleSpeedManager;
 
 import java.time.Duration;
 import java.util.List;
@@ -60,8 +54,7 @@ public class AgentConfigFactory {
                                                  PromptManager promptManager,
                                                  MemoryOrchestrator memoryOrchestrator,
                                                  ToolRegistry toolRegistry,
-                                                 VehicleStatusPreProcessor.VehicleStatusProvider statusProvider,
-                                                 VehicleSpeedManager speedManager) {
+                                                 VehicleStatusPreProcessor.VehicleStatusProvider statusProvider) {
         return AgentConfig.builder("chat")
                 .modelName("qwen-turbo")
                 .systemPromptTemplateName(PromptConstants.SYSTEM_ASSISTANT_DEFAULT)
@@ -76,14 +69,10 @@ public class AgentConfigFactory {
                 .modelCaller(new Lc4jModelCaller(buildQwenTurbo()))
                 .toolExecutor(toolRegistry::dispatch)
                 .toolSubset(null)
-                .safetyGuards(List.of(
-                        new SpeedBasedDoorLockGuard(() -> parseSpeed(speedManager.getSpeedStatus()))))
                 .postProcessors(List.of(
                         new NoOpPostProcessor(),
                         new MemoryPostProcessor()))
-                .terminator(new CompositeTerminator(
-                        new NoToolCallTerminator(),
-                        new SafetyVetoTerminator()))
+                .terminator(new NoToolCallTerminator())
                 .resultCollector(new DirectTextCollector())
                 .timeout(Duration.ofSeconds(30))
                 .build();
@@ -97,7 +86,6 @@ public class AgentConfigFactory {
                                                   PromptManager promptManager,
                                                   ToolRegistry toolRegistry,
                                                   VehicleStatusPreProcessor.VehicleStatusProvider statusProvider,
-                                                  VehicleSpeedManager speedManager,
                                                   SceneMatch.Scene scene) {
         return AgentConfig.builder("scene")
                 .modelName("qwen-flash")
@@ -113,8 +101,6 @@ public class AgentConfigFactory {
                 .modelCaller(new Lc4jModelCaller(buildQwenFlash()))
                 .toolExecutor(toolRegistry::dispatch)
                 .toolSubset(filterSceneTools(toolRegistry, scene.name))
-                .safetyGuards(List.of(
-                        new SpeedBasedDoorLockGuard(() -> parseSpeed(speedManager.getSpeedStatus()))))
                 .postProcessors(List.of(
                         new SceneActionMergePostProcessor()))
                 .terminator(new NoToolCallTerminator())
@@ -134,7 +120,6 @@ public class AgentConfigFactory {
                                                  MemoryOrchestrator memoryOrchestrator,
                                                  ToolRegistry toolRegistry,
                                                  VehicleStatusPreProcessor.VehicleStatusProvider statusProvider,
-                                                 VehicleSpeedManager speedManager,
                                                  String personaId) {
         String template = switchPersonaTemplate(personaId);
         // session-scoped 主路径由 MemoryOrchestrator.chatMemoryForSession(sessionId, maxMessages) 决定；
@@ -151,14 +136,10 @@ public class AgentConfigFactory {
                 .modelCaller(new Lc4jModelCaller(buildQwenTurbo()))
                 .toolExecutor(toolRegistry::dispatch)
                 .toolSubset(null)
-                .safetyGuards(List.of(
-                        new SpeedBasedDoorLockGuard(() -> parseSpeed(speedManager.getSpeedStatus()))))
                 .postProcessors(List.of(
                         new NoOpPostProcessor(),
                         new MemoryPostProcessor()))
-                .terminator(new CompositeTerminator(
-                        new NoToolCallTerminator(),
-                        new SafetyVetoTerminator()))
+                .terminator(new NoToolCallTerminator())
                 .resultCollector(new DirectTextCollector())
                 .timeout(Duration.ofSeconds(30))
                 .build();
@@ -192,7 +173,6 @@ public class AgentConfigFactory {
                 .modelCaller(new Lc4jModelCaller(buildQwenVlMax()))
                 .toolExecutor(toolRegistry::dispatch)
                 .toolSubset(List.of())
-                .safetyGuards(List.of(new AllowAllSafetyGuard()))
                 .postProcessors(List.of(new VlWarningPostProcessor(promptManager)))
                 .terminator(new NoToolCallTerminator())
                 .resultCollector(new DirectTextCollector())
@@ -226,17 +206,6 @@ public class AgentConfigFactory {
                 .modelName(modelName)
                 .parallelToolCalls(true)
                 .build();
-    }
-
-    // ── 辅助方法 ──
-
-    private static int parseSpeed(String speedStatusJson) {
-        try {
-            org.json.JSONObject json = new org.json.JSONObject(speedStatusJson);
-            return json.optInt("车速", 0);
-        } catch (Exception e) {
-            return 0;
-        }
     }
 
     // ── 场景工具过滤 ──

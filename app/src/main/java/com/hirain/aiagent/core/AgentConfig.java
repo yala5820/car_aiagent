@@ -6,7 +6,6 @@ import com.hirain.aiagent.core.component.ModelCaller;
 import com.hirain.aiagent.core.component.PostProcessor;
 import com.hirain.aiagent.core.component.PreProcessor;
 import com.hirain.aiagent.core.component.ResultCollector;
-import com.hirain.aiagent.core.component.SafetyGuard;
 import com.hirain.aiagent.core.component.ToolExecutor;
 
 import java.time.Duration;
@@ -46,7 +45,6 @@ public final class AgentConfig {
     private final ModelCaller modelCaller;
     private final ToolExecutor toolExecutor;
     private final List<ToolSpecification> toolSubset;
-    private final List<SafetyGuard> safetyGuards;
     private final List<PostProcessor> postProcessors;
     private final LoopTerminator terminator;
     private final ResultCollector resultCollector;
@@ -66,7 +64,6 @@ public final class AgentConfig {
         this.toolExecutor = b.toolExecutor;
         this.toolSubset = b.toolSubset != null
                 ? Collections.unmodifiableList(b.toolSubset) : null;
-        this.safetyGuards = Collections.unmodifiableList(b.safetyGuards);
         this.postProcessors = Collections.unmodifiableList(b.postProcessors);
         this.terminator = b.terminator;
         this.resultCollector = b.resultCollector;
@@ -87,7 +84,6 @@ public final class AgentConfig {
     public ModelCaller modelCaller() { return modelCaller; }
     public ToolExecutor toolExecutor() { return toolExecutor; }
     public List<ToolSpecification> toolSubset() { return toolSubset; }
-    public List<SafetyGuard> safetyGuards() { return safetyGuards; }
     public List<PostProcessor> postProcessors() { return postProcessors; }
     public LoopTerminator terminator() { return terminator; }
     public ResultCollector resultCollector() { return resultCollector; }
@@ -112,7 +108,6 @@ public final class AgentConfig {
         private ModelCaller modelCaller;
         private ToolExecutor toolExecutor;
         private List<ToolSpecification> toolSubset;
-        private List<SafetyGuard> safetyGuards = List.of();
         private List<PostProcessor> postProcessors = List.of();
         private LoopTerminator terminator;
         private ResultCollector resultCollector;
@@ -136,7 +131,6 @@ public final class AgentConfig {
         public Builder modelCaller(ModelCaller v) { this.modelCaller = v; return this; }
         public Builder toolExecutor(ToolExecutor v) { this.toolExecutor = v; return this; }
         public Builder toolSubset(List<ToolSpecification> v) { this.toolSubset = v; return this; }
-        public Builder safetyGuards(List<SafetyGuard> v) { this.safetyGuards = v; return this; }
         public Builder postProcessors(List<PostProcessor> v) { this.postProcessors = v; return this; }
         public Builder terminator(LoopTerminator v) { this.terminator = v; return this; }
         public Builder resultCollector(ResultCollector v) { this.resultCollector = v; return this; }

@@ -37,7 +37,6 @@ public class ContextCancellationAtomicityTest {
                         ? (com.hirain.aiagent.core.component.ToolExecutor) toolExec
                         : req -> "{}")
                 .toolSubset(null)
-                .safetyGuards(List.of())
                 .postProcessors(List.of(new NoOpPostProcessor()))
                 .terminator(new NoToolCallTerminator())
                 .resultCollector(new DirectTextCollector())

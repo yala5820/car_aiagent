@@ -1,6 +1,6 @@
 package com.hirain.aiagent.trace;
 
-import com.hirain.aiagent.core.SafetyVerdict;
+import com.hirain.aiagent.safety.SafetyDecision;
 
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
@@ -192,19 +192,35 @@ public class AgentTraceRecorder {
         return span;
     }
 
-    public void finishTool(Span span, String result, SafetyVerdict verdict) {
+    public void finishTool(Span span, String result, SafetyDecision decision) {
+        // 无细粒度执行诊断的兼容路径：安全放行且未抛异常时视为执行成功。
+        finishTool(span, result, decision,
+                decision != null && decision.isAllowed());
+    }
+
+    /**
+     * 结束工具 span，并同时考虑安全决定和真实执行结果。
+     * DENY 是预期业务结果，不标记为系统异常；安全已放行但 dispatch 失败则必须标记 ERROR。
+     */
+    public void finishTool(Span span, String result, SafetyDecision decision,
+                           boolean executionSucceeded) {
         if (span == null) return;
-        // verdict==null 表示工具异常（exception 路径），此时判定为失败
-        boolean vetoed = verdict != null && verdict.isVetoed();
-        boolean success = verdict != null && verdict.isAllowed();
+        boolean safetyAllowed = decision != null && decision.isAllowed();
+        boolean success = safetyAllowed && executionSucceeded;
         writer.putBoolean(span, TraceAttributeKeys.TOOL_SUCCESS, success);
-        writer.putBoolean(span, TraceAttributeKeys.TOOL_SAFETY_VETO, vetoed);
-        if (vetoed) {
-            writer.putString(span, TraceAttributeKeys.TOOL_SAFETY_VETO_REASON, verdict.reason());
+        if (decision != null) {
+            writer.putString(span, TraceAttributeKeys.TOOL_SAFETY_DECISION,
+                    decision.type().name());
+            writer.putString(span, TraceAttributeKeys.TOOL_SAFETY_REASON_CODE,
+                    decision.reasonCode().name());
+            if (decision.isDenied()) {
+                writer.putString(span, TraceAttributeKeys.TOOL_SAFETY_REASON,
+                        decision.reason());
+            }
         }
         writer.putResult(span, TraceAttributeKeys.TOOL_OUTPUT, result);
-        if (!success) {
-            span.setStatus(StatusCode.ERROR, vetoed ? "safety_veto" : "tool_failed");
+        if (decision == null || (safetyAllowed && !executionSucceeded)) {
+            span.setStatus(StatusCode.ERROR, "tool_failed");
         }
     }
 
@@ -268,14 +284,18 @@ public class AgentTraceRecorder {
                 io.opentelemetry.context.Context.current());
     }
 
-    /** 结束 safety_check span，记录 guard 数量和 veto 信息。 */
-    public void finishToolSafetyCheck(Span span, int guardCount,
-                                       boolean vetoed, String vetoReason) {
+    /** 结束 safety_check span，记录统一 Engine 返回的审核结果。 */
+    public void finishToolSafetyCheck(Span span, SafetyDecision decision) {
         if (span == null) return;
-        span.setAttribute(TraceAttributeKeys.TOOL_SAFETY_GUARD_COUNT, guardCount);
-        span.setAttribute(TraceAttributeKeys.TOOL_SAFETY_VETO, vetoed);
-        if (vetoed && vetoReason != null) {
-            writer.putString(span, TraceAttributeKeys.TOOL_SAFETY_VETO_REASON, vetoReason);
+        if (decision != null) {
+            writer.putString(span, TraceAttributeKeys.TOOL_SAFETY_DECISION,
+                    decision.type().name());
+            writer.putString(span, TraceAttributeKeys.TOOL_SAFETY_REASON_CODE,
+                    decision.reasonCode().name());
+            if (decision.isDenied()) {
+                writer.putString(span, TraceAttributeKeys.TOOL_SAFETY_REASON,
+                        decision.reason());
+            }
         }
         span.end();
     }

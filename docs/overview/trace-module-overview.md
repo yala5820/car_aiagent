@@ -296,7 +296,7 @@ tool.execute
 含义如下：
 
 - `tool.safety_check`
-  记录逐个 `SafetyGuard` 的判断和 veto 原因
+  记录共享 `ToolSafetyEngine` 的 ALLOW / DENY、稳定原因码和拒绝原因
 - `tool.dispatch`
   记录 `ToolRegistry.dispatch()` 到具体 `ToolDispatcher.dispatch()` 的真实执行阶段
 - `tool.result_writeback`
@@ -313,8 +313,9 @@ tool.execute
 - `tool.target.class`
 - `tool.target.method`
 - `tool.success`
-- `tool.safety_veto`
-- `tool.safety_veto_reason`
+- `tool.safety.decision`
+- `tool.safety.reason_code`
+- `tool.safety.reason`
 - `tool.output.preview`
 - `tool.output.sha1`
 - `error.type`
@@ -445,7 +446,7 @@ void finishFragmentSpan(Span span, ...);
 2. **为什么某个上下文没生效？**
    是 Provider 没跑、跑了失败、跑了但 `POLICY_ONLY`、还是进模型后被预算裁掉。
 3. **工具到底干没干活？**
-   是 LLM 根本没发 tool call、被 safety veto、dispatch 失败、还是执行成功但结果没写回。
+   是 LLM 根本没发 tool call、被 ToolSafetyEngine 拒绝、dispatch 失败、还是执行成功但结果没写回。
 
 如果做不到这三点，trace 再多也只是日志换皮，不是可观测性。
 

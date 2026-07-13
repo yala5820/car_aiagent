@@ -1,5 +1,6 @@
 package com.hirain.aiagent.core;
 
+import com.hirain.aiagent.VirtualStateMachine.VehicleStateMachine;
 import com.hirain.aiagent.context.ContextAssemblyGateway;
 import com.hirain.aiagent.context.ContextAssemblyRequest;
 import com.hirain.aiagent.context.ContextAssemblyDebugInfo;
@@ -13,7 +14,6 @@ import com.hirain.aiagent.context.ContextPrepareResult;
 import com.hirain.aiagent.context.TestRequestSessions;
 import com.hirain.aiagent.core.collector.DirectTextCollector;
 import com.hirain.aiagent.core.component.ModelCaller;
-import com.hirain.aiagent.core.component.SafetyGuard;
 import com.hirain.aiagent.core.component.ToolExecutor;
 import com.hirain.aiagent.core.postprocessor.NoOpPostProcessor;
 import com.hirain.aiagent.core.terminator.NoToolCallTerminator;
@@ -24,12 +24,15 @@ import com.hirain.aiagent.memory.MemoryCompactionResult;
 import com.hirain.aiagent.memory.MemoryEntry;
 import com.hirain.aiagent.memory.MemorySnapshot;
 import com.hirain.aiagent.runtime.RequestSession;
+import com.hirain.aiagent.safety.DefaultSafetyRules;
+import com.hirain.aiagent.safety.ToolSafetyEngine;
 import com.hirain.aiagent.trace.AgentTraceRecorder;
 
 import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -93,17 +96,6 @@ public class TextAgentLoopOrchestratorTest {
         }
     }
 
-    static class VetoSafetyGuard implements SafetyGuard {
-        final String vetoToolName;
-        final AtomicInteger evaluateCount = new AtomicInteger(0);
-        VetoSafetyGuard(String vetoToolName) { this.vetoToolName = vetoToolName; }
-        @Override public SafetyVerdict evaluate(ToolExecutionRequest request, AgentLoopContext ctx) {
-            evaluateCount.incrementAndGet();
-            if (request.name().equals(vetoToolName)) return SafetyVerdict.veto("speed too high");
-            return SafetyVerdict.allow();
-        }
-    }
-
     public static class FakeAssemblyGateway implements ContextAssemblyGateway {
         final List<ToolSpecification> tools;
         final String systemPrompt;
@@ -121,7 +113,8 @@ public class TextAgentLoopOrchestratorTest {
         }
     }
 
-    private static AgentConfig configWith(CapturingModelCaller caller, ToolExecutor toolExec, List<SafetyGuard> guards) {
+    private static AgentConfig configWith(CapturingModelCaller caller,
+                                          ToolExecutor toolExec) {
         return AgentConfig.builder("chat")
                 .modelName("qwen-turbo")
                 .systemPromptTemplateName("prompts/system/assistant_default")
@@ -130,12 +123,23 @@ public class TextAgentLoopOrchestratorTest {
                 .modelCaller(caller)
                 .toolExecutor(toolExec)
                 .toolSubset(null)
-                .safetyGuards(guards)
                 .postProcessors(List.of(new NoOpPostProcessor()))
                 .terminator(new NoToolCallTerminator())
                 .resultCollector(new DirectTextCollector())
                 .timeout(java.time.Duration.ofSeconds(30))
                 .build();
+    }
+
+    private static ToolSafetyEngine allowAllSafetyEngine() {
+        return new ToolSafetyEngine(new VehicleStateMachine(), Map.of());
+    }
+
+    private static TextAgentLoopOrchestrator newLoop(
+            AgentConfig config,
+            ContextMemoryGateway memoryGateway,
+            ContextAssemblyGateway assemblyGateway) {
+        return new TextAgentLoopOrchestrator(
+                config, memoryGateway, assemblyGateway, allowAllSafetyEngine());
     }
 
     private static RequestSession session(String input) {
@@ -159,7 +163,6 @@ public class TextAgentLoopOrchestratorTest {
                         .aiMessage(AiMessage.from("ok")).build())
                 .toolExecutor(req -> "{}")
                 .toolSubset(null)
-                .safetyGuards(List.of())
                 .postProcessors(List.of(new NoOpPostProcessor()))
                 .terminator(new NoToolCallTerminator())
                 .resultCollector(new DirectTextCollector())
@@ -167,7 +170,7 @@ public class TextAgentLoopOrchestratorTest {
                 .build();
         boolean thrown = false;
         try {
-            new TextAgentLoopOrchestrator(cfg, null,
+            newLoop(cfg, null,
                     new FakeAssemblyGateway(List.of(), ""));
         } catch (IllegalArgumentException e) { thrown = true; }
         assertTrue("null memoryGateway should throw", thrown);
@@ -184,7 +187,6 @@ public class TextAgentLoopOrchestratorTest {
                         .aiMessage(AiMessage.from("ok")).build())
                 .toolExecutor(req -> "{}")
                 .toolSubset(null)
-                .safetyGuards(List.of())
                 .postProcessors(List.of(new NoOpPostProcessor()))
                 .terminator(new NoToolCallTerminator())
                 .resultCollector(new DirectTextCollector())
@@ -192,7 +194,7 @@ public class TextAgentLoopOrchestratorTest {
                 .build();
         boolean thrown = false;
         try {
-            new TextAgentLoopOrchestrator(cfg,
+            newLoop(cfg,
                     new FakeMemoryGateway(), null);
         } catch (IllegalArgumentException e) { thrown = true; }
         assertTrue("null contextAssemblyGateway should throw", thrown);
@@ -203,9 +205,9 @@ public class TextAgentLoopOrchestratorTest {
         CapturingModelCaller caller = new CapturingModelCaller(List.of(
                 ChatResponse.builder().aiMessage(AiMessage.from("第一次")).build(),
                 ChatResponse.builder().aiMessage(AiMessage.from("第二次")).build()));
-        AgentConfig config = configWith(caller, req -> "{}", List.of());
+        AgentConfig config = configWith(caller, req -> "{}");
         FakeMemoryGateway mg = new FakeMemoryGateway();
-        TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(config, mg,
+        TextAgentLoopOrchestrator loop = newLoop(config, mg,
                 new FakeAssemblyGateway(List.of(), "你是助手。"));
 
         AgentResult r1 = loop.execute(session("hi"), prepare(session("hi")));
@@ -216,22 +218,39 @@ public class TextAgentLoopOrchestratorTest {
     }
 
     @Test
-    public void safetyGuardVeto_preventsToolExecution() {
+    public void safetyDeny_preventsToolExecutionAndReturnsToLlm() {
         CountingToolExecutor toolExec = new CountingToolExecutor();
-        VetoSafetyGuard vetoGuard = new VetoSafetyGuard("set_door_lock");
         CapturingModelCaller caller = new CapturingModelCaller(List.of(
                 ChatResponse.builder().aiMessage(AiMessage.from(
-                        ToolExecutionRequest.builder().id("r1").name("set_door_lock").arguments("{}").build()))
+                        ToolExecutionRequest.builder().id("r1").name("set_door_lock")
+                                .arguments("{\"arg0\":false}").build()))
+                        .build(),
+                ChatResponse.builder().aiMessage(AiMessage.from("车辆行驶中，暂时不能解锁，请先停车。"))
                         .build()));
-        AgentConfig config = configWith(caller, toolExec, List.of(vetoGuard));
-        TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(config, new FakeMemoryGateway(),
+        AgentConfig config = configWith(caller, toolExec);
+        FakeMemoryGateway memoryGateway = new FakeMemoryGateway();
+        VehicleStateMachine vehicleStateMachine = new VehicleStateMachine();
+        vehicleStateMachine.setVehicleSpd(70);
+        ToolSafetyEngine safetyEngine = new ToolSafetyEngine(
+                vehicleStateMachine, DefaultSafetyRules.create());
+        TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
+                config, memoryGateway,
                 new FakeAssemblyGateway(List.of(ToolSpecification.builder().name("set_door_lock").description("Lock doors").build()),
-                        "你是车控助手。"));
+                        "你是车控助手。"),
+                safetyEngine);
 
         AgentResult result = loop.execute(session("开门"), prepare(session("开门")));
-        assertEquals("ToolExecutor should not be called (safety veto)", 0, toolExec.callCount.get());
-        assertEquals(1, vetoGuard.evaluateCount.get());
-        assertTrue("Should produce output", result.isSuccess());
+        assertEquals("ToolExecutor should not be called after safety DENY",
+                0, toolExec.callCount.get());
+        assertEquals("DENY result should return to LLM for one explanation",
+                2, caller.captured.size());
+        assertTrue("LLM explanation should be returned", result.isSuccess());
+        assertEquals("车辆行驶中，暂时不能解锁，请先停车。", result.output());
+        boolean hasSafetyResult = memoryGateway.chatMemory.messages().stream().anyMatch(m ->
+                m instanceof ToolExecutionResultMessage
+                        && ((ToolExecutionResultMessage) m).text()
+                        .contains("DOOR_UNLOCK_REQUIRES_STOPPED"));
+        assertTrue("ChatMemory should contain stable safety reason code", hasSafetyResult);
     }
 
     @Test
@@ -239,8 +258,8 @@ public class TextAgentLoopOrchestratorTest {
         ToolSpecification acSpec = ToolSpecification.builder().name("set_ac_status").description("Set AC").build();
         CapturingModelCaller caller = new CapturingModelCaller(List.of(
                 ChatResponse.builder().aiMessage(AiMessage.from("打开空调")).build()));
-        AgentConfig config = configWith(caller, req -> "{}", List.of());
-        TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(config, new FakeMemoryGateway(),
+        AgentConfig config = configWith(caller, req -> "{}");
+        TextAgentLoopOrchestrator loop = newLoop(config, new FakeMemoryGateway(),
                 new FakeAssemblyGateway(List.of(acSpec), "你是车控助手。"));
 
         loop.execute(session("打开空调"), prepare(session("打开空调")));
@@ -260,9 +279,9 @@ public class TextAgentLoopOrchestratorTest {
                         ToolExecutionRequest.builder().id("r1").name("set_ac_status").arguments("{}").build()))
                         .build(),
                 ChatResponse.builder().aiMessage(AiMessage.from("错误已处理")).build()));
-        AgentConfig config = configWith(caller, failingExec, List.of());
+        AgentConfig config = configWith(caller, failingExec);
         FakeMemoryGateway mg = new FakeMemoryGateway();
-        TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(config, mg,
+        TextAgentLoopOrchestrator loop = newLoop(config, mg,
                 new FakeAssemblyGateway(List.of(ToolSpecification.builder().name("set_ac_status").description("AC").build()),
                         "你是助手。"));
 
@@ -281,10 +300,10 @@ public class TextAgentLoopOrchestratorTest {
     public void cancelBeforeModelCall_modelNotCalled() {
         CapturingModelCaller caller = new CapturingModelCaller(List.of(
                 ChatResponse.builder().aiMessage(AiMessage.from("should not be called")).build()));
-        AgentConfig config = configWith(caller, req -> "{}", List.of());
+        AgentConfig config = configWith(caller, req -> "{}");
         FakeMemoryGateway mg = new FakeMemoryGateway();
         AtomicBoolean cancelFlag = new AtomicBoolean(true);
-        TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(config, mg,
+        TextAgentLoopOrchestrator loop = newLoop(config, mg,
                 new FakeAssemblyGateway(List.of(), "你是一个助手。") {
                     @Override public ContextAssemblyResult assemble(ContextAssemblyRequest req) {
                         return ContextAssemblyResult.failure(ContextErrorCode.CONTEXT_CANCELLED, "cancelled",
@@ -307,11 +326,11 @@ public class TextAgentLoopOrchestratorTest {
     public void cancelAfterModelCall_noAiMessageInChatMemory() {
         CapturingModelCaller caller = new CapturingModelCaller(List.of(
                 ChatResponse.builder().aiMessage(AiMessage.from("a response")).build()));
-        AgentConfig config = configWith(caller, req -> "{}", List.of());
+        AgentConfig config = configWith(caller, req -> "{}");
         FakeMemoryGateway mg = new FakeMemoryGateway();
         AtomicBoolean cancelFlag = new AtomicBoolean(false);
 
-        TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(config, mg,
+        TextAgentLoopOrchestrator loop = newLoop(config, mg,
                 new FakeAssemblyGateway(List.of(), "你是一个助手。") {
                     @Override public ContextAssemblyResult assemble(ContextAssemblyRequest req) {
                         cancelFlag.set(true);
@@ -353,7 +372,6 @@ public class TextAgentLoopOrchestratorTest {
                     return "{\"ok\":true}";
                 })
                 .toolSubset(null)
-                .safetyGuards(List.of())
                 .postProcessors(List.of(new NoOpPostProcessor()))
                 .terminator(new NoToolCallTerminator())
                 .resultCollector(new DirectTextCollector())
@@ -361,7 +379,7 @@ public class TextAgentLoopOrchestratorTest {
                 .build();
 
         FakeMemoryGateway mg = new FakeMemoryGateway();
-        TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(config, mg,
+        TextAgentLoopOrchestrator loop = newLoop(config, mg,
                 new FakeAssemblyGateway(
                         List.of(ToolSpecification.builder().name("tool_a").build(),
                                 ToolSpecification.builder().name("tool_b").build()),

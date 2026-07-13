@@ -38,9 +38,9 @@ public final class TraceAttributeKeys {
     public static final String TOOL_ARGUMENTS = "tool.arguments";
     public static final String TOOL_OUTPUT = "tool.output";
     public static final String TOOL_SUCCESS = "tool.success";
-    public static final String TOOL_SAFETY_VETO = "tool.safety_veto";
-    public static final String TOOL_SAFETY_VETO_REASON = "tool.safety_veto_reason";
-    public static final String TOOL_SAFETY_GUARD_COUNT = "tool.safety_guard_count";
+    public static final String TOOL_SAFETY_DECISION = "tool.safety.decision";
+    public static final String TOOL_SAFETY_REASON_CODE = "tool.safety.reason_code";
+    public static final String TOOL_SAFETY_REASON = "tool.safety.reason";
     public static final String TOOL_DISPATCH_TARGET = "tool.dispatch_target";
     public static final String TOOL_DISPATCH_SUCCESS = "tool.dispatch_success";
     public static final String TOOL_DISPATCH_DURATION_MS = "tool.dispatch_duration_ms";

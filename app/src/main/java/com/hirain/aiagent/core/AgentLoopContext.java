@@ -1,5 +1,7 @@
 package com.hirain.aiagent.core;
 
+import com.hirain.aiagent.safety.SafetyDecision;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -21,7 +23,6 @@ public class AgentLoopContext {
     private final List<ToolExecutionRecord> toolExecutionHistory = new ArrayList<>();
 
     private int iteration;
-    private SafetyVerdict lastSafetyVeto;
 
     public AgentLoopContext(String userInput, String personaId, Map<String, Object> contextData) {
         this.userInput = userInput;
@@ -37,7 +38,6 @@ public class AgentLoopContext {
     public String personaId() { return personaId; }
     public long startTimeMs() { return startTimeMs; }
     public int iteration() { return iteration; }
-    public SafetyVerdict lastSafetyVeto() { return lastSafetyVeto; }
     public List<ToolExecutionRecord> toolExecutionHistory() {
         return Collections.unmodifiableList(toolExecutionHistory);
     }
@@ -60,10 +60,9 @@ public class AgentLoopContext {
     }
 
     void setIteration(int iteration) { this.iteration = iteration; }
-    void setLastSafetyVeto(SafetyVerdict veto) { this.lastSafetyVeto = veto; }
-
-    void addToolResult(String toolName, String arguments, String result, SafetyVerdict verdict) {
+    void addToolResult(String toolName, String arguments, String result,
+                       SafetyDecision decision) {
         toolExecutionHistory.add(new ToolExecutionRecord(
-                toolName, arguments, result, verdict));
+                toolName, arguments, result, decision));
     }
 }

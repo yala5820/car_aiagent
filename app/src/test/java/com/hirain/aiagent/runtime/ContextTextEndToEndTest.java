@@ -1,6 +1,7 @@
 package com.hirain.aiagent.runtime;
 
 import com.hirain.aiagent.AgentRequest;
+import com.hirain.aiagent.VirtualStateMachine.VehicleStateMachine;
 import com.hirain.aiagent.ai.langchain4j.tool.ToolRegistry;
 import com.hirain.aiagent.context.ContextBuildInput;
 import com.hirain.aiagent.context.ContextCancelChecker;
@@ -22,6 +23,7 @@ import com.hirain.aiagent.memory.MemoryCompactionResult;
 import com.hirain.aiagent.memory.MemoryEntry;
 import com.hirain.aiagent.memory.MemorySnapshot;
 import com.hirain.aiagent.prompt.PromptManager;
+import com.hirain.aiagent.safety.ToolSafetyEngine;
 import com.hirain.aiagent.runtime.RequestSession;
 import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
 import com.hirain.aiagent.trace.AgentTraceRecorder;
@@ -136,12 +138,15 @@ public class ContextTextEndToEndTest {
                 .modelCaller(caller)
                 .toolExecutor(toolExec)
                 .toolSubset(null)
-                .safetyGuards(List.of())
                 .postProcessors(List.of(new NoOpPostProcessor()))
                 .terminator(new NoToolCallTerminator())
                 .resultCollector(new DirectTextCollector())
                 .timeout(java.time.Duration.ofSeconds(30))
                 .build();
+    }
+
+    private static ToolSafetyEngine allowAllSafetyEngine() {
+        return new ToolSafetyEngine(new VehicleStateMachine(), Map.of());
     }
 
     private static AgentRequest request(String text) {
@@ -186,7 +191,7 @@ public class ContextTextEndToEndTest {
     /** 创建 AgentRuntime（不含 TextAgentLoop，仅测试 prepare + session 层级）。 */
     private static AgentRuntime runtimeForSessionOnly(ContextOrchestrator orch, CapturingModelCaller caller, FakeMemoryGateway mg, ToolExecutor toolExec) {
         TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
-                configWith(caller, toolExec), mg, orch);
+                configWith(caller, toolExec), mg, orch, allowAllSafetyEngine());
         return new AgentRuntime(
                 (session, pr) -> loop.execute(session, pr), orch,
                 (userId, reqSessionId, title, personaId, sourceApp) ->
@@ -233,7 +238,7 @@ public class ContextTextEndToEndTest {
         CapturingModelCaller caller = new CapturingModelCaller();
         ContextOrchestrator orch = createOrchestrator(testPrompt(), defaultToolRegistry(), mg);
         TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
-                configWith(caller, req -> "{}"), mg, orch);
+                configWith(caller, req -> "{}"), mg, orch, allowAllSafetyEngine());
         AgentRuntime runtime = new AgentRuntime(
                 (s, pr) -> loop.execute(s, pr), orch,
                 (userId, reqSessionId, title, pId, sourceApp) ->
@@ -264,7 +269,7 @@ public class ContextTextEndToEndTest {
         CapturingModelCaller caller = new CapturingModelCaller();
         ContextOrchestrator orch = createOrchestrator(testPrompt(), defaultToolRegistry(), mg);
         TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
-                configWith(caller, req -> "{}"), mg, orch);
+                configWith(caller, req -> "{}"), mg, orch, allowAllSafetyEngine());
         AgentRuntime runtime = new AgentRuntime(
                 (s, pr) -> loop.execute(s, pr), orch,
                 (userId, reqSessionId, title, pId, sourceApp) ->
@@ -304,7 +309,7 @@ public class ContextTextEndToEndTest {
         CapturingModelCaller caller = new CapturingModelCaller();
         ContextOrchestrator orch = createOrchestrator(testPrompt(), defaultToolRegistry(), mg);
         TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
-                configWith(caller, req -> "{}"), mg, orch);
+                configWith(caller, req -> "{}"), mg, orch, allowAllSafetyEngine());
         AgentRuntime runtime = new AgentRuntime(
                 (s, pr) -> loop.execute(s, pr), orch,
                 (userId, reqSessionId, title, pId, sourceApp) ->
@@ -345,7 +350,7 @@ public class ContextTextEndToEndTest {
         CapturingModelCaller caller = new CapturingModelCaller();
         ContextOrchestrator orch = createOrchestrator(testPrompt(), defaultToolRegistry(), mg);
         TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
-                configWith(caller, req -> "{}"), mg, orch);
+                configWith(caller, req -> "{}"), mg, orch, allowAllSafetyEngine());
 
         RequestSession session = com.hirain.aiagent.context.TestRequestSessions.chatOnlySession(
                 "req-1", "conv-1", "user-a", "chat", "cl-1", "你好");
@@ -363,7 +368,7 @@ public class ContextTextEndToEndTest {
         // 使用默认全量注册表验证 AC 工具解析
         ContextOrchestrator orch = createOrchestrator(testPrompt(), defaultToolRegistry(), mg);
         TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
-                configWith(caller, req -> "{}"), mg, orch);
+                configWith(caller, req -> "{}"), mg, orch, allowAllSafetyEngine());
 
         RequestSession session = com.hirain.aiagent.context.TestRequestSessions.textSession(
                 "req-1", "conv-1", "user-a", "chat", "cl-1", "打开空调");
@@ -386,7 +391,7 @@ public class ContextTextEndToEndTest {
         CapturingModelCaller caller = new CapturingModelCaller();
         ContextOrchestrator orch = createOrchestrator(testPrompt(), toolRegistry, mg);
         TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
-                configWith(caller, req -> "{}"), mg, orch);
+                configWith(caller, req -> "{}"), mg, orch, allowAllSafetyEngine());
         AgentRuntime runtime = new AgentRuntime(
                 (session, pr) -> loop.execute(session, pr),
                 orch,
@@ -455,7 +460,7 @@ public class ContextTextEndToEndTest {
                 configWith(caller, req -> {
                     toolCalls.incrementAndGet();
                     return "{}";
-                }), mg, tinyBudgetGateway);
+                }), mg, tinyBudgetGateway, allowAllSafetyEngine());
 
         AgentResult result = loop.execute(session, pr);
 
@@ -476,7 +481,7 @@ public class ContextTextEndToEndTest {
         CapturingModelCaller caller = new CapturingModelCaller();
         ContextOrchestrator orch = createOrchestrator(testPrompt(), defaultToolRegistry(), mg);
         TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
-                configWith(caller, req -> "{}"), mg, orch);
+                configWith(caller, req -> "{}"), mg, orch, allowAllSafetyEngine());
 
         RequestSession session = com.hirain.aiagent.context.TestRequestSessions.textSession(
                 "req-1", "conv-1", "user-a", "chat", "cl-1", "你好");
@@ -513,7 +518,7 @@ public class ContextTextEndToEndTest {
                     if ("tool_a".equals(req.name())) cancelAfterFirst.set(true);
                     return "{\"ok\":true}";
                 })
-                .toolSubset(null).safetyGuards(List.of())
+                .toolSubset(null)
                 .postProcessors(List.of(new NoOpPostProcessor()))
                 .terminator(new NoToolCallTerminator())
                 .resultCollector(new DirectTextCollector())
@@ -521,7 +526,8 @@ public class ContextTextEndToEndTest {
                 .build();
 
         ContextOrchestrator orch = createOrchestrator(testPrompt(), defaultToolRegistry(), mg);
-        TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(config, mg, orch);
+        TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
+                config, mg, orch, allowAllSafetyEngine());
 
         RequestSession session = com.hirain.aiagent.context.TestRequestSessions.textSession(
                 "req-1", "conv-1", "user-a", "chat", "cl-1", "do two things");
@@ -546,7 +552,7 @@ public class ContextTextEndToEndTest {
         CapturingModelCaller caller = new CapturingModelCaller();
         ContextOrchestrator orch = createOrchestrator(testPrompt(), defaultToolRegistry(), mg);
         TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
-                configWith(caller, req -> "{}"), mg, orch);
+                configWith(caller, req -> "{}"), mg, orch, allowAllSafetyEngine());
 
         RequestSession session = com.hirain.aiagent.context.TestRequestSessions.chatOnlySession(
                 "req-1", "conv-1", "user-a", "chat", "cl-1", "你好");
@@ -567,7 +573,7 @@ public class ContextTextEndToEndTest {
         CapturingModelCaller caller = new CapturingModelCaller();
         ContextOrchestrator orch = createOrchestrator(testPrompt(), defaultToolRegistry(), mg);
         TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
-                configWith(caller, req -> "{}"), mg, orch);
+                configWith(caller, req -> "{}"), mg, orch, allowAllSafetyEngine());
 
         RequestSession session = com.hirain.aiagent.context.TestRequestSessions.textSession(
                 "req-1", "conv-1", "user-a", "chat", "cl-1", "打开空调");

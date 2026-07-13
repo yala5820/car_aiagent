@@ -83,7 +83,7 @@ AIAgentService.handleTextRequest()
                       -> ContextAssemblyResult
                  -> ChatRequest(messages, toolSpecifications)
                  -> ModelCaller.call()
-                 -> SafetyGuard / ToolExecutor
+                 -> ToolSafetyEngine / ToolExecutor
                  -> ChatMemory 写回
             -> MemoryExtractor
   -> TraceResponseDispatcher
@@ -616,17 +616,9 @@ Context 来源层还会分别记录：
 
 因此，“完整内容的采集逻辑”已经实现，但导出到 span attribute 前仍会被 Writer 截断。这与 Demo 阶段已经确认的“Trace 不 truncated、全部显示”目标仍不一致。要真正完成该目标，需要让 FULL_DEBUG 直接写入原文，或删除 Demo 路径中的长度限制。
 
-#### P2：ToolDispatcher 的字符串失败结果仍可能被外层标成成功
+#### ToolDispatcher 聚合成功语义已收口
 
-`ToolDispatcher.dispatch()` 捕获参数解析或反射异常后会返回 `工具执行失败: ...` 字符串，并通过 `DispatchDiagnostics` 标记 `argumentParseSuccess/invokeSuccess=false`。TextAgentLoop 能记录这两个真实字段，但当前传给 `finishToolDispatch()` 的顶层 `success` 仍固定为 true，外层 `tool.execute` 也会因为 SafetyVerdict 为 allow 而写 `tool.success=true`。
-
-结果是同一个 Trace 中可能出现：
-
-- `tool.dispatch_success=true`
-- `tool.invoke_success=false`
-- `tool.success=true`
-
-细粒度字段能够暴露失败，但聚合成功字段语义不一致。建议让 dispatch success 由 `diag.argumentParseSuccess && diag.invokeSuccess` 决定，并让 tool success 同时考虑真实执行结果。
+`ToolDispatcher.dispatch()` 捕获参数解析或反射异常后仍返回 `工具执行失败: ...` 字符串，同时通过 `DispatchDiagnostics` 标记 `argumentParseSuccess/invokeSuccess=false`。TextAgentLoop 现在使用两者的合取作为 `tool.dispatch_success`，并将真实执行结果继续传给外层 `tool.execute`，因此安全 ALLOW 但 dispatch 失败时会得到 `tool.success=false` 和 ERROR span，不再把安全放行误当成工具执行成功。
 
 #### P3：Phoenix 设备侧显示仍需验收
 
@@ -688,10 +680,6 @@ JVM 测试已经验证 span、属性和父子关系，但不能证明 Phoenix �
 ### P1：TraceAttributeWriter 仍截断 FULL_DEBUG 内容
 
 完整消息和工具 schema 已在上层组装，但 Writer 会在写入 span 前截断。该问题直接影响长 SessionMemory、完整 System Prompt 和全量工具 schema 排查。
-
-### P2：Tool 聚合成功字段与真实 DispatchDiagnostics 可能矛盾
-
-工具异常被 Dispatcher 转成错误字符串时，`invoke_success=false` 已能记录，但 `dispatch_success/tool.success` 仍可能为 true。
 
 ### P2：LongTermMemory Provider 吞掉 fallback 状态
 
@@ -761,8 +749,7 @@ required、visibility、priority 分散在 Provider、ToolGroup Registry 和 Ass
 ### 第一优先级：完成 Trace 最后收口
 
 1. FULL_DEBUG 下取消 `TraceAttributeWriter` 的 500/200 字限制。
-2. 让 `dispatch_success` 和 `tool.success` 使用真实 DispatchDiagnostics，而不是只看是否抛异常和 SafetyVerdict。
-3. 在 Phoenix 设备上验证完整 System Prompt、长 SessionMemory、全量工具 schema 和工具失败状态。
+2. 在 Phoenix 设备上验证完整 System Prompt、长 SessionMemory、全量工具 schema 和工具失败状态。
 
 ### 第二优先级：保证长会话连续工作
 

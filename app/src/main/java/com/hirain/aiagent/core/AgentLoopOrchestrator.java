@@ -17,6 +17,8 @@ import com.hirain.aiagent.core.component.LoopTerminator;
 import com.hirain.aiagent.memory.ContextMemoryGateway;
 import com.hirain.aiagent.memory.MemoryOrchestrator;
 import com.hirain.aiagent.memory.SpeakerMessageFormatter;
+import com.hirain.aiagent.safety.SafetyDecision;
+import com.hirain.aiagent.safety.ToolSafetyEngine;
 import com.hirain.aiagent.trace.AgentTraceRecorder;
 import com.hirain.aiagent.trace.TraceContext;
 import com.hirain.aiagent.trace.TraceSession;
@@ -27,7 +29,6 @@ import com.hirain.aiagent.core.component.ModelCaller;
 import com.hirain.aiagent.core.component.PostProcessor;
 import com.hirain.aiagent.core.component.PreProcessor;
 import com.hirain.aiagent.core.component.ResultCollector;
-import com.hirain.aiagent.core.component.SafetyGuard;
 import com.hirain.aiagent.core.component.ToolExecutor;
 import com.hirain.aiagent.prompt.PromptManager;
 
@@ -64,7 +65,7 @@ import static com.hirain.aiagent.core.AgentResult.ErrorType;
  *     → for i in 0..maxIterations:
  *         ① PreProcessor 链 → 生成临时上下文消息
  *         ② ModelCaller → LLM 调用
- *         ③ LLM 返回 ToolCall → SafetyGuard → ToolExecutor → 回填结果 → continue
+ *         ③ LLM 返回 ToolCall → ToolSafetyEngine → ToolExecutor → 回填结果 → continue
  *         ④ LLM 返回文本 → PostProcessor → 记忆提取 → LoopTerminator → ResultCollector → return
  *     → max iterations → AgentResult.error(MAX_ITERATIONS)
  * </pre>
@@ -80,6 +81,7 @@ public class AgentLoopOrchestrator {
     private final AgentLoopState state = new AgentLoopState();
     private final List<ToolSpecification> effectiveToolSpecs;
     private final ContextAssemblyGateway contextAssemblyGateway;
+    private final ToolSafetyEngine toolSafetyEngine;
 
     /**
      * @param config         Agent 配置
@@ -91,8 +93,10 @@ public class AgentLoopOrchestrator {
     public AgentLoopOrchestrator(AgentConfig config, Context context,
                                  PromptManager promptManager,
                                  MemoryOrchestrator memoryOrchestrator,
-                                 List<ToolSpecification> allToolSpecs) {
-        this(config, context, promptManager, memoryOrchestrator, allToolSpecs, null);
+                                 List<ToolSpecification> allToolSpecs,
+                                 ToolSafetyEngine toolSafetyEngine) {
+        this(config, context, promptManager, memoryOrchestrator, allToolSpecs,
+                null, toolSafetyEngine);
     }
 
     /**
@@ -106,7 +110,8 @@ public class AgentLoopOrchestrator {
                                  PromptManager promptManager,
                                  MemoryOrchestrator memoryOrchestrator,
                                  List<ToolSpecification> allToolSpecs,
-                                 ContextAssemblyGateway contextAssemblyGateway) {
+                                 ContextAssemblyGateway contextAssemblyGateway,
+                                 ToolSafetyEngine toolSafetyEngine) {
         this.config = config;
         this.promptManager = promptManager;
         this.memoryOrchestrator = memoryOrchestrator;
@@ -114,6 +119,10 @@ public class AgentLoopOrchestrator {
         this.effectiveToolSpecs = config.toolSubset() != null
                 ? config.toolSubset() : allToolSpecs;
         this.contextAssemblyGateway = contextAssemblyGateway;
+        if (toolSafetyEngine == null) {
+            throw new IllegalArgumentException("toolSafetyEngine must not be null");
+        }
+        this.toolSafetyEngine = toolSafetyEngine;
     }
 
     // ── 公开接口 ──
@@ -253,7 +262,6 @@ public class AgentLoopOrchestrator {
                 // ③ LLM 请求了工具调用
                 if (aiMessage.hasToolExecutionRequests()) {
                     List<ToolExecutionRequest> toolReqs = aiMessage.toolExecutionRequests();
-                    int vetoCount = 0;
 
                     for (ToolExecutionRequest toolReq : toolReqs) {
                         // 工具执行子 span
@@ -262,24 +270,26 @@ public class AgentLoopOrchestrator {
                                 : null;
                         Scope toolScope = toolSpan != null ? toolSpan.makeCurrent() : null;
 
-                        SafetyVerdict verdict = SafetyVerdict.allow();
+                        SafetyDecision decision = SafetyDecision.allow();
                         String result = null;
                         try {
-                            // 安全审查
-                            for (SafetyGuard guard : config.safetyGuards()) {
-                                verdict = guard.evaluate(toolReq, ctx);
-                                if (verdict.isVetoed()) break;
+                            Span safetySpan = trace != null
+                                    ? trace.startToolSafetyCheck() : null;
+                            try {
+                                decision = toolSafetyEngine.check(toolReq);
+                            } finally {
+                                if (trace != null) {
+                                    trace.finishToolSafetyCheck(safetySpan, decision);
+                                }
                             }
 
-                            if (verdict.isVetoed()) {
-                                ctx.setLastSafetyVeto(verdict);
-                                result = "[SAFETY VETO] " + verdict.reason();
-                                vetoCount++;
+                            if (decision.isDenied()) {
+                                result = toolSafetyEngine.formatDenyResult(decision);
                             } else {
                                 result = config.toolExecutor().execute(toolReq);
                             }
-                            if (trace != null) trace.finishTool(toolSpan, result, verdict);
-                            ctx.addToolResult(toolReq.name(), toolReq.arguments(), result, verdict);
+                            if (trace != null) trace.finishTool(toolSpan, result, decision);
+                            ctx.addToolResult(toolReq.name(), toolReq.arguments(), result, decision);
                             chatMemory.add(ToolExecutionResultMessage.from(toolReq, result));
                             Log.d(TAG, "Tool[" + toolReq.name() + "] -> " + result);
                         } catch (Exception e) {
@@ -289,32 +299,6 @@ public class AgentLoopOrchestrator {
                             if (toolScope != null) toolScope.close();
                             if (toolSpan != null) toolSpan.end();
                         }
-                    }
-
-                    // 所有工具都被安全否决 → 不再继续循环，直接返回
-                    if (vetoCount == toolReqs.size() && vetoCount > 0) {
-                        String output = "安全原因已阻止所有工具调用。";
-                        for (PostProcessor pp : config.postProcessors()) {
-                            output = pp.process(output, ctx);
-                        }
-                        if (memoryOrchestrator != null && userInput != null) {
-                            if (persistentMode) {
-                                memoryOrchestrator.onTurnComplete(
-                                        userId, sessionId, chatMemory.messages(),
-                                        estimateTokens(chatMemory.messages()),
-                                        userInput, output, trace);
-                            } else {
-                                memoryOrchestrator.onTurnComplete(
-                                        userId, chatMemory.messages(),
-                                        estimateTokens(chatMemory.messages()),
-                                        userInput, output, trace);
-                            }
-                        }
-                        state.markCompleted();
-                        return config.resultCollector().collect(
-                                ChatResponse.builder()
-                                        .aiMessage(AiMessage.from(output))
-                                        .build(), ctx);
                     }
 
                     continue; // 下一轮迭代
@@ -525,7 +509,7 @@ public class AgentLoopOrchestrator {
 
                 chatMemory.add(aiMessage);
 
-                // ③ LLM 请求了工具调用 → SafetyGuard → ToolExecutor → 回填
+                // ③ LLM 请求了工具调用 → ToolSafetyEngine → ToolExecutor → 回填
                 if (aiMessage.hasToolExecutionRequests()) {
                     List<ToolExecutionRequest> toolReqs = aiMessage.toolExecutionRequests();
                     // 工具执行前检查取消
@@ -534,8 +518,6 @@ public class AgentLoopOrchestrator {
                         return AgentResult.error(ErrorType.CANCELLED,
                                 "cancelled_before_tool_execution");
                     }
-                    int vetoCount = 0;
-
                     for (ToolExecutionRequest req : toolReqs) {
                         Span toolSpan = trace != null
                                 ? trace.startTool(req, i,
@@ -543,21 +525,22 @@ public class AgentLoopOrchestrator {
                         try {
                             // 工具执行前检查取消（取消后停止执行新工具，已有结果保留）
                             if (cancelCheck.isCancelled()) {
-                                vetoCount = toolReqs.size();
                                 break;
                             }
-                            // 安全审查：逐 guard 审查，任一否决则跳过工具执行
-                            SafetyVerdict verdict = SafetyVerdict.allow();
-                            for (SafetyGuard guard : config.safetyGuards()) {
-                                verdict = guard.evaluate(req, loopCtx);
-                                if (verdict.isVetoed()) break;
+                            Span safetySpan = trace != null
+                                    ? trace.startToolSafetyCheck() : null;
+                            SafetyDecision decision = SafetyDecision.allow();
+                            try {
+                                decision = toolSafetyEngine.check(req);
+                            } finally {
+                                if (trace != null) {
+                                    trace.finishToolSafetyCheck(safetySpan, decision);
+                                }
                             }
 
                             String toolResult;
-                            if (verdict.isVetoed()) {
-                                loopCtx.setLastSafetyVeto(verdict);
-                                toolResult = "[SAFETY VETO] " + verdict.reason();
-                                vetoCount++;
+                            if (decision.isDenied()) {
+                                toolResult = toolSafetyEngine.formatDenyResult(decision);
                             } else {
                                 toolResult = config.toolExecutor().execute(req);
                             }
@@ -566,10 +549,10 @@ public class AgentLoopOrchestrator {
                                     req.id(), req.name(),
                                     toolResult != null ? toolResult : "{}"));
                             if (trace != null) {
-                                trace.finishTool(toolSpan, toolResult, verdict);
+                                trace.finishTool(toolSpan, toolResult, decision);
                             }
                             loopCtx.addToolResult(req.name(), req.arguments(),
-                                    toolResult, verdict);
+                                    toolResult, decision);
                         } catch (Exception e) {
                             if (trace != null) trace.finishTool(toolSpan, "error", null);
                             loopCtx.addToolResult(req.name(), req.arguments(),
@@ -588,25 +571,6 @@ public class AgentLoopOrchestrator {
                         state.markError();
                         return AgentResult.error(ErrorType.CANCELLED,
                                 "cancelled_during_tool_execution");
-                    }
-
-                    // 全部工具均被安全否决 → 运行 PostProcessor，经 ResultCollector 返回
-                    if (vetoCount == toolReqs.size() && vetoCount > 0) {
-                        String output = "安全原因已阻止所有工具调用。";
-                        if (config.postProcessors() != null) {
-                            for (PostProcessor pp : config.postProcessors()) {
-                                output = pp.process(output, loopCtx);
-                            }
-                        }
-                        if (textMemoryGateway != null) {
-                            textMemoryGateway.extractTurnMemory(userId, sessionId,
-                                    session.userInput(), output, trace);
-                        }
-                        state.markCompleted();
-                        return config.resultCollector().collect(
-                                dev.langchain4j.model.chat.response.ChatResponse.builder()
-                                        .aiMessage(AiMessage.from(output))
-                                        .build(), loopCtx);
                     }
 
                     continue;

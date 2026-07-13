@@ -45,8 +45,7 @@ public class ToolGroupRegistry {
 
         List<String> doorTools = List.of("set_door_lock");
 
-        // 含车速控制（无独立 SPEED_GROUP，归入 CHASSIS_GROUP）
-        List<String> chassisTools = List.of("set_chassis_mode", "set_vehicle_spd");
+        List<String> chassisTools = List.of("set_chassis_mode");
 
         List<String> fragranceTools = List.of("set_frag_type", "set_frag_intensity");
 

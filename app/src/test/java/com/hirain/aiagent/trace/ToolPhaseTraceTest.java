@@ -1,7 +1,6 @@
 package com.hirain.aiagent.trace;
 
-import com.hirain.aiagent.core.AgentLoopContext;
-import com.hirain.aiagent.core.SafetyVerdict;
+import com.hirain.aiagent.safety.SafetyDecision;
 
 import org.junit.Test;
 
@@ -29,7 +28,7 @@ import static org.junit.Assert.assertTrue;
  * <p>
  * 测试目标：
  * 1. 正常工具执行：tool.execute → tool.safety_check → tool.dispatch → tool.result_writeback
- * 2. 安全否决：tool.execute → tool.safety_check（vetoed=true），无 tool.dispatch
+ * 2. 安全拒绝：tool.execute → tool.safety_check（decision=DENY），无 tool.dispatch
  * 3. dispatch 异常：tool.dispatch 标记 dispatch_success=false
  */
 public class ToolPhaseTraceTest {
@@ -47,7 +46,7 @@ public class ToolPhaseTraceTest {
 
         // Stage 1: safety_check (allow)
         Span safety = recorder.startToolSafetyCheck();
-        recorder.finishToolSafetyCheck(safety, 2, false, null);
+        recorder.finishToolSafetyCheck(safety, SafetyDecision.allow());
 
         // Stage 2: dispatch (success) — 增强版 finishToolDispatch
         Span dispatch = recorder.startToolDispatch("set_ac_temperature");
@@ -56,7 +55,7 @@ public class ToolPhaseTraceTest {
 
         // Stage 3: writeback
         Span writeback = recorder.startToolWriteback();
-        recorder.finishTool(toolSpan, "{\"code\":0}", SafetyVerdict.allow());
+        recorder.finishTool(toolSpan, "{\"code\":0}", SafetyDecision.allow());
         recorder.finishToolWriteback(writeback, true);
 
         scope.close();
@@ -71,10 +70,10 @@ public class ToolPhaseTraceTest {
         assertNotNull("tool.safety_check span should exist", safetyData);
         assertEquals("safety_check parent should be tool.execute",
                 toolData.getSpanId(), safetyData.getParentSpanId());
-        assertEquals("safety_check should have guard count",
-                2L, safetyData.getAttributes().get(AttributeKey.longKey("tool.safety_guard_count")).longValue());
-        assertFalse("safety_check should not be vetoed",
-                safetyData.getAttributes().get(AttributeKey.booleanKey("tool.safety_veto")));
+        assertEquals("ALLOW", safetyData.getAttributes().get(
+                AttributeKey.stringKey(TraceAttributeKeys.TOOL_SAFETY_DECISION)));
+        assertEquals("ALLOW", safetyData.getAttributes().get(
+                AttributeKey.stringKey(TraceAttributeKeys.TOOL_SAFETY_REASON_CODE)));
 
         SpanData dispatchData = findSpan(ts.exporter.spans, "tool.dispatch");
         assertNotNull("tool.dispatch span should exist", dispatchData);
@@ -107,7 +106,7 @@ public class ToolPhaseTraceTest {
     }
 
     @Test
-    public void vetoedTool_noDispatchSpan() {
+    public void deniedTool_noDispatchSpan() {
         TestSession ts = new TestSession();
         AgentTraceRecorder recorder = new AgentTraceRecorder(ts.traceSession);
 
@@ -117,13 +116,17 @@ public class ToolPhaseTraceTest {
                 0);
         io.opentelemetry.context.Scope scope = toolSpan.makeCurrent();
 
-        // Stage 1: safety_check (vetoed)
+        // Stage 1: safety_check (denied)
         Span safety = recorder.startToolSafetyCheck();
-        recorder.finishToolSafetyCheck(safety, 1, true, "speed too high");
+        SafetyDecision denied = SafetyDecision.deny(
+                SafetyDecision.ReasonCode.DOOR_UNLOCK_REQUIRES_STOPPED,
+                "speed too high");
+        recorder.finishToolSafetyCheck(safety, denied);
 
-        // Vetoed — no dispatch
-        recorder.finishTool(toolSpan, "[SAFETY VETO] speed too high",
-                SafetyVerdict.veto("speed too high"));
+        // DENY — no dispatch
+        recorder.finishTool(toolSpan,
+                "[SAFETY_DENY][DOOR_UNLOCK_REQUIRES_STOPPED] speed too high",
+                denied);
 
         scope.close();
         toolSpan.end();
@@ -134,14 +137,17 @@ public class ToolPhaseTraceTest {
 
         SpanData safetyData = findSpan(ts.exporter.spans, "tool.safety_check");
         assertNotNull("tool.safety_check should exist", safetyData);
-        assertTrue("safety_check should be vetoed",
-                safetyData.getAttributes().get(AttributeKey.booleanKey("tool.safety_veto")));
-        assertEquals("veto reason should match",
+        assertEquals("DENY", safetyData.getAttributes().get(
+                AttributeKey.stringKey(TraceAttributeKeys.TOOL_SAFETY_DECISION)));
+        assertEquals("DOOR_UNLOCK_REQUIRES_STOPPED", safetyData.getAttributes().get(
+                AttributeKey.stringKey(TraceAttributeKeys.TOOL_SAFETY_REASON_CODE)));
+        assertEquals("deny reason should match",
                 "speed too high",
-                safetyData.getAttributes().get(AttributeKey.stringKey("tool.safety_veto_reason")));
+                safetyData.getAttributes().get(
+                        AttributeKey.stringKey(TraceAttributeKeys.TOOL_SAFETY_REASON)));
 
         SpanData dispatchData = findSpan(ts.exporter.spans, "tool.dispatch");
-        assertNull("tool.dispatch should NOT exist when vetoed", dispatchData);
+        assertNull("tool.dispatch should NOT exist when denied", dispatchData);
     }
 
     @Test
@@ -157,7 +163,7 @@ public class ToolPhaseTraceTest {
 
         // Stage 1: safety_check (allow)
         Span safety = recorder.startToolSafetyCheck();
-        recorder.finishToolSafetyCheck(safety, 2, false, null);
+        recorder.finishToolSafetyCheck(safety, SafetyDecision.allow());
 
         // Stage 2: dispatch (exception) — 增强版 finishToolDispatch
         Span dispatch = recorder.startToolDispatch("set_ac_temperature");
@@ -205,11 +211,11 @@ public class ToolPhaseTraceTest {
                 0, io.opentelemetry.context.Context.current());
         io.opentelemetry.context.Scope tool1Scope = tool1Span.makeCurrent();
         Span s1 = recorder.startToolSafetyCheck();
-        recorder.finishToolSafetyCheck(s1, 2, false, null);
+        recorder.finishToolSafetyCheck(s1, SafetyDecision.allow());
         Span d1 = recorder.startToolDispatch("set_ac_temperature");
         recorder.finishToolDispatch(d1, true, "VehicleAcManager", "setAcTemperature", 30, true, true);
         Span w1 = recorder.startToolWriteback();
-        recorder.finishTool(tool1Span, "{\"code\":0}", SafetyVerdict.allow());
+        recorder.finishTool(tool1Span, "{\"code\":0}", SafetyDecision.allow());
         recorder.finishToolWriteback(w1, true);
         tool1Scope.close();
         tool1Span.end();
@@ -221,11 +227,11 @@ public class ToolPhaseTraceTest {
                 0, io.opentelemetry.context.Context.current());
         io.opentelemetry.context.Scope tool2Scope = tool2Span.makeCurrent();
         Span s2 = recorder.startToolSafetyCheck();
-        recorder.finishToolSafetyCheck(s2, 2, false, null);
+        recorder.finishToolSafetyCheck(s2, SafetyDecision.allow());
         Span d2 = recorder.startToolDispatch("set_door_lock");
         recorder.finishToolDispatch(d2, true, "VehicleDoorManager", "setDoorLock", 20, true, true);
         Span w2 = recorder.startToolWriteback();
-        recorder.finishTool(tool2Span, "{\"code\":0}", SafetyVerdict.allow());
+        recorder.finishTool(tool2Span, "{\"code\":0}", SafetyDecision.allow());
         recorder.finishToolWriteback(w2, true);
         tool2Scope.close();
         tool2Span.end();
@@ -271,11 +277,11 @@ public class ToolPhaseTraceTest {
                 0, io.opentelemetry.context.Context.current());
         io.opentelemetry.context.Scope toolScope = toolSpan.makeCurrent();
         Span s = recorder.startToolSafetyCheck();
-        recorder.finishToolSafetyCheck(s, 2, false, null);
+        recorder.finishToolSafetyCheck(s, SafetyDecision.allow());
         Span d = recorder.startToolDispatch("set_ac_temperature");
         recorder.finishToolDispatch(d, true, "VehicleAcManager", "setAcTemperature", 50, true, true);
         Span w = recorder.startToolWriteback();
-        recorder.finishTool(toolSpan, "{\"code\":0}", SafetyVerdict.allow());
+        recorder.finishTool(toolSpan, "{\"code\":0}", SafetyDecision.allow());
         recorder.finishToolWriteback(w, true);
         toolScope.close();
         toolSpan.end();

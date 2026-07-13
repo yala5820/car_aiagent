@@ -47,10 +47,10 @@ LangChain4j Tools 支持 `@Tool` 方法发现、参数 schema、动态工具提�
 | --- | --- | --- | --- | --- |
 | `AIAgentService` / AIDL 服务边界 | 完全自研 | 基本完成 | `IAIAgentAidlInterface.aidl` 已包含 `processAgentRequest`、会话 CRUD、取消、listener；`AIAgentService.kt` 已委托 `AgentRuntime`、`ConversationManager`、`ActiveRequestRegistry`。 | 保持同版本 SDK/Service 末尾追加字段策略；不要把 Binder 生命周期、前台 Service、listener 分发交给 LLM 框架。 |
 | `AgentRuntime` | 完全自研 | 基本完成 | 已集中处理 `RequestSession`、`IntentRouter`、`ToolGroupSelector`、`ContextOrchestrator.build(session)`、runtime 取消检查和 `RuntimeResult` 映射。 | 继续作为 Service 与 AgentLoop 的唯一协调层；后续 LangChain4j 能力只应从这里下沉到模型/记忆/tool 基础设施。 |
-| `AgentLoopOrchestrator` 业务编排 | 保持自研主循环 | 基本完成，但仍需会话记忆收敛 | 已自研 PreProcessor、ModelCaller、SafetyGuard、ToolExecutor、PostProcessor、Terminator、ResultCollector；用 LangChain4j `ChatRequest` 发模型请求。 | 主循环不要整体迁移到 `AiServices`；但要把固定 `chatMemory` 继续收敛为按 `userId/sessionId/personaId` 选择的 LangChain4j `ChatMemory`。 |
+| `AgentLoopOrchestrator` 业务编排 | 保持自研主循环 | 基本完成，但仍需会话记忆收敛 | 已自研 ModelCaller、ToolSafetyEngine、ToolExecutor、PostProcessor、Terminator、ResultCollector 等执行管线；用 LangChain4j `ChatRequest` 发模型请求。 | 主循环不要整体迁移到 `AiServices`；但要把固定 `chatMemory` 继续收敛为按 `userId/sessionId/personaId` 选择的 LangChain4j `ChatMemory`。 |
 | context 策略层 | 完全自研 | 基本完成第一版 | 已有 `ContextFrame`、`ContextProvider`、`ContextOrchestrator`、9 个 provider、`ContextBudgetManager`、`ContextTraceRecorder`，并通过 `ContextExtraPreProcessor` 首轮注入模型输入。 | 继续自研上下文优先级、裁剪、fallback、车况/工具组/长期记忆策略；底层消息仍使用 LangChain4j `ChatMessage`。 |
 | context 完整语义层 | 完全自研 | 部分完成 | 当前一期采用 `HYBRID_EXTRA_CONTEXT`，`FULL_CONTEXT` 在源码中仍降级处理；Memory provider 一期不读取完整短期 `ChatMemory`，tool provider 一期只渲染工具组说明和 toolName。 | 后续分阶段补齐真实 memory summary、完整 selected tool spec、token budget 和压缩策略，不要一次性扩大到全量上下文系统。 |
-| 车控安全层 | 完全自研 | 基本完成 | `SpeedBasedDoorLockGuard` 等 SafetyGuard 已在 Agent 配置中参与工具调用前审查。 | 车控安全必须保持确定性，不能依赖 LLM 自觉；LangChain4j 只能作为工具调用输入来源。 |
+| 车控安全层 | 完全自研 | Demo 完成 | 共享 `ToolSafetyEngine` 已在所有 AgentLoop 工具执行前审核；当前显式覆盖静止解锁和静止切换底盘模式，其他低风险 Tool 默认放行。 | 车控安全必须保持确定性，不能依赖 LLM 自觉；LangChain4j 只能作为工具调用输入来源。 |
 | `VehicleStateMachine` | 完全自研 | 基本完成 | 已作为 Demo 阶段车控 tool 的状态托管中心，管理参数校验与状态收敛。 | 继续作为车控仿真/验收基础；后续接真实 SOA 时也应保留状态校验边界。 |
 | `IntentRouter` | 建议自研 | 基本完成 | 已有 `KeywordIntentRouter`、`IntentTag`、`IntentConfidence` 和测试。 | 第一版继续用轻量规则；后续可考虑用 LangChain4j 结构化输出做“辅助分类器”，但最终路由策略仍由自研层裁决。 |
 | `ToolGroupSelector` / `ToolGroupRegistry` | 建议自研 | 基本完成 | 已有 13 个工具组、默认注册表、基于意图和车载关键词的选择器、单元测试。 | 保留自研工具组策略；后续可把选择结果映射到 LangChain4j `ToolProvider` 或 tool search，而不是让 LLM 直接看全量工具。 |
@@ -104,7 +104,7 @@ LangChain4j Tools 支持 `@Tool` 方法发现、参数 schema、动态工具提�
 
 已完成内容：
 
-- 主循环已明确分成 PreProcessor、ModelCaller、SafetyGuard、ToolExecutor、PostProcessor、Terminator、ResultCollector。
+- 主循环已明确分成模型调用、ToolSafetyEngine、ToolExecutor、PostProcessor、Terminator、ResultCollector 等阶段。
 - 模型调用使用 LangChain4j `ChatRequest` / `ChatResponse`。
 - Tool call 结果通过 LangChain4j `ToolExecutionResultMessage` 回填。
 - `ContextExtraPreProcessor` 已能把 context 模块渲染结果放入 `ChatRequest.messages()`。
@@ -353,7 +353,7 @@ LangChain4j 对 Android 客户端 UI 状态没有帮助。测试 App 的职责�
   ContextOrchestrator / ContextPolicy
   IntentRouter / ToolGroupSelector
   AgentLoopOrchestrator business loop
-  SafetyGuard / VehicleStateMachine
+  ToolSafetyEngine / VehicleStateMachine
   ConversationManager / Session lifecycle
   Trace business spans
   TestApp UI conversation state

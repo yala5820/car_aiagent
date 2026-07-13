@@ -391,6 +391,15 @@ public class VehicleStateMachine {
         return "车速大小调节成功";
     }
 
+    /**
+     * 读取当前车速，供执行前安全规则进行确定性判断。
+     * 与 getSpeedStatus() 的展示型 JSON 不同，此方法直接返回类型明确的状态值，
+     * 避免安全判断依赖中文 JSON 字段和字符串解析。
+     */
+    public int getVehicleSpd() {
+        return speed.getVehicleSpd();
+    }
+
     public String getSpeedStatus() {
         JSONObject json = new JSONObject();
         try {

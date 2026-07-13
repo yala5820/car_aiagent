@@ -34,6 +34,8 @@ import com.hirain.aiagent.core.preprocessor.VehicleStatusPreProcessor
 import com.hirain.aiagent.conversation.ConversationManager
 import com.hirain.aiagent.conversation.MemoryConversationSessionGateway
 import com.hirain.aiagent.memory.MemoryOrchestrator
+import com.hirain.aiagent.safety.DefaultSafetyRules
+import com.hirain.aiagent.safety.ToolSafetyEngine
 import com.hirain.aiagent.trace.TraceConfig
 import com.hirain.aiagent.trace.TraceManager
 import com.hirain.aiagent.trace.TraceResponseDispatcher
@@ -83,6 +85,7 @@ class AIAgentService : Service() {
     private lateinit var memoryOrchestrator: MemoryOrchestrator
     private lateinit var contextOrchestrator: ContextOrchestrator
     private lateinit var vehicleStateMachine: VehicleStateMachine
+    private lateinit var toolSafetyEngine: ToolSafetyEngine
     private lateinit var traceManager: TraceManager
     private lateinit var chatOrchestrator: AgentLoopOrchestrator
     private lateinit var agentRuntime: AgentRuntime
@@ -159,10 +162,11 @@ class AIAgentService : Service() {
 
                     val sceneConfig = AgentConfigFactory.createScenePersona(
                         this@AIAgentService, promptManager!!, toolRegistry,
-                        statusProvider, VehicleSpeedManager(vehicleStateMachine), scene)
+                        statusProvider, scene)
                     val sceneOrchestrator = AgentLoopOrchestrator(
                         sceneConfig, this@AIAgentService, promptManager!!,
-                        memoryOrchestrator, toolRegistry.toolSpecifications)
+                        memoryOrchestrator, toolRegistry.toolSpecifications,
+                        toolSafetyEngine)
                     val result = sceneOrchestrator.execute("", mapOf("scene" to scene))
                     val res = if (result.isSuccess) result.output()
                               else "系统: 场景服务暂时不可用"
@@ -323,6 +327,12 @@ class AIAgentService : Service() {
         // ── 虚拟车辆状态机 ──
         vehicleStateMachine = VehicleStateMachine()
 
+        // ── 全 Persona 共用的确定性 Tool 安全引擎 ──
+        toolSafetyEngine = ToolSafetyEngine(
+            vehicleStateMachine,
+            DefaultSafetyRules.create()
+        )
+
         // ── 工具管理器和注册表 ──
         val doorManager = VehicleDoorManager(vehicleStateMachine)
         val windowManager = VehicleWindowManager(vehicleStateMachine)
@@ -338,7 +348,7 @@ class AIAgentService : Service() {
         toolRegistry = ToolRegistry().apply {
             registerAll(
                 weatherUtils, doorManager, windowManager, seatManager,
-                acManager, chassisManager, fragManager, speedManager,
+                acManager, chassisManager, fragManager,
                 dmsManager, vl!!
             )
         }
@@ -373,8 +383,9 @@ class AIAgentService : Service() {
         chatOrchestrator = AgentLoopOrchestrator(
             AgentConfigFactory.createChatPersona(
                 this, promptManager!!, memoryOrchestrator, toolRegistry,
-                statusProvider, speedManager),
-            this, promptManager!!, memoryOrchestrator, toolRegistry.toolSpecifications)
+                statusProvider),
+            this, promptManager!!, memoryOrchestrator, toolRegistry.toolSpecifications,
+            toolSafetyEngine)
 
         // ── ContextOrchestrator 初始化（必须在 textOrchestrator 前创建，因为需要注入作为 ContextAssemblyGateway） ──
         contextOrchestrator = ContextOrchestrator.defaultForText(
@@ -392,10 +403,11 @@ class AIAgentService : Service() {
         textOrchestrator = TextAgentLoopOrchestrator(
             AgentConfigFactory.createTextPersona(
                 this, promptManager!!, memoryOrchestrator,
-                toolRegistry, statusProvider, speedManager, "chat"
+                toolRegistry, statusProvider, "chat"
             ),
             memoryOrchestrator,  // implements ContextMemoryGateway
-            contextOrchestrator   // implements ContextAssemblyGateway
+            contextOrchestrator,  // implements ContextAssemblyGateway
+            toolSafetyEngine
         )
 
         // ── AgentRuntime 初始化（注入 memoryOrchestrator 作为 SessionIdResolver） ──

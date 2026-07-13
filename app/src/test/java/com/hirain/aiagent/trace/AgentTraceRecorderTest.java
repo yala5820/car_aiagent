@@ -5,7 +5,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-import com.hirain.aiagent.core.SafetyVerdict;
+import com.hirain.aiagent.safety.SafetyDecision;
 
 import dev.langchain4j.agent.tool.ToolSpecification;
 import io.opentelemetry.api.common.AttributeKey;
@@ -76,7 +76,7 @@ public class AgentTraceRecorderTest {
     }
 
     @Test
-    public void recordsToolResultAndSafetyVeto() {
+    public void recordsToolResultAndSafetyDecision() {
         TestSession session = new TestSession();
         AgentTraceRecorder recorder = new AgentTraceRecorder(session.traceSession);
         ToolExecutionRequest request = ToolExecutionRequest.builder()
@@ -86,7 +86,9 @@ public class AgentTraceRecorderTest {
                 .build();
 
         Span span = recorder.startTool(request, 0);
-        recorder.finishTool(span, "车速过高，禁止开门", SafetyVerdict.veto("speed too high"));
+        recorder.finishTool(span, "车速过高，禁止开门", SafetyDecision.deny(
+                SafetyDecision.ReasonCode.DOOR_UNLOCK_REQUIRES_STOPPED,
+                "speed too high"));
         span.end();
         session.close();
 
@@ -94,9 +96,39 @@ public class AgentTraceRecorderTest {
         assertEquals(TraceSpanNames.TOOL_EXECUTE, data.getName());
         assertEquals("set_door_lock", data.getAttributes().get(AttributeKey.stringKey(TraceAttributeKeys.TOOL_NAME)));
         assertEquals(false, data.getAttributes().get(AttributeKey.booleanKey(TraceAttributeKeys.TOOL_SUCCESS)));
-        assertEquals(true, data.getAttributes().get(AttributeKey.booleanKey(TraceAttributeKeys.TOOL_SAFETY_VETO)));
+        assertEquals("DENY", data.getAttributes().get(
+                AttributeKey.stringKey(TraceAttributeKeys.TOOL_SAFETY_DECISION)));
+        assertEquals("DOOR_UNLOCK_REQUIRES_STOPPED", data.getAttributes().get(
+                AttributeKey.stringKey(TraceAttributeKeys.TOOL_SAFETY_REASON_CODE)));
+        assertEquals("speed too high", data.getAttributes().get(
+                AttributeKey.stringKey(TraceAttributeKeys.TOOL_SAFETY_REASON)));
         assertTrue(data.getAttributes().get(AttributeKey.stringKey(TraceAttributeKeys.TOOL_ARGUMENTS))
                 .contains("138****5678"));
+    }
+
+    @Test
+    public void allowedButDispatchFailed_marksToolAsFailed() {
+        TestSession session = new TestSession();
+        AgentTraceRecorder recorder = new AgentTraceRecorder(session.traceSession);
+        ToolExecutionRequest request = ToolExecutionRequest.builder()
+                .id("failed-dispatch")
+                .name("set_ac_status")
+                .arguments("{\"arg0\":true}")
+                .build();
+
+        Span span = recorder.startTool(request, 0);
+        recorder.finishTool(span, "工具执行失败: 参数错误",
+                SafetyDecision.allow(), false);
+        span.end();
+        session.close();
+
+        SpanData data = session.exporter.spans.get(0);
+        assertEquals(false, data.getAttributes().get(
+                AttributeKey.booleanKey(TraceAttributeKeys.TOOL_SUCCESS)));
+        assertEquals(io.opentelemetry.api.trace.StatusCode.ERROR,
+                data.getStatus().getStatusCode());
+        assertEquals("ALLOW", data.getAttributes().get(
+                AttributeKey.stringKey(TraceAttributeKeys.TOOL_SAFETY_DECISION)));
     }
 
     @Test

@@ -175,7 +175,7 @@ public class AgentRuntimeContextTest {
         RuntimeResult result = runtime.execute(session);
 
         assertTrue(result.success());
-        assertTrue(session.toolGroupSelectionResult().selectedToolNames().size() < 47);
+        assertTrue(session.toolGroupSelectionResult().selectedToolNames().size() < 46);
         assertEquals(session.toolGroupSelectionResult().selectedToolNames(), frameRef.get().selectedToolNames());
     }
 }

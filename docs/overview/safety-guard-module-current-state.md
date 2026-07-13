@@ -1,6 +1,8 @@
 # SafetyGuard 模块现状总结
 
 > 最后更新：2026-07-11 | 依据实际代码（已验证）
+>
+> **历史文档说明：** 本文记录的是 2026-07-13 改造前的旧 SafetyGuard 体系，相关接口与实现现已删除。当前实现请阅读 [`tool-safety-policy-engine-current-state.md`](./tool-safety-policy-engine-current-state.md)。
 
 ---
 
