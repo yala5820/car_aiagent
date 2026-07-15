@@ -36,6 +36,24 @@ public class RuntimeResponseMapper {
             response.setErrorType("CANCELLED");
             response.setStatus("CANCELLED");
             response.setErrorDetail(result.errorDetail());
+        } else if ("BUSY".equals(result.errorType())) {
+            response.setSuccess(false);
+            response.setText(result.errorDetail());
+            response.setErrorType("BUSY");
+            response.setStatus("BUSY");
+            response.setErrorDetail(result.errorDetail());
+        } else if ("DUPLICATE_REQUEST".equals(result.errorType())) {
+            response.setSuccess(false);
+            response.setText(result.errorDetail());
+            response.setErrorType("DUPLICATE_REQUEST");
+            response.setStatus("DUPLICATE_REQUEST");
+            response.setErrorDetail(result.errorDetail());
+        } else if ("TOOL_SELECTION_FAILED".equals(result.errorType())) {
+            response.setSuccess(false);
+            response.setText("系统暂时无法安全确定可用工具，请重新描述请求。");
+            response.setErrorType("TOOL_SELECTION_FAILED");
+            response.setStatus("TOOL_SELECTION_FAILED");
+            response.setErrorDetail(result.errorDetail());
         } else if ("EXCEPTION".equals(result.errorType())) {
             response.setSuccess(false);
             response.setText("系统: 请求失败 - " + (result.errorDetail() != null ? result.errorDetail() : "未知错误"));

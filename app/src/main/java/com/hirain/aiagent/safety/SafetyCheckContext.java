@@ -14,10 +14,16 @@ public final class SafetyCheckContext {
 
     private final String toolName;
     private final JsonObject arguments;
+    private final SafetyCheckMode mode;
 
     public SafetyCheckContext(String toolName, JsonObject arguments) {
+        this(toolName, arguments, SafetyCheckMode.INITIAL);
+    }
+
+    public SafetyCheckContext(String toolName, JsonObject arguments, SafetyCheckMode mode) {
         this.toolName = Objects.requireNonNull(toolName, "toolName");
         this.arguments = Objects.requireNonNull(arguments, "arguments");
+        this.mode = Objects.requireNonNull(mode, "mode");
     }
 
     public String toolName() {
@@ -30,5 +36,9 @@ public final class SafetyCheckContext {
      */
     public JsonObject arguments() {
         return arguments;
+    }
+
+    public SafetyCheckMode mode() {
+        return mode;
     }
 }

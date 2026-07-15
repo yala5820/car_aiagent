@@ -1,5 +1,8 @@
 package langchain4j.http_client_ok;
 
+import com.hirain.aiagent.runtime.RequestCallRegistry;
+import com.hirain.aiagent.runtime.RequestExecutionContext;
+
 import dev.langchain4j.exception.HttpException;
 import dev.langchain4j.http.client.HttpClient;
 import dev.langchain4j.http.client.HttpRequest;
@@ -16,11 +19,13 @@ import okhttp3.ResponseBody;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.SocketTimeoutException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 public class OkHttpClient implements HttpClient {
     private final okhttp3.OkHttpClient delegate;
+    private final RequestCallRegistry requestCallRegistry;
 
     public OkHttpClient(OkHttpClientBuilder builder) {
         okhttp3.OkHttpClient.Builder okBuilder = builder.httpClientBuilder();
@@ -33,6 +38,7 @@ public class OkHttpClient implements HttpClient {
         }
 
         this.delegate = okBuilder.build();
+        this.requestCallRegistry = builder.requestCallRegistry();
     }
 
     public static OkHttpClientBuilder builder() {
@@ -42,10 +48,27 @@ public class OkHttpClient implements HttpClient {
     @Override
     public SuccessfulHttpResponse execute(HttpRequest request) {
         Request okRequest = toOkRequest(request);
-        try (Response response = delegate.newCall(okRequest).execute()) {
+        Call call = delegate.newCall(okRequest);
+        RequestCallRegistry.Registration registration = null;
+        RequestExecutionContext.State executionContext = RequestExecutionContext.current();
+        if (executionContext != null) {
+            long remainingMs = executionContext.deadline().remainingMs(System.currentTimeMillis());
+            if (remainingMs <= 0L) {
+                throw new RuntimeException(new SocketTimeoutException("request deadline exceeded"));
+            }
+            call.timeout().timeout(remainingMs, TimeUnit.MILLISECONDS);
+            if (requestCallRegistry != null) {
+                registration = requestCallRegistry.register(executionContext.requestId(), call);
+            }
+        }
+        try (Response response = call.execute()) {
             return handleResponse(response);
         } catch (IOException e) {
             throw new RuntimeException(e);
+        } finally {
+            if (registration != null) {
+                registration.close();
+            }
         }
     }
 

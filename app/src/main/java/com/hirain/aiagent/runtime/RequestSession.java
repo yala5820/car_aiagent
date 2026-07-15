@@ -28,6 +28,7 @@ public final class RequestSession {
     private final String clientMessageId;
     private final String userInput;
     private final long startedAtMs;
+    private final RequestDeadline deadline;
     private final TraceContext traceContext;
     private final IntentResult intentResult;
     private final ToolGroupSelectionResult toolGroupSelectionResult;
@@ -40,6 +41,19 @@ public final class RequestSession {
                    IntentResult intentResult,
                    ToolGroupSelectionResult toolGroupSelectionResult,
                    Map<String, Object> orchestratorContext) {
+        this(request, requestId, sessionId, userId, sourceApp, inputType,
+                personaId, clientMessageId, userInput,
+                RequestDeadline.standard(startedAtMs), traceContext, intentResult,
+                toolGroupSelectionResult, orchestratorContext);
+    }
+
+    RequestSession(AgentRequest request, String requestId, String sessionId,
+                   String userId, String sourceApp, String inputType,
+                   String personaId, String clientMessageId, String userInput,
+                   RequestDeadline deadline, TraceContext traceContext,
+                   IntentResult intentResult,
+                   ToolGroupSelectionResult toolGroupSelectionResult,
+                   Map<String, Object> orchestratorContext) {
         this.request = request;
         this.requestId = requestId;
         this.sessionId = sessionId;
@@ -49,7 +63,9 @@ public final class RequestSession {
         this.personaId = personaId;
         this.clientMessageId = clientMessageId;
         this.userInput = userInput;
-        this.startedAtMs = startedAtMs;
+        this.deadline = deadline != null ? deadline
+                : RequestDeadline.standard(System.currentTimeMillis());
+        this.startedAtMs = this.deadline.startedAtMs();
         this.traceContext = traceContext;
         this.intentResult = intentResult;
         this.toolGroupSelectionResult = toolGroupSelectionResult;
@@ -67,6 +83,7 @@ public final class RequestSession {
     public String clientMessageId() { return clientMessageId; }
     public String userInput() { return userInput; }
     public long startedAtMs() { return startedAtMs; }
+    public RequestDeadline deadline() { return deadline; }
     public TraceContext traceContext() { return traceContext; }
     public IntentResult intentResult() { return intentResult; }
     public ToolGroupSelectionResult toolGroupSelectionResult() { return toolGroupSelectionResult; }

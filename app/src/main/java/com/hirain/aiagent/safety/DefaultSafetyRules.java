@@ -18,6 +18,10 @@ import java.util.Map;
  */
 public final class DefaultSafetyRules {
 
+    private static final java.util.Set<String> HIGH_RISK_TOOL_NAMES = java.util.Set.of(
+            VehicleDoorManager.TOOL_SET_DOOR_LOCK,
+            VehicleChassisManager.TOOL_SET_CHASSIS_MODE);
+
     private DefaultSafetyRules() {
     }
 
@@ -28,5 +32,14 @@ public final class DefaultSafetyRules {
         rules.put(VehicleChassisManager.TOOL_SET_CHASSIS_MODE,
                 List.of(new ChassisModeSafetyRule()));
         return Collections.unmodifiableMap(rules);
+    }
+
+    /** 具体 HIGH Tool 必须具有专用规则；聚合组风险不得扩大到全部成员。 */
+    public static boolean requiresDedicatedRule(String toolName) {
+        return HIGH_RISK_TOOL_NAMES.contains(toolName);
+    }
+
+    public static java.util.Set<String> highRiskToolNames() {
+        return HIGH_RISK_TOOL_NAMES;
     }
 }

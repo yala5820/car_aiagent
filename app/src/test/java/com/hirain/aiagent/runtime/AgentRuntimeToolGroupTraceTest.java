@@ -52,6 +52,8 @@ public class AgentRuntimeToolGroupTraceTest {
                 .get(AttributeKey.stringKey("agent.tool_group.selected_tool_names")));
         assertEquals("intent:VEHICLE_AC", root.getAttributes()
                 .get(AttributeKey.stringKey("agent.tool_group.selection_reason")));
+        assertEquals("SELECTED", root.getAttributes()
+                .get(AttributeKey.stringKey("agent.tool_group.selection_status")));
         assertEquals("HIGH", root.getAttributes()
                 .get(AttributeKey.stringKey("agent.tool_group.confidence")));
         assertEquals(false, root.getAttributes()

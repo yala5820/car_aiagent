@@ -136,10 +136,11 @@ public class ToolGroupRegistryTest {
     }
 
     @Test
-    public void toolGroupSelectionResult_fallbackReturnsChatOnlyGroup() {
+    public void toolGroupSelectionResult_fallbackFailsClosed() {
         ToolGroupSelectionResult result = ToolGroupSelectionResult.fallback("test_reason");
 
-        assertEquals(List.of(ToolGroupId.CHAT_ONLY_GROUP), result.selectedGroupIds());
+        assertEquals(ToolGroupSelectionStatus.FAILED_CLOSED, result.status());
+        assertTrue(result.selectedGroupIds().isEmpty());
         assertTrue(result.selectedToolNames().isEmpty());
         assertEquals("test_reason", result.selectionReason());
         assertEquals(IntentConfidence.NONE, result.confidence());

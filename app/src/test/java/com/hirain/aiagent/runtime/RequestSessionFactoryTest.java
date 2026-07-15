@@ -13,6 +13,7 @@ import com.hirain.aiagent.intentrouter.IntentResult;
 import com.hirain.aiagent.intentrouter.IntentTag;
 import com.hirain.aiagent.toolgroup.ToolGroupId;
 import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
+import com.hirain.aiagent.toolgroup.ToolGroupSelectionStatus;
 import com.hirain.aiagent.trace.TraceContext;
 
 import org.junit.Test;
@@ -129,7 +130,7 @@ public class RequestSessionFactoryTest {
     }
 
     @Test
-    public void create_withNullSelection_usesLightweightFallback() {
+    public void create_withNullSelection_failsClosed() {
         RequestSessionFactory factory = new RequestSessionFactory(() -> "req-1", () -> 1000L);
         AgentRequest request = new AgentRequest();
         request.setInputType("TEXT");
@@ -143,9 +144,27 @@ public class RequestSessionFactoryTest {
         assertNotNull(session.toolGroupSelectionResult());
         assertEquals("missing_tool_group_selection",
                 session.toolGroupSelectionResult().selectionReason());
-        // 轻量防线：CHAT_ONLY_GROUP + 空 tools，非全量兜底
-        assertEquals(List.of(ToolGroupId.CHAT_ONLY_GROUP),
-                session.toolGroupSelectionResult().selectedGroupIds());
+        assertEquals(ToolGroupSelectionStatus.FAILED_CLOSED,
+                session.toolGroupSelectionResult().status());
+        assertTrue(session.toolGroupSelectionResult().selectedGroupIds().isEmpty());
         assertTrue(session.toolGroupSelectionResult().selectedToolNames().isEmpty());
+    }
+
+    @Test
+    public void create_usesAdmissionDeadlineWithoutRestartingClock() {
+        RequestSessionFactory factory = new RequestSessionFactory(() -> "req-1", () -> 9_999L);
+        AgentRequest request = new AgentRequest();
+        request.setRequestId("req-1");
+        request.setInputType("TEXT");
+        request.setText("你好");
+        RequestDeadline admissionDeadline = new RequestDeadline(1_000L, 30_000L);
+
+        RequestSession session = factory.create(request, null, null,
+                ToolGroupSelectionResult.fallback("test_default"),
+                "session-1", admissionDeadline);
+
+        assertSame(admissionDeadline, session.deadline());
+        assertEquals(1_000L, session.startedAtMs());
+        assertEquals(31_000L, session.deadline().deadlineAtMs());
     }
 }

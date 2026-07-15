@@ -21,6 +21,7 @@ import com.hirain.aiagent.core.terminator.NoToolCallTerminator;
 import com.hirain.aiagent.engines.scenematch.SceneMatch;
 import com.hirain.aiagent.memory.MemoryOrchestrator;
 import com.hirain.aiagent.prompt.PromptConstants;
+import com.hirain.aiagent.runtime.RequestCallRegistry;
 import com.hirain.aiagent.trace.TracingOkHttpInterceptor;
 import com.hirain.aiagent.prompt.PromptManager;
 
@@ -120,6 +121,7 @@ public class AgentConfigFactory {
                                                  MemoryOrchestrator memoryOrchestrator,
                                                  ToolRegistry toolRegistry,
                                                  VehicleStatusPreProcessor.VehicleStatusProvider statusProvider,
+                                                 RequestCallRegistry requestCallRegistry,
                                                  String personaId) {
         String template = switchPersonaTemplate(personaId);
         // session-scoped 主路径由 MemoryOrchestrator.chatMemoryForSession(sessionId, maxMessages) 决定；
@@ -133,7 +135,7 @@ public class AgentConfigFactory {
                 .memoryPolicy(AgentConfig.MemoryPolicy.PERSISTENT)
                 .chatMemoryStoreId(memoryId)
                 .preProcessors(List.of())
-                .modelCaller(new Lc4jModelCaller(buildQwenTurbo()))
+                .modelCaller(new Lc4jModelCaller(buildQwenTurbo(requestCallRegistry)))
                 .toolExecutor(toolRegistry::dispatch)
                 .toolSubset(null)
                 .postProcessors(List.of(
@@ -186,6 +188,10 @@ public class AgentConfigFactory {
         return buildModel("qwen-turbo");
     }
 
+    private static OpenAiChatModel buildQwenTurbo(RequestCallRegistry requestCallRegistry) {
+        return buildModel("qwen-turbo", requestCallRegistry);
+    }
+
     private static OpenAiChatModel buildQwenFlash() {
         return buildModel("qwen-flash");
     }
@@ -195,9 +201,20 @@ public class AgentConfigFactory {
     }
 
     private static OpenAiChatModel buildModel(String modelName) {
+        return buildModel(modelName, null);
+    }
+
+    private static OpenAiChatModel buildModel(String modelName,
+                                              RequestCallRegistry requestCallRegistry) {
         OkHttpClientBuilder httpBuilder = OkHttpClient.builder()
                 .connectTimeout(Duration.ofSeconds(30))
-                .readTimeout(Duration.ofSeconds(120));
+                // 只有带 RequestCallRegistry 的 TEXT 模型进入本阶段统一 30 秒语义；
+                // scene/vision 等旧链路保持原有 120 秒 read timeout，避免越界修改。
+                .readTimeout(requestCallRegistry != null
+                        ? Duration.ofSeconds(30) : Duration.ofSeconds(120));
+        if (requestCallRegistry != null) {
+            httpBuilder.requestCallRegistry(requestCallRegistry);
+        }
         httpBuilder.httpClientBuilder().addInterceptor(new TracingOkHttpInterceptor());
         return OpenAiChatModel.builder()
                 .httpClientBuilder(httpBuilder)

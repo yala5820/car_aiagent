@@ -4,6 +4,7 @@ import com.google.gson.JsonParser;
 import com.hirain.aiagent.VirtualStateMachine.VehicleStateMachine;
 import com.hirain.aiagent.safety.SafetyCheckContext;
 import com.hirain.aiagent.safety.SafetyDecision;
+import com.hirain.aiagent.safety.SafetyCheckMode;
 
 import org.junit.Test;
 
@@ -30,13 +31,13 @@ public class ChassisModeSafetyRuleTest {
     }
 
     @Test
-    public void switchModeAtZeroSpeed_allows() {
+    public void switchModeAtZeroSpeed_requiresConfirmation() {
         VehicleStateMachine state = stateAtSpeed(0);
 
         SafetyDecision decision = rule.check(
                 context("{\"arg0\":\"越野模式\"}"), state);
 
-        assertTrue(decision.isAllowed());
+        assertTrue(decision.requiresConfirmation());
     }
 
     @Test
@@ -51,14 +52,32 @@ public class ChassisModeSafetyRuleTest {
     }
 
     @Test
-    public void invalidModeAtZeroSpeed_safetyAllowsExecutionValidation() {
+    public void invalidModeAtZeroSpeed_confirmationStillDefersEnumValidation() {
         VehicleStateMachine state = stateAtSpeed(0);
 
         SafetyDecision decision = rule.check(
                 context("{\"arg0\":\"飞行模式\"}"), state);
 
-        assertTrue(decision.isAllowed());
+        assertTrue(decision.requiresConfirmation());
         assertTrue(state.setChassisMode("飞行模式").contains("无效"));
+    }
+
+    @Test
+    public void confirmedSwitchAtZeroSpeed_allows() {
+        SafetyDecision decision = rule.check(
+                context("{\"arg0\":\"越野模式\"}", SafetyCheckMode.CONFIRMED_RECHECK),
+                stateAtSpeed(0));
+
+        assertTrue(decision.isAllowed());
+    }
+
+    @Test
+    public void confirmedSwitchAfterVehicleMoves_deniesStateChanged() {
+        SafetyDecision decision = rule.check(
+                context("{\"arg0\":\"越野模式\"}", SafetyCheckMode.CONFIRMED_RECHECK),
+                stateAtSpeed(10));
+
+        assertDenied(decision, SafetyDecision.ReasonCode.CONFIRMATION_STATE_CHANGED);
     }
 
     @Test
@@ -83,8 +102,12 @@ public class ChassisModeSafetyRuleTest {
     }
 
     private static SafetyCheckContext context(String json) {
+        return context(json, SafetyCheckMode.INITIAL);
+    }
+
+    private static SafetyCheckContext context(String json, SafetyCheckMode mode) {
         return new SafetyCheckContext("set_chassis_mode",
-                JsonParser.parseString(json).getAsJsonObject());
+                JsonParser.parseString(json).getAsJsonObject(), mode);
     }
 
     private static void assertDenied(SafetyDecision decision,

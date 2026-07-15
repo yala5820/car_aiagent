@@ -15,22 +15,45 @@ public final class ActiveRequest {
     }
 
     private final String requestId;
-    private final String sessionId;
-    private final String userId;
-    private final String personaId;
-    private final String clientMessageId;
+    private volatile String sessionId;
+    private volatile String userId;
+    private volatile String personaId;
+    private volatile String clientMessageId;
     private final long startedAtMs;
+    private final RequestDeadline deadline;
     private final AtomicReference<TerminalState> state = new AtomicReference<>(TerminalState.RUNNING);
     private volatile String cancelReason;
 
     public ActiveRequest(String requestId, String sessionId, String userId,
                          String personaId, String clientMessageId, long startedAtMs) {
+        this(requestId, sessionId, userId, personaId, clientMessageId,
+                RequestDeadline.standard(startedAtMs));
+    }
+
+    public ActiveRequest(RequestAdmission admission) {
+        this(admission.requestId(), admission.sessionId(), admission.userId(),
+                admission.personaId(), admission.clientMessageId(), admission.deadline());
+    }
+
+    private ActiveRequest(String requestId, String sessionId, String userId,
+                          String personaId, String clientMessageId,
+                          RequestDeadline deadline) {
         this.requestId = requestId;
         this.sessionId = sessionId;
         this.userId = userId;
         this.personaId = personaId;
         this.clientMessageId = clientMessageId;
-        this.startedAtMs = startedAtMs;
+        this.deadline = deadline;
+        this.startedAtMs = deadline.startedAtMs();
+    }
+
+    /** Runtime 解析出最终 sessionId 后补齐响应元数据，不改变准入身份和 deadline。 */
+    public void bindSession(RequestSession session) {
+        if (session == null || !requestId.equals(session.requestId())) return;
+        this.sessionId = session.sessionId();
+        this.userId = session.userId();
+        this.personaId = session.personaId();
+        this.clientMessageId = session.clientMessageId();
     }
 
     /** 抢占终态：只有 RUNNING→终态返回 true，后续调用返回 false */
@@ -50,5 +73,6 @@ public final class ActiveRequest {
     public String personaId() { return personaId; }
     public String clientMessageId() { return clientMessageId; }
     public long startedAtMs() { return startedAtMs; }
+    public RequestDeadline deadline() { return deadline; }
     public String cancelReason() { return cancelReason; }
 }

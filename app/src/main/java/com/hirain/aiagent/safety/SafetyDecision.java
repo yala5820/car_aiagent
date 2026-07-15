@@ -12,7 +12,8 @@ public final class SafetyDecision {
 
     public enum DecisionType {
         ALLOW,
-        DENY
+        DENY,
+        REQUIRE_CONFIRMATION
     }
 
     public enum ReasonCode {
@@ -21,7 +22,15 @@ public final class SafetyDecision {
         SPEED_UNAVAILABLE,
         DOOR_UNLOCK_REQUIRES_STOPPED,
         CHASSIS_MODE_REQUIRES_STOPPED,
-        RULE_EXECUTION_ERROR
+        RULE_EXECUTION_ERROR,
+        HIGH_RISK_CONFIRMATION_REQUIRED,
+        CONFIRMATION_EXPIRED,
+        CONFIRMATION_CANCELLED,
+        CONFIRMATION_STATE_CHANGED,
+        CONFIRMATION_ALREADY_CONSUMED,
+        CONFIRMATION_CHANNEL_UNAVAILABLE,
+        MULTI_TOOL_CONFIRMATION_NOT_SUPPORTED,
+        POLICY_NOT_CONFIGURED
     }
 
     private static final SafetyDecision ALLOW_INSTANCE =
@@ -58,6 +67,15 @@ public final class SafetyDecision {
         return new SafetyDecision(DecisionType.DENY, reasonCode, reason);
     }
 
+    /** 创建需要用户二次确认的结果。 */
+    public static SafetyDecision requireConfirmation(String reason) {
+        if (reason == null || reason.trim().isEmpty()) {
+            throw new IllegalArgumentException("确认要求必须包含动作说明");
+        }
+        return new SafetyDecision(DecisionType.REQUIRE_CONFIRMATION,
+                ReasonCode.HIGH_RISK_CONFIRMATION_REQUIRED, reason);
+    }
+
     public DecisionType type() {
         return type;
     }
@@ -76,5 +94,9 @@ public final class SafetyDecision {
 
     public boolean isDenied() {
         return type == DecisionType.DENY;
+    }
+
+    public boolean requiresConfirmation() {
+        return type == DecisionType.REQUIRE_CONFIRMATION;
     }
 }

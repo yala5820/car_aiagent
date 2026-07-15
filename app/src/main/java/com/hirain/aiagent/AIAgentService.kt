@@ -25,6 +25,11 @@ import com.hirain.aiagent.core.AgentResult
 import com.hirain.aiagent.core.AgentLoopOrchestrator
 import com.hirain.aiagent.runtime.ActiveRequest
 import com.hirain.aiagent.runtime.ActiveRequestRegistry
+import com.hirain.aiagent.runtime.RequestAdmission
+import com.hirain.aiagent.runtime.RequestAdmissionResult
+import com.hirain.aiagent.runtime.RequestCallRegistry
+import com.hirain.aiagent.runtime.RequestDeadline
+import com.hirain.aiagent.runtime.RequestExecutionContext
 import com.hirain.aiagent.runtime.AgentExecutor
 import com.hirain.aiagent.runtime.AgentRuntime
 import com.hirain.aiagent.runtime.RuntimeResponseMapper
@@ -36,7 +41,10 @@ import com.hirain.aiagent.conversation.MemoryConversationSessionGateway
 import com.hirain.aiagent.memory.MemoryOrchestrator
 import com.hirain.aiagent.safety.DefaultSafetyRules
 import com.hirain.aiagent.safety.ToolSafetyEngine
+import com.hirain.aiagent.safety.confirmation.ConfirmationTextParser
+import com.hirain.aiagent.safety.confirmation.ToolConfirmationCoordinator
 import com.hirain.aiagent.trace.TraceConfig
+import com.hirain.aiagent.trace.TraceAttributeKeys
 import com.hirain.aiagent.trace.TraceManager
 import com.hirain.aiagent.trace.TraceResponseDispatcher
 import com.hirain.aiagent.engines.scenematch.SceneMatch
@@ -86,17 +94,21 @@ class AIAgentService : Service() {
     private lateinit var contextOrchestrator: ContextOrchestrator
     private lateinit var vehicleStateMachine: VehicleStateMachine
     private lateinit var toolSafetyEngine: ToolSafetyEngine
+    private lateinit var toolConfirmationCoordinator: ToolConfirmationCoordinator
     private lateinit var traceManager: TraceManager
     private lateinit var chatOrchestrator: AgentLoopOrchestrator
     private lateinit var agentRuntime: AgentRuntime
     private lateinit var runtimeResponseMapper: RuntimeResponseMapper
     private lateinit var conversationManager: ConversationManager
     private val activeRequestRegistry = ActiveRequestRegistry()
+    private val requestCallRegistry = RequestCallRegistry()
     private val activeTimeouts = java.util.concurrent.ConcurrentHashMap<String, Runnable>()
     private val requestDispatchers = java.util.concurrent.ConcurrentHashMap<String, TraceResponseDispatcher>()
     private lateinit var statusProvider: VehicleStatusPreProcessor.VehicleStatusProvider
     private var mWorkHandlerThread: HandlerThread? = null
     private var mWorkHandler: Handler? = null
+    private var mTextWorkHandlerThread: HandlerThread? = null
+    private var mTextWorkHandler: Handler? = null
 
     private var mManager: VRServiceManager? = null
     private var mLastRequestAITimeStamp:Long = 0
@@ -113,6 +125,7 @@ class AIAgentService : Service() {
     private var mChating = false
 
     companion object {
+        // 非 TEXT 旧链路继续沿用原有时限；TEXT 使用 RequestDeadline 的独立 30 秒语义。
         private const val SENDMESSAGE_TIMEOUT_MS = 15000L
     }
 
@@ -124,6 +137,11 @@ class AIAgentService : Service() {
                 (mWorkHandlerThread as HandlerThread).looper,
                 null
             )
+        }
+        if (mTextWorkHandlerThread == null) {
+            mTextWorkHandlerThread = HandlerThread("text_agent_work_thread")
+            mTextWorkHandlerThread!!.start()
+            mTextWorkHandler = Handler(mTextWorkHandlerThread!!.looper)
         }
     }
 
@@ -352,6 +370,11 @@ class AIAgentService : Service() {
                 dmsManager, vl!!
             )
         }
+        toolConfirmationCoordinator = ToolConfirmationCoordinator(
+            toolSafetyEngine,
+            { toolRequest -> toolRegistry.dispatch(toolRequest) },
+            SystemTimeProvider()
+        )
 
         // ── 车辆状态提供者 ──
         statusProvider = VehicleStatusPreProcessor.VehicleStatusProvider {
@@ -403,11 +426,12 @@ class AIAgentService : Service() {
         textOrchestrator = TextAgentLoopOrchestrator(
             AgentConfigFactory.createTextPersona(
                 this, promptManager!!, memoryOrchestrator,
-                toolRegistry, statusProvider, "chat"
+                toolRegistry, statusProvider, requestCallRegistry, "chat"
             ),
             memoryOrchestrator,  // implements ContextMemoryGateway
             contextOrchestrator,  // implements ContextAssemblyGateway
-            toolSafetyEngine
+            toolSafetyEngine,
+            toolConfirmationCoordinator
         )
 
         // ── AgentRuntime 初始化（注入 memoryOrchestrator 作为 SessionIdResolver） ──
@@ -448,6 +472,8 @@ class AIAgentService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        mTextWorkHandlerThread?.quitSafely()
+        mWorkHandlerThread?.quitSafely()
         memoryOrchestrator.shutdown()
         traceManager.shutdown()
         Log.d("TAG", "onDestroy")
@@ -539,6 +565,11 @@ class AIAgentService : Service() {
             val result = activeRequestRegistry.cancel(requestId, cancelReason, System.currentTimeMillis())
             if (result.isSuccess) {
                 requestId?.let { id ->
+                    // 终态通知与执行槽位分离：先取消模型 Call，槽位由 worker finally 释放。
+                    requestCallRegistry.cancel(id)
+                    if (::toolConfirmationCoordinator.isInitialized) {
+                        toolConfirmationCoordinator.cancelPendingForOriginalRequest(id)
+                    }
                     activeTimeouts.remove(id)?.let { timeoutRunnable ->
                         mainHandler.removeCallbacks(timeoutRunnable)
                     }
@@ -556,7 +587,6 @@ class AIAgentService : Service() {
                         } ?: run {
                             notifyAIAgentListeners(cancelledResponse)
                         }
-                        activeRequestRegistry.finish(id)
                     }
                 }
                 stopTTS()
@@ -613,85 +643,303 @@ class AIAgentService : Service() {
         val effectivePersonaId = normalizeTextPersona(rawPersonaId)
         // 将实际使用的 persona 写回 request，确保 Trace 和 Runtime 使用同一值
         request.personaId = effectivePersonaId
-        val session = traceManager.startAgentRequest(
-            effectivePersonaId,
-            userId,
-            requestId,
-            request.sessionId,
-            request.sourceApp,
-            request.inputType,
-            message
+        val nowMs = System.currentTimeMillis()
+        val deadline = RequestDeadline.standard(nowMs)
+        val admission = RequestAdmission(
+            requestId, request.sessionId, userId, effectivePersonaId,
+            request.clientMessageId, deadline
         )
-        val runtimeSession = agentRuntime.startSession(request, session.toTraceContext())
-        val responseDispatcher = TraceResponseDispatcher(session)
-        requestDispatchers[requestId] = responseDispatcher
-        val activeRequest = activeRequestRegistry.register(runtimeSession)
+        val admissionResult = activeRequestRegistry.tryAcquire(admission, nowMs)
+        if (!admissionResult.isAccepted) {
+            val rejectedResult = if (admissionResult.status() == RequestAdmissionResult.Status.BUSY) {
+                RuntimeResult.busy(requestId, request.sessionId, userId,
+                    effectivePersonaId, request.clientMessageId, nowMs)
+            } else {
+                RuntimeResult.duplicate(requestId, request.sessionId, userId,
+                    effectivePersonaId, request.clientMessageId, nowMs)
+            }
+            val rejectedTrace = traceManager.startAgentRequest(
+                effectivePersonaId, userId, requestId, request.sessionId,
+                request.sourceApp, request.inputType, message)
+            rejectedTrace.setAttribute(
+                TraceAttributeKeys.REQUEST_ADMISSION_STATUS,
+                admissionResult.status().name)
+            TraceResponseDispatcher(rejectedTrace).dispatchAndClose(
+                runtimeResponseMapper.toAgentResponse(rejectedResult),
+                admissionResult.status().name) { notifyAIAgentListeners(it) }
+            return
+        }
 
+        val activeRequest = admissionResult.activeRequest()
+        var traceSession: com.hirain.aiagent.trace.TraceSession? = null
+        try {
+            traceSession = traceManager.startAgentRequest(
+                effectivePersonaId,
+                userId,
+                requestId,
+                request.sessionId,
+                request.sourceApp,
+                request.inputType,
+                message
+            )
+            val session = traceSession!!
+            session.setAttribute(TraceAttributeKeys.REQUEST_ADMISSION_STATUS, "ACCEPTED")
+            session.setAttribute(TraceAttributeKeys.REQUEST_DEADLINE_AT_MS, deadline.deadlineAtMs())
+            session.setAttribute(TraceAttributeKeys.REQUEST_TIMEOUT_MS,
+                RequestDeadline.DEFAULT_TIMEOUT_MS)
+            val confirmationCommand = toolConfirmationCoordinator.parse(message)
+            if (confirmationCommand != ConfirmationTextParser.Command.NONE) {
+                handleConfirmationTextRequest(
+                    request, requestId, userId, effectivePersonaId,
+                    activeRequest, session, deadline
+                )
+                return
+            }
+            // 任何新的普通请求都会取消旧 PendingAction，防止旧动作跨请求获得授权。
+            toolConfirmationCoordinator.cancelPendingForOrdinaryRequest()
+            val runtimeSession = agentRuntime.startSession(
+                request, session.toTraceContext(), deadline)
+            activeRequest.bindSession(runtimeSession)
+            val responseDispatcher = TraceResponseDispatcher(session)
+            requestDispatchers[requestId] = responseDispatcher
+
+            val timeoutRunnable = Runnable {
+                Log.e("TAG", "processAgentRequest TEXT timeout")
+                if (activeRequestRegistry.tryComplete(
+                        requestId, ActiveRequest.TerminalState.TIMEOUT)) {
+                    requestCallRegistry.cancel(requestId)
+                    toolConfirmationCoordinator.cancelPendingForOriginalRequest(requestId)
+                    val timeoutResponse = runtimeResponseMapper.toAgentResponse(
+                        agentRuntime.timeoutResult(runtimeSession))
+                    responseDispatcher.dispatchAndClose(timeoutResponse, "timeout") {
+                        notifyAIAgentListeners(it)
+                    }
+                    activeTimeouts.remove(requestId)
+                    requestDispatchers.remove(requestId)
+                }
+            }
+            activeTimeouts[requestId] = timeoutRunnable
+            mainHandler.postDelayed(
+                timeoutRunnable, deadline.remainingMs(System.currentTimeMillis()))
+
+            Log.d("TAG", "TextRequest requestId=$requestId sessionId=${request.sessionId} " +
+                    "userId=$userId personaId=$effectivePersonaId " +
+                    "clientMessageId=${request.clientMessageId}")
+
+            val posted = mTextWorkHandler?.post {
+                val traceScope = session.makeCurrent()
+                val executionScope = RequestExecutionContext.bind(requestId, deadline)
+                try {
+                    if (activeRequest.state() != ActiveRequest.TerminalState.RUNNING) {
+                        return@post
+                    }
+                    Log.d("TAG", "handleTextRequest begin")
+                    val runtimeResult = agentRuntime.execute(runtimeSession)
+                    val terminalState = terminalStateFor(runtimeResult)
+                    if (activeRequestRegistry.tryComplete(requestId, terminalState)) {
+                        if (terminalState == ActiveRequest.TerminalState.TIMEOUT
+                            || terminalState == ActiveRequest.TerminalState.CANCELLED) {
+                            requestCallRegistry.cancel(requestId)
+                        }
+                        activeTimeouts.remove(requestId)?.let {
+                            mainHandler.removeCallbacks(it)
+                        }
+                        val response = runtimeResponseMapper.toAgentResponse(runtimeResult)
+                        responseDispatcher.dispatchAndClose(response, runtimeResult.errorType()) {
+                            notifyAIAgentListeners(it)
+                        }
+                        requestDispatchers.remove(requestId)
+                    }
+                } catch (e: Exception) {
+                    Log.e("TAG", "handleTextRequest service-level failure", e)
+                    if (activeRequestRegistry.tryComplete(
+                            requestId, ActiveRequest.TerminalState.FAILED)) {
+                        activeTimeouts.remove(requestId)?.let {
+                            mainHandler.removeCallbacks(it)
+                        }
+                        val errorResult = agentRuntime.errorResult(runtimeSession, e)
+                        val response = runtimeResponseMapper.toAgentResponse(errorResult)
+                        responseDispatcher.dispatchAndClose(
+                            response, e.message ?: "service_failure") {
+                            notifyAIAgentListeners(it)
+                        }
+                        requestDispatchers.remove(requestId)
+                    }
+                } finally {
+                    activeTimeouts.remove(requestId)?.let {
+                        mainHandler.removeCallbacks(it)
+                    }
+                    requestDispatchers.remove(requestId)
+                    executionScope.close()
+                    traceScope.close()
+                    session.close()
+                    requestCallRegistry.clear(requestId)
+                    activeRequestRegistry.release(requestId, System.currentTimeMillis())
+                }
+            } ?: false
+
+            if (!posted) {
+                if (activeRequestRegistry.tryComplete(
+                        requestId, ActiveRequest.TerminalState.FAILED)) {
+                    val errorResult = RuntimeResult.failure(
+                        requestId, runtimeSession.sessionId(), userId, effectivePersonaId,
+                        request.clientMessageId, "WORKER_SUBMISSION_FAILED",
+                        "TEXT worker 无法接受请求", System.currentTimeMillis())
+                    responseDispatcher.dispatchAndClose(
+                        runtimeResponseMapper.toAgentResponse(errorResult),
+                        "worker_submission_failed") { notifyAIAgentListeners(it) }
+                }
+                activeTimeouts.remove(requestId)?.let { mainHandler.removeCallbacks(it) }
+                requestDispatchers.remove(requestId)
+                session.close()
+                requestCallRegistry.clear(requestId)
+                activeRequestRegistry.release(requestId, System.currentTimeMillis())
+            }
+        } catch (e: Exception) {
+            Log.e("TAG", "TEXT request setup failed", e)
+            if (activeRequestRegistry.tryComplete(requestId, ActiveRequest.TerminalState.FAILED)) {
+                val errorResult = RuntimeResult.failure(
+                    requestId, request.sessionId, userId, effectivePersonaId,
+                    request.clientMessageId, "REQUEST_SETUP_FAILED",
+                    e.message ?: "请求初始化失败", System.currentTimeMillis())
+                notifyAIAgentListeners(runtimeResponseMapper.toAgentResponse(errorResult))
+            }
+            traceSession?.close()
+            requestCallRegistry.clear(requestId)
+            activeRequestRegistry.release(requestId, System.currentTimeMillis())
+        }
+    }
+
+    /**
+     * 在 IntentRouter 与 LLM 前处理严格确认文本。
+     * 该分支仍复用单槽位准入、30 秒 deadline、取消状态和唯一终态响应。
+     */
+    private fun handleConfirmationTextRequest(
+        request: AgentRequest,
+        requestId: String,
+        userId: String,
+        personaId: String,
+        activeRequest: ActiveRequest,
+        traceSession: com.hirain.aiagent.trace.TraceSession,
+        deadline: RequestDeadline
+    ) {
+        val responseDispatcher = TraceResponseDispatcher(traceSession)
+        requestDispatchers[requestId] = responseDispatcher
         val timeoutRunnable = Runnable {
-            Log.e("TAG", "processAgentRequest TEXT timeout")
-            val requestIdLocal = runtimeSession.requestId()
-            if (activeRequestRegistry.tryComplete(requestIdLocal, ActiveRequest.TerminalState.TIMEOUT)) {
-                val timeoutResponse = runtimeResponseMapper.toAgentResponse(
-                    agentRuntime.timeoutResult(runtimeSession))
-                responseDispatcher.dispatchAndClose(timeoutResponse, "timeout") { notifyAIAgentListeners(it) }
-                activeTimeouts.remove(requestIdLocal)
-                activeRequestRegistry.finish(requestIdLocal)
-                requestDispatchers.remove(requestIdLocal)
+            if (activeRequestRegistry.tryComplete(requestId, ActiveRequest.TerminalState.TIMEOUT)) {
+                val timeoutResult = RuntimeResult.timeout(
+                    requestId, request.sessionId, userId, personaId,
+                    request.clientMessageId, System.currentTimeMillis())
+                responseDispatcher.dispatchAndClose(
+                    runtimeResponseMapper.toAgentResponse(timeoutResult), "confirmation_timeout"
+                ) { notifyAIAgentListeners(it) }
+                activeTimeouts.remove(requestId)
+                requestDispatchers.remove(requestId)
             }
         }
-        activeTimeouts[runtimeSession.requestId()] = timeoutRunnable
-        mainHandler.postDelayed(timeoutRunnable, SENDMESSAGE_TIMEOUT_MS)
+        activeTimeouts[requestId] = timeoutRunnable
+        mainHandler.postDelayed(
+            timeoutRunnable, deadline.remainingMs(System.currentTimeMillis()))
 
-        Log.d("TAG", "TextRequest requestId=$requestId sessionId=${request.sessionId} " +
-                "userId=$userId personaId=$effectivePersonaId " +
-                "clientMessageId=${request.clientMessageId}")
-
-        mWorkHandler?.post {
-            val traceScope = session.makeCurrent()
+        val posted = mTextWorkHandler?.post {
+            val traceScope = traceSession.makeCurrent()
+            val executionScope = RequestExecutionContext.bind(requestId, deadline)
             try {
-                if (activeRequest.isCancelled) {
-                    activeTimeouts.remove(runtimeSession.requestId())?.let {
-                        mainHandler.removeCallbacks(it)
-                    }
-                    // finish 由已抢占 CANCELLED 的 cancel handler 独占负责
-                    return@post
+                if (activeRequest.state() != ActiveRequest.TerminalState.RUNNING) return@post
+                // 当前只支持一个 Session；请求未显式携带 id 时使用待确认动作所属 session。
+                val confirmationSessionId = request.sessionId
+                    ?: toolConfirmationCoordinator.pendingAction()?.sessionId()
+                val confirmationResult = toolConfirmationCoordinator.handleText(
+                    request.text, confirmationSessionId
+                ) {
+                    deadline.isExpired(System.currentTimeMillis()) ||
+                        activeRequest.state() != ActiveRequest.TerminalState.RUNNING
                 }
-                Log.d("TAG", "handleTextRequest begin")
-                val runtimeResult = agentRuntime.execute(runtimeSession)
-                // Runtime 返回后取消检查：suppress late success，取消响应由 cancelAgentRequest() 抢占并发送
-                if (activeRequest.isCancelled) {
-                    activeTimeouts.remove(runtimeSession.requestId())?.let {
-                        mainHandler.removeCallbacks(it)
-                    }
-                    return@post
+                confirmationResult.confirmationId()?.let {
+                    traceSession.setAttribute(TraceAttributeKeys.CONFIRMATION_ID, it)
                 }
-                if (activeRequestRegistry.tryComplete(
-                        runtimeSession.requestId(), ActiveRequest.TerminalState.COMPLETED)) {
-                    activeTimeouts.remove(runtimeSession.requestId())?.let {
-                        mainHandler.removeCallbacks(it)
+                confirmationResult.reasonCode()?.let {
+                    traceSession.setAttribute(TraceAttributeKeys.CONFIRMATION_REASON_CODE, it.name)
+                }
+                traceSession.setAttribute(
+                    TraceAttributeKeys.CONFIRMATION_STATUS,
+                    if (confirmationResult.success()) "COMPLETED" else "REJECTED"
+                )
+
+                val now = System.currentTimeMillis()
+                val runtimeResult = if (confirmationResult.success()) {
+                    RuntimeResult.success(
+                        requestId, confirmationSessionId, userId, personaId,
+                        request.clientMessageId, confirmationResult.text(), now, 0, 0)
+                } else {
+                    RuntimeResult.failure(
+                        requestId, confirmationSessionId, userId, personaId,
+                        request.clientMessageId, "CONFIRMATION_FAILED",
+                        confirmationResult.text(), now)
+                }
+                val terminalState = if (confirmationResult.success()) {
+                    ActiveRequest.TerminalState.COMPLETED
+                } else {
+                    ActiveRequest.TerminalState.FAILED
+                }
+                if (activeRequestRegistry.tryComplete(requestId, terminalState)) {
+                    if (!confirmationSessionId.isNullOrBlank()) {
+                        val memory = memoryOrchestrator.chatMemoryForSession(confirmationSessionId, 50)
+                        memory.add(dev.langchain4j.data.message.UserMessage.from(request.text ?: ""))
+                        memory.add(dev.langchain4j.data.message.AiMessage.from(confirmationResult.text()))
                     }
-                    val response = runtimeResponseMapper.toAgentResponse(runtimeResult)
-                    responseDispatcher.dispatch(response, null) { notifyAIAgentListeners(it) }
-                    activeRequestRegistry.finish(runtimeSession.requestId())
-                    requestDispatchers.remove(runtimeSession.requestId())
+                    activeTimeouts.remove(requestId)?.let { mainHandler.removeCallbacks(it) }
+                    responseDispatcher.dispatchAndClose(
+                        runtimeResponseMapper.toAgentResponse(runtimeResult),
+                        confirmationResult.reasonCode()?.name
+                    ) { notifyAIAgentListeners(it) }
+                    requestDispatchers.remove(requestId)
                 }
             } catch (e: Exception) {
-                Log.e("TAG", "handleTextRequest service-level failure", e)
-                if (activeRequestRegistry.tryComplete(
-                        runtimeSession.requestId(), ActiveRequest.TerminalState.FAILED)) {
-                    activeTimeouts.remove(runtimeSession.requestId())?.let {
-                        mainHandler.removeCallbacks(it)
-                    }
-                    val runtimeResult = agentRuntime.errorResult(runtimeSession, e)
-                    val response = runtimeResponseMapper.toAgentResponse(runtimeResult)
-                    responseDispatcher.dispatch(response, e.message ?: "service_failure") { notifyAIAgentListeners(it) }
-                    activeRequestRegistry.finish(runtimeSession.requestId())
-                    requestDispatchers.remove(runtimeSession.requestId())
+                Log.e("TAG", "confirmation request failed", e)
+                if (activeRequestRegistry.tryComplete(requestId, ActiveRequest.TerminalState.FAILED)) {
+                    val error = RuntimeResult.failure(
+                        requestId, request.sessionId, userId, personaId,
+                        request.clientMessageId, "CONFIRMATION_FAILED",
+                        e.message ?: "确认处理失败", System.currentTimeMillis())
+                    responseDispatcher.dispatchAndClose(
+                        runtimeResponseMapper.toAgentResponse(error), "confirmation_exception"
+                    ) { notifyAIAgentListeners(it) }
                 }
             } finally {
+                activeTimeouts.remove(requestId)?.let { mainHandler.removeCallbacks(it) }
+                requestDispatchers.remove(requestId)
+                executionScope.close()
                 traceScope.close()
-                session.close()
+                traceSession.close()
+                requestCallRegistry.clear(requestId)
+                activeRequestRegistry.release(requestId, System.currentTimeMillis())
             }
+        } ?: false
+
+        if (!posted) {
+            if (activeRequestRegistry.tryComplete(requestId, ActiveRequest.TerminalState.FAILED)) {
+                val failure = RuntimeResult.failure(
+                    requestId, request.sessionId, userId, personaId,
+                    request.clientMessageId, "WORKER_SUBMISSION_FAILED",
+                    "TEXT worker 无法接受确认请求", System.currentTimeMillis())
+                responseDispatcher.dispatchAndClose(
+                    runtimeResponseMapper.toAgentResponse(failure), "confirmation_worker_failed"
+                ) { notifyAIAgentListeners(it) }
+            }
+            activeTimeouts.remove(requestId)?.let { mainHandler.removeCallbacks(it) }
+            requestDispatchers.remove(requestId)
+            traceSession.close()
+            activeRequestRegistry.release(requestId, System.currentTimeMillis())
+        }
+    }
+
+    private fun terminalStateFor(result: RuntimeResult): ActiveRequest.TerminalState {
+        return when (result.errorType()) {
+            null -> ActiveRequest.TerminalState.COMPLETED
+            "TIMEOUT" -> ActiveRequest.TerminalState.TIMEOUT
+            "CANCELLED" -> ActiveRequest.TerminalState.CANCELLED
+            else -> ActiveRequest.TerminalState.FAILED
         }
     }
 
@@ -893,7 +1141,8 @@ class AIAgentService : Service() {
     private fun buildQwenTurbo(): OpenAiChatModel {
         val httpBuilder = OkHttpClient.builder()
             .connectTimeout(java.time.Duration.ofSeconds(30))
-            .readTimeout(java.time.Duration.ofSeconds(120))
+            .readTimeout(java.time.Duration.ofSeconds(30))
+            .requestCallRegistry(requestCallRegistry)
         return OpenAiChatModel.builder()
             .httpClientBuilder(httpBuilder)
             .apiKey(BuildConfig.DASHSCOPE_API_KEY)

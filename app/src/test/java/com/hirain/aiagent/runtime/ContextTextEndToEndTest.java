@@ -384,7 +384,7 @@ public class ContextTextEndToEndTest {
     }
 
     @Test
-    public void allToolsFallback_completeEnabledToolsReachChatRequest() {
+    public void allToolsFallback_isRejectedBeforeContextAndModel() {
         ToolGroupRegistry groupRegistry = ToolGroupRegistry.defaultRegistry();
         JvmToolRegistry toolRegistry = defaultToolRegistry();
         FakeMemoryGateway mg = new FakeMemoryGateway();
@@ -407,11 +407,10 @@ public class ContextTextEndToEndTest {
 
         RuntimeResult result = runtime.execute(runtime.startSession(request("模糊指令"), null));
 
-        assertTrue("All-tools fallback request should succeed", result.success());
-        List<String> actualNames = caller.capturedRequests().get(0).toolSpecifications().stream()
-                .map(ToolSpecification::name).toList();
-        assertEquals("Complete enabled tool set must reach ChatRequest",
-                groupRegistry.allToolNames(), actualNames);
+        assertFalse("All-tools fallback request must fail closed", result.success());
+        assertEquals("TOOL_SELECTION_FAILED", result.errorType());
+        assertTrue("Model must not be called for all-tools fallback",
+                caller.capturedRequests().isEmpty());
     }
 
     @Test

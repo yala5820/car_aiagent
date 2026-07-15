@@ -77,6 +77,22 @@ public final class RuntimeResult {
                 reason != null ? reason : "请求已取消", timestampMs, 0, 0);
     }
 
+    public static RuntimeResult busy(String requestId, String sessionId,
+                                     String userId, String personaId,
+                                     String clientMessageId, long timestampMs) {
+        return failure(requestId, sessionId, userId, personaId, clientMessageId,
+                "BUSY", "系统正忙，请稍后重试；如需中止当前请求，请先取消当前请求。",
+                timestampMs);
+    }
+
+    public static RuntimeResult duplicate(String requestId, String sessionId,
+                                          String userId, String personaId,
+                                          String clientMessageId, long timestampMs) {
+        return failure(requestId, sessionId, userId, personaId, clientMessageId,
+                "DUPLICATE_REQUEST", "该 requestId 已存在或近期已执行，请勿重复提交。",
+                timestampMs);
+    }
+
     public static RuntimeResult fromAgentResult(String requestId, String sessionId,
                                                 String userId, String personaId,
                                                 String clientMessageId,

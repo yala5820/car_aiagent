@@ -61,6 +61,15 @@ public final class ToolSafetyEngine {
 
     /** 审核单个 Tool 调用；没有注册规则的 Tool 默认放行。 */
     public SafetyDecision check(ToolExecutionRequest request) {
+        return check(request, SafetyCheckMode.INITIAL);
+    }
+
+    /** 确认后使用保存的原始请求重新读取车辆状态并复核。 */
+    public SafetyDecision recheckConfirmed(ToolExecutionRequest request) {
+        return check(request, SafetyCheckMode.CONFIRMED_RECHECK);
+    }
+
+    private SafetyDecision check(ToolExecutionRequest request, SafetyCheckMode mode) {
         if (request == null || request.name() == null
                 || request.name().trim().isEmpty()
                 || !request.name().equals(request.name().trim())) {
@@ -72,6 +81,12 @@ public final class ToolSafetyEngine {
 
         List<SafetyRule> rules = rulesByTool.get(request.name());
         if (rules == null || rules.isEmpty()) {
+            if (DefaultSafetyRules.requiresDedicatedRule(request.name())) {
+                return SafetyDecision.deny(
+                        SafetyDecision.ReasonCode.POLICY_NOT_CONFIGURED,
+                        "高风险工具缺少专用安全规则，已拒绝执行。"
+                );
+            }
             return SafetyDecision.allow();
         }
 
@@ -89,14 +104,14 @@ public final class ToolSafetyEngine {
             );
         }
 
-        SafetyCheckContext context = new SafetyCheckContext(request.name(), arguments);
+        SafetyCheckContext context = new SafetyCheckContext(request.name(), arguments, mode);
         for (SafetyRule rule : rules) {
             try {
                 SafetyDecision decision = rule.check(context, vehicleStateMachine);
                 if (decision == null) {
                     return ruleExecutionError();
                 }
-                if (decision.isDenied()) {
+                if (decision.isDenied() || decision.requiresConfirmation()) {
                     return decision;
                 }
             } catch (Exception e) {
@@ -104,6 +119,12 @@ public final class ToolSafetyEngine {
             }
         }
         return SafetyDecision.allow();
+    }
+
+    /** 非 TEXT 路径遇到确认要求时使用确定性拒绝结果，绝不 dispatch。 */
+    public String formatConfirmationUnavailableResult() {
+        return "[SAFETY_DENY][CONFIRMATION_CHANNEL_UNAVAILABLE]\n"
+                + "该高风险操作需要通过 TEXT 请求二次确认，本次未执行。";
     }
 
     /** 统一 DENY 回写格式，避免多个 AgentLoop 路径各自拼接不同文本。 */

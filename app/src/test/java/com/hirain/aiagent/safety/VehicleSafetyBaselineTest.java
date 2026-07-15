@@ -13,16 +13,18 @@ import static org.junit.Assert.assertTrue;
 public class VehicleSafetyBaselineTest {
 
     @Test
-    public void newVehicle_startsStoppedAndAllowsStoppedOnlyActions() {
+    public void newVehicle_startsStoppedAndRequiresConfirmationForHighRiskActions() {
         VehicleStateMachine state = new VehicleStateMachine();
         ToolSafetyEngine engine = new ToolSafetyEngine(
                 state, DefaultSafetyRules.create());
 
         assertEquals(0, state.getVehicleSpd());
         assertTrue(engine.check(request(
-                "set_door_lock", "{\"arg0\":false}")).isAllowed());
+                "set_door_lock", "{\"arg0\":false}")).requiresConfirmation());
         assertTrue(engine.check(request(
-                "set_chassis_mode", "{\"arg0\":\"越野模式\"}")).isAllowed());
+                "set_chassis_mode", "{\"arg0\":\"越野模式\"}")).requiresConfirmation());
+        assertTrue(engine.recheckConfirmed(request(
+                "set_door_lock", "{\"arg0\":false}")).isAllowed());
     }
 
     @Test

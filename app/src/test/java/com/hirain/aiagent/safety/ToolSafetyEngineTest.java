@@ -77,6 +77,19 @@ public class ToolSafetyEngineTest {
     }
 
     @Test
+    public void highRiskToolWithoutDedicatedPolicy_deniesClosed() {
+        ToolSafetyEngine engine = new ToolSafetyEngine(
+                new VehicleStateMachine(), Map.of());
+
+        SafetyDecision decision = engine.check(
+                request("set_door_lock", "{\"arg0\":false}"));
+
+        assertTrue(decision.isDenied());
+        assertEquals(SafetyDecision.ReasonCode.POLICY_NOT_CONFIGURED,
+                decision.reasonCode());
+    }
+
+    @Test
     public void registeredTool_invalidJson_deniesWithStableCode() {
         ToolSafetyEngine engine = new ToolSafetyEngine(
                 new VehicleStateMachine(), DefaultSafetyRules.create());

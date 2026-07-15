@@ -15,6 +15,7 @@ import com.hirain.aiagent.intentrouter.KeywordIntentRouter;
 import com.hirain.aiagent.toolgroup.DefaultToolGroupSelector;
 import com.hirain.aiagent.toolgroup.ToolGroupRegistry;
 import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
+import com.hirain.aiagent.toolgroup.ToolGroupSelectionStatus;
 import com.hirain.aiagent.toolgroup.ToolGroupSelector;
 import com.hirain.aiagent.memory.SessionIdResolver;
 import com.hirain.aiagent.trace.TraceAttributeKeys;
@@ -36,6 +37,8 @@ import io.opentelemetry.context.Scope;
 public class AgentRuntime {
 
     private static final String CHAT_PERSONA = "chat";
+    private static final String TOOL_CLARIFICATION_TEXT =
+            "请明确要控制空调、车窗、座椅、车门还是底盘。";
 
     private final AgentExecutor chatExecutor;
     private final ContextOrchestrator contextOrchestrator;
@@ -192,6 +195,14 @@ public class AgentRuntime {
      * 在创建 Session 前调用 IntentRouter 和 ToolGroupSelector，并写入 Trace。
      */
     public RequestSession startSession(AgentRequest request, TraceContext traceContext) {
+        // 兼容调用方没有前置 admission；使用真实时钟创建可执行的默认 deadline。
+        return startSession(request, traceContext,
+                RequestDeadline.standard(System.currentTimeMillis()));
+    }
+
+    /** 使用 Service 在 Runtime 前准入时创建的统一 deadline。 */
+    public RequestSession startSession(AgentRequest request, TraceContext traceContext,
+                                       RequestDeadline requestDeadline) {
         IntentResult intentResult = routeIntentSafely(request);
         ToolGroupSelectionResult toolGroupSelectionResult = selectToolGroupsSafely(intentResult, request);
         writeIntentToTrace(traceContext, intentResult);
@@ -201,7 +212,7 @@ public class AgentRuntime {
         String resolvedSessionId = resolveSessionIdSafely(request);
 
         RequestSession session = sessionFactory.create(request, traceContext,
-                intentResult, toolGroupSelectionResult, resolvedSessionId);
+                intentResult, toolGroupSelectionResult, resolvedSessionId, requestDeadline);
         writeRequestMetaToTrace(traceContext, session);
         return session;
     }
@@ -226,6 +237,24 @@ public class AgentRuntime {
                     timeProvider.nowMillis());
         }
 
+        ToolGroupSelectionResult selection = session.toolGroupSelectionResult();
+        ToolGroupSelectionStatus selectionStatus = selection != null ? selection.status() : null;
+        if (selectionStatus == ToolGroupSelectionStatus.CLARIFICATION_REQUIRED) {
+            return RuntimeResult.success(
+                    session.requestId(), session.sessionId(),
+                    session.userId(), session.personaId(), session.clientMessageId(),
+                    TOOL_CLARIFICATION_TEXT, timeProvider.nowMillis(), 0, 0);
+        }
+        if (selectionStatus == null || selectionStatus == ToolGroupSelectionStatus.FAILED_CLOSED) {
+            String reason = selection != null
+                    ? selection.selectionReason()
+                    : "missing_tool_group_selection";
+            return RuntimeResult.failure(
+                    session.requestId(), session.sessionId(),
+                    session.userId(), session.personaId(), session.clientMessageId(),
+                    "TOOL_SELECTION_FAILED", reason, timeProvider.nowMillis());
+        }
+
         // 从 RequestSession 中提取 TraceSession，用于创建 agent.loop span
         TraceContext traceCtx = session.traceContext();
         TraceSession traceSession = (traceCtx != null && traceCtx.isActive())
@@ -239,14 +268,18 @@ public class AgentRuntime {
                         .startSpan();
         try (Scope ignored = loopSpan.makeCurrent()) {
             // Context 准备（将 RuntimeCancelChecker 适配为 ContextCancelChecker）
-            ContextCancelChecker contextCancel = () ->
-                    cancelChecker != null && cancelChecker.isCancelled(session);
+            ContextCancelChecker contextCancel = () -> isStopped(session);
             ContextPrepareResult prepareResult = contextOrchestrator.prepare(session, contextCancel);
             if (prepareResult.isFailed()) {
                 return failureFromPrepare(prepareResult, session);
             }
             if (prepareResult.isCancelled()) {
-                return cancelledFromPrepare(prepareResult, session);
+                return session.deadline().isExpired(timeProvider.nowMillis())
+                        ? timeoutResult(session)
+                        : cancelledFromPrepare(prepareResult, session);
+            }
+            if (session.deadline().isExpired(timeProvider.nowMillis())) {
+                return timeoutResult(session);
             }
             if (cancelChecker.isCancelled(session)) {
                 return RuntimeResult.cancelled(
@@ -263,6 +296,12 @@ public class AgentRuntime {
             if (Span.current() != null) {
                 loopSpan.recordException(e);
             }
+            if (session.deadline().isExpired(timeProvider.nowMillis())) {
+                return timeoutResult(session);
+            }
+            if (cancelChecker != null && cancelChecker.isCancelled(session)) {
+                return cancelledResult(session, "cancelled_during_execution");
+            }
             return RuntimeResult.fromException(
                     session.requestId(), session.sessionId(),
                     session.userId(), session.personaId(), session.clientMessageId(),
@@ -270,6 +309,12 @@ public class AgentRuntime {
         } finally {
             loopSpan.end();
         }
+    }
+
+    private boolean isStopped(RequestSession session) {
+        return session == null
+                || session.deadline().isExpired(timeProvider.nowMillis())
+                || (cancelChecker != null && cancelChecker.isCancelled(session));
     }
 
     private RuntimeResult failureFromPrepare(ContextPrepareResult pr, RequestSession session) {
@@ -352,15 +397,31 @@ public class AgentRuntime {
         String text = request != null && request.getText() != null ? request.getText() : "";
         try {
             ToolGroupSelectionResult result = toolGroupSelector.select(intentResult, text);
-            if (result != null) return result;
-            // selector 返回 null → 全量兜底
-            return ToolGroupSelectionResult.allToolsFallback(
-                    toolGroupRegistry, "tool_group_selector_null_all_tools");
+            if (result == null) {
+                return ToolGroupSelectionResult.failedClosed("tool_group_selector_null");
+            }
+            if (!isConsistentSelection(result)) {
+                return ToolGroupSelectionResult.failedClosed("tool_group_selector_inconsistent_result");
+            }
+            return result;
         } catch (Exception e) {
-            // selector 抛异常 → 全量兜底
-            return ToolGroupSelectionResult.allToolsFallback(
-                    toolGroupRegistry, "tool_group_selector_exception_all_tools");
+            return ToolGroupSelectionResult.failedClosed("tool_group_selector_exception");
         }
+    }
+
+    /**
+     * 校验工具选择结果是否满足最小安全不变量。
+     * SELECTED 必须是具体、非聚合、非全量的工具集合；其余状态必须保持空工具。
+     */
+    private boolean isConsistentSelection(ToolGroupSelectionResult result) {
+        if (result.status() == null) return false;
+        if (result.status() == ToolGroupSelectionStatus.SELECTED) {
+            return !result.selectedGroupIds().isEmpty()
+                    && !result.selectedToolNames().isEmpty()
+                    && !result.allToolsFallback()
+                    && !result.containsAggregationGroup();
+        }
+        return result.selectedToolNames().isEmpty();
     }
 
     private void writeToolGroupsToTrace(TraceContext traceContext, ToolGroupSelectionResult result) {
@@ -373,6 +434,8 @@ public class AgentRuntime {
                 String.join(",", result.selectedToolNames()));
         traceContext.session().setAttribute("agent.tool_group.selection_reason",
                 result.selectionReason());
+        traceContext.session().setAttribute("agent.tool_group.selection_status",
+                result.status().name());
         traceContext.session().setAttribute("agent.tool_group.confidence",
                 result.confidence().name());
         traceContext.session().setAttribute("agent.tool_group.fallback_used",

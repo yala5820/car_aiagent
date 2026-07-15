@@ -26,6 +26,7 @@ import com.hirain.aiagent.memory.MemorySnapshot;
 import com.hirain.aiagent.runtime.RequestSession;
 import com.hirain.aiagent.safety.DefaultSafetyRules;
 import com.hirain.aiagent.safety.ToolSafetyEngine;
+import com.hirain.aiagent.safety.confirmation.ToolConfirmationCoordinator;
 import com.hirain.aiagent.trace.AgentTraceRecorder;
 
 import org.junit.Test;
@@ -254,6 +255,72 @@ public class TextAgentLoopOrchestratorTest {
     }
 
     @Test
+    public void highRiskTool_firstTurnCreatesPendingWithoutDispatch_thenConfirmExecutesOnce() {
+        VehicleStateMachine state = new VehicleStateMachine();
+        CountingToolExecutor toolExec = new CountingToolExecutor();
+        ToolSafetyEngine safetyEngine = new ToolSafetyEngine(state, DefaultSafetyRules.create());
+        ToolConfirmationCoordinator coordinator = new ToolConfirmationCoordinator(
+                safetyEngine, toolExec, System::currentTimeMillis);
+        CapturingModelCaller caller = new CapturingModelCaller(List.of(
+                ChatResponse.builder().aiMessage(AiMessage.from(
+                        ToolExecutionRequest.builder().id("r-confirm").name("set_door_lock")
+                                .arguments("{\"arg0\":false}").build())).build()));
+        AgentConfig config = configWith(caller, toolExec);
+        FakeMemoryGateway memory = new FakeMemoryGateway();
+        TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
+                config, memory,
+                new FakeAssemblyGateway(List.of(ToolSpecification.builder()
+                        .name("set_door_lock").description("unlock").build()), "车控"),
+                safetyEngine, coordinator);
+
+        AgentResult first = loop.execute(session("解锁车门"), prepare(session("解锁车门")));
+
+        assertTrue(first.isSuccess());
+        assertTrue(first.output().contains("确认执行"));
+        assertEquals(0, toolExec.callCount.get());
+        assertNotNull(coordinator.pendingAction());
+        assertTrue(memory.chatMemory.messages().stream()
+                .anyMatch(message -> message instanceof ToolExecutionResultMessage
+                        && ((ToolExecutionResultMessage) message).text()
+                                .contains("CONFIRMATION_REQUIRED")));
+
+        assertTrue(coordinator.handleText("确认执行", "conv-1", () -> false).success());
+        assertEquals(1, toolExec.callCount.get());
+        assertTrue(!coordinator.handleText("确认执行", "conv-1", () -> false).success());
+        assertEquals(1, toolExec.callCount.get());
+    }
+
+    @Test
+    public void multiToolBatchContainingConfirmation_executesNothingAndCreatesNoPending() {
+        CountingToolExecutor toolExec = new CountingToolExecutor();
+        ToolSafetyEngine safetyEngine = new ToolSafetyEngine(
+                new VehicleStateMachine(), DefaultSafetyRules.create());
+        ToolConfirmationCoordinator coordinator = new ToolConfirmationCoordinator(
+                safetyEngine, toolExec, System::currentTimeMillis);
+        CapturingModelCaller caller = new CapturingModelCaller(List.of(
+                ChatResponse.builder().aiMessage(AiMessage.from(
+                        ToolExecutionRequest.builder().id("r-low").name("set_ac_status")
+                                .arguments("{\"arg0\":true}").build(),
+                        ToolExecutionRequest.builder().id("r-high").name("set_door_lock")
+                                .arguments("{\"arg0\":false}").build())).build()));
+        AgentConfig config = configWith(caller, toolExec);
+        FakeMemoryGateway memory = new FakeMemoryGateway();
+        TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
+                config, memory, new FakeAssemblyGateway(List.of(), "车控"),
+                safetyEngine, coordinator);
+        RequestSession requestSession = session("打开空调并解锁");
+
+        AgentResult result = loop.execute(requestSession, prepare(requestSession));
+
+        assertTrue(result.isSuccess());
+        assertTrue(result.output().contains("拆分"));
+        assertEquals(0, toolExec.callCount.get());
+        assertTrue(coordinator.pendingAction() == null);
+        assertEquals(2, memory.chatMemory.messages().stream()
+                .filter(message -> message instanceof ToolExecutionResultMessage).count());
+    }
+
+    @Test
     public void selectedTools_appearInChatRequest() {
         ToolSpecification acSpec = ToolSpecification.builder().name("set_ac_status").description("Set AC").build();
         CapturingModelCaller caller = new CapturingModelCaller(List.of(
@@ -437,5 +504,22 @@ public class TextAgentLoopOrchestratorTest {
                 TextAgentLoopOrchestrator.mapAssemblyError(
                         ContextAssemblyResult.failure(ContextErrorCode.CONTEXT_INTERNAL_ERROR, "x",
                                 new ContextAssemblyDebugInfo(List.of(), 0, 0, "x"))));
+    }
+
+    @Test
+    public void expiredDeadline_stopsBeforeModelCall() {
+        CapturingModelCaller caller = new CapturingModelCaller(List.of(
+                ChatResponse.builder().aiMessage(AiMessage.from("不应调用")).build()));
+        TextAgentLoopOrchestrator loop = newLoop(
+                configWith(caller, req -> "{}"),
+                new FakeMemoryGateway(),
+                new FakeAssemblyGateway(List.of(), "你是一个助手。"));
+        RequestSession expired = TestRequestSessions.expiredTextSession(
+                "req-expired", "conv-expired", "你好");
+
+        AgentResult result = loop.execute(expired, prepare(expired));
+
+        assertEquals(AgentResult.ErrorType.TIMEOUT, result.errorType());
+        assertEquals(0, caller.captured.size());
     }
 }

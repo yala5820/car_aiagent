@@ -30,6 +30,7 @@ public class DefaultToolGroupSelectorTest {
         assertTrue(result.selectedToolNames().contains("set_ac_status"));
         assertTrue(result.selectedToolNames().contains("set_ac_drive_temp"));
         assertEquals("intent:VEHICLE_AC", result.selectionReason());
+        assertEquals(ToolGroupSelectionStatus.SELECTED, result.status());
         assertEquals(IntentConfidence.HIGH, result.confidence());
         assertFalse(result.fallbackUsed());
     }
@@ -56,31 +57,33 @@ public class DefaultToolGroupSelectorTest {
         assertEquals(List.of(ToolGroupId.CHAT_ONLY_GROUP), result.selectedGroupIds());
         assertTrue(result.selectedToolNames().isEmpty());
         assertEquals("intent:CHAT", result.selectionReason());
+        assertEquals(ToolGroupSelectionStatus.CHAT_ONLY, result.status());
     }
 
     @Test
-    public void select_unknownWithWeakVehicleKeywordReturnsCommonVehicle() {
+    public void select_unknownWithWeakVehicleKeywordRequiresClarification() {
         IntentResult intent = IntentResult.unknown("车窗好像有问题", "TEXT", "empty_text");
 
         ToolGroupSelectionResult result = selector.select(intent, "车窗好像有问题");
 
-        assertEquals(List.of(ToolGroupId.COMMON_VEHICLE_GROUP, ToolGroupId.BASIC_STATUS_GROUP),
-                result.selectedGroupIds());
-        assertTrue(result.selectedToolNames().contains("set_fl_window_status"));
-        assertEquals("fallback:unknown_vehicle_keyword", result.selectionReason());
+        assertEquals(ToolGroupSelectionStatus.CLARIFICATION_REQUIRED, result.status());
+        assertTrue(result.selectedGroupIds().isEmpty());
+        assertTrue(result.selectedToolNames().isEmpty());
+        assertEquals("clarification:unknown_vehicle_keyword", result.selectionReason());
         assertTrue(result.fallbackUsed());
     }
 
     @Test
-    public void select_unknownWithoutVehicleKeywordReturnsAllSafeDemo() {
+    public void select_unknownWithoutVehicleKeywordReturnsChatOnly() {
         IntentResult intent = IntentResult.unknown("随便聊聊", "TEXT", "empty_text");
 
         ToolGroupSelectionResult result = selector.select(intent, "随便聊聊");
 
-        assertEquals(List.of(ToolGroupId.ALL_SAFE_DEMO_GROUP), result.selectedGroupIds());
-        assertEquals("fallback:unknown_all_tools", result.selectionReason());
-        assertTrue(result.fallbackUsed());
-        assertTrue(result.allToolsFallback());
+        assertEquals(List.of(ToolGroupId.CHAT_ONLY_GROUP), result.selectedGroupIds());
+        assertEquals("intent:UNKNOWN_CHAT_ONLY", result.selectionReason());
+        assertEquals(ToolGroupSelectionStatus.CHAT_ONLY, result.status());
+        assertFalse(result.fallbackUsed());
+        assertFalse(result.allToolsFallback());
     }
 
     @Test
@@ -107,7 +110,7 @@ public class DefaultToolGroupSelectorTest {
     }
 
     @Test
-    public void select_chatWithVehicleKeywordFallsBackToCommonVehicle() {
+    public void select_chatWithVehicleKeywordRequiresClarification() {
         // "车里有点不舒服" → KeywordIntentRouter 返回 CHAT/LOW（无特定业务关键词）
         // DefaultToolGroupSelector 应识别弱车载关键词"车"，走车辆 fallback
         IntentResult intent = IntentResult.of(IntentTag.CHAT, IntentConfidence.LOW,
@@ -115,11 +118,10 @@ public class DefaultToolGroupSelectorTest {
 
         ToolGroupSelectionResult result = selector.select(intent, "车里有点不舒服");
 
-        assertEquals(List.of(ToolGroupId.COMMON_VEHICLE_GROUP, ToolGroupId.BASIC_STATUS_GROUP),
-                result.selectedGroupIds());
-        assertTrue("Should contain set_ac_status",
-                result.selectedToolNames().contains("set_ac_status"));
-        assertEquals("fallback:chat_vehicle_keyword", result.selectionReason());
+        assertEquals(ToolGroupSelectionStatus.CLARIFICATION_REQUIRED, result.status());
+        assertTrue(result.selectedGroupIds().isEmpty());
+        assertTrue(result.selectedToolNames().isEmpty());
+        assertEquals("clarification:chat_vehicle_keyword", result.selectionReason());
         assertTrue(result.fallbackUsed());
     }
 
@@ -130,12 +132,12 @@ public class DefaultToolGroupSelectorTest {
         DefaultToolGroupSelector selector = new DefaultToolGroupSelector(ToolGroupRegistry.defaultRegistry());
 
         // "车里有点不舒服" → KWR 无业务关键词命中 → CHAT/LOW
-        // → selector 因含"车" → COMMON_VEHICLE_GROUP
+        // → selector 因含弱车载关键词而要求澄清，不暴露聚合工具组
         IntentResult chatWithVehicle = router.route("车里有点不舒服", "TEXT");
         assertEquals(IntentTag.CHAT, chatWithVehicle.intentTag());
         ToolGroupSelectionResult r1 = selector.select(chatWithVehicle, "车里有点不舒服");
-        assertEquals(List.of(ToolGroupId.COMMON_VEHICLE_GROUP, ToolGroupId.BASIC_STATUS_GROUP),
-                r1.selectedGroupIds());
+        assertEquals(ToolGroupSelectionStatus.CLARIFICATION_REQUIRED, r1.status());
+        assertTrue(r1.selectedToolNames().isEmpty());
 
         // "讲个笑话" → KWR 无关键词 → CHAT/LOW
         // → selector 无车关键词 → CHAT_ONLY_GROUP
@@ -193,15 +195,17 @@ public class DefaultToolGroupSelectorTest {
         assertEquals("sess-99", input.sessionId());
     }
 
-    // ── Phase 3: 全量兜底 ──
+    // ── P0: 失败关闭 ──
 
     @Test
-    public void select_nullIntentResult_returnsAllSafeDemoGroup() {
+    public void select_nullIntentResult_failsClosed() {
         ToolGroupSelectionResult result = selector.select((IntentResult) null, "");
 
-        assertEquals(List.of(ToolGroupId.ALL_SAFE_DEMO_GROUP), result.selectedGroupIds());
-        assertEquals("fallback:null_intent_all_tools", result.selectionReason());
-        assertTrue(result.allToolsFallback());
+        assertEquals(ToolGroupSelectionStatus.FAILED_CLOSED, result.status());
+        assertTrue(result.selectedGroupIds().isEmpty());
+        assertTrue(result.selectedToolNames().isEmpty());
+        assertEquals("selector:null_intent", result.selectionReason());
+        assertFalse(result.allToolsFallback());
     }
 
     @Test
@@ -218,13 +222,13 @@ public class DefaultToolGroupSelectorTest {
     }
 
     @Test
-    public void select_unknownWithoutKeyword_hasAllToolsFallbackTrue() {
+    public void select_unknownWithoutKeyword_neverUsesAllToolsFallback() {
         IntentResult intent = IntentResult.unknown("什么", "TEXT", "empty_text");
 
         ToolGroupSelectionResult result = selector.select(intent, "什么");
 
-        assertTrue(result.allToolsFallback());
-        // 全量兜底时 selectedToolNames 不应为空
-        assertFalse(result.selectedToolNames().isEmpty());
+        assertEquals(ToolGroupSelectionStatus.CHAT_ONLY, result.status());
+        assertFalse(result.allToolsFallback());
+        assertTrue(result.selectedToolNames().isEmpty());
     }
 }

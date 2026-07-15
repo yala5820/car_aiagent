@@ -15,6 +15,7 @@ import com.hirain.aiagent.intentrouter.IntentRouter;
 import com.hirain.aiagent.intentrouter.IntentTag;
 import com.hirain.aiagent.toolgroup.ToolGroupId;
 import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
+import com.hirain.aiagent.toolgroup.ToolGroupSelectionStatus;
 import com.hirain.aiagent.toolgroup.ToolGroupSelector;
 import com.hirain.aiagent.trace.TraceContext;
 import com.hirain.aiagent.trace.TestTraceSupport;
@@ -26,6 +27,7 @@ import org.junit.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class AgentRuntimeTest {
@@ -198,12 +200,16 @@ public class AgentRuntimeTest {
     }
 
     @Test
-    public void startSession_toolGroupSelectorExceptionFallsBackAndExecuteContinues() {
+    public void startSession_toolGroupSelectorExceptionFailsClosedBeforeExecutor() {
         ToolGroupSelector failingSelector = (intentResult, userInput) -> {
             throw new IllegalStateException("selector failed");
         };
+        AtomicInteger executorCalls = new AtomicInteger();
         AgentRuntime runtime = new AgentRuntime(
-                (session, prepareResult) -> AgentResult.success("继续执行", 1, 10L, List.of()),
+                (session, prepareResult) -> {
+                    executorCalls.incrementAndGet();
+                    return AgentResult.success("不应执行", 1, 10L, List.of());
+                },
                 (text, sourceInputType) -> IntentResult.of(IntentTag.CHAT, IntentConfidence.LOW,
                         List.of(), text, sourceInputType, "fallback_chat"),
                 failingSelector,
@@ -213,17 +219,20 @@ public class AgentRuntimeTest {
         RequestSession session = runtime.startSession(createRequest("测试"), null);
         RuntimeResult result = runtime.execute(session);
 
-        assertEquals(List.of(ToolGroupId.ALL_SAFE_DEMO_GROUP),
-                session.toolGroupSelectionResult().selectedGroupIds());
-        assertEquals("tool_group_selector_exception_all_tools",
+        assertTrue(session.toolGroupSelectionResult().selectedGroupIds().isEmpty());
+        assertTrue(session.toolGroupSelectionResult().selectedToolNames().isEmpty());
+        assertEquals("tool_group_selector_exception",
                 session.toolGroupSelectionResult().selectionReason());
-        assertTrue(session.toolGroupSelectionResult().allToolsFallback());
+        assertEquals(ToolGroupSelectionStatus.FAILED_CLOSED,
+                session.toolGroupSelectionResult().status());
+        assertFalse(session.toolGroupSelectionResult().allToolsFallback());
         assertTrue(session.toolGroupSelectionResult().fallbackUsed());
-        assertTrue(result.success());
+        assertEquals("TOOL_SELECTION_FAILED", result.errorType());
+        assertEquals(0, executorCalls.get());
     }
 
     @Test
-    public void startSession_toolGroupSelectorReturnsNull_returnsAllToolsFallback() {
+    public void startSession_toolGroupSelectorReturnsNull_failsClosed() {
         ToolGroupSelector nullReturningSelector = (intentResult, userInput) -> null;
         AgentRuntime runtime = new AgentRuntime(
                 (session, prepareResult) -> AgentResult.success("继续执行", 1, 10L, List.of()),
@@ -234,12 +243,15 @@ public class AgentRuntimeTest {
                 () -> 3000L);
 
         RequestSession session = runtime.startSession(createRequest("测试"), null);
+        RuntimeResult result = runtime.execute(session);
 
-        assertEquals(List.of(ToolGroupId.ALL_SAFE_DEMO_GROUP),
-                session.toolGroupSelectionResult().selectedGroupIds());
-        assertEquals("tool_group_selector_null_all_tools",
+        assertTrue(session.toolGroupSelectionResult().selectedGroupIds().isEmpty());
+        assertEquals("tool_group_selector_null",
                 session.toolGroupSelectionResult().selectionReason());
-        assertTrue(session.toolGroupSelectionResult().allToolsFallback());
+        assertEquals(ToolGroupSelectionStatus.FAILED_CLOSED,
+                session.toolGroupSelectionResult().status());
+        assertFalse(session.toolGroupSelectionResult().allToolsFallback());
+        assertEquals("TOOL_SELECTION_FAILED", result.errorType());
     }
 
     @Test
@@ -260,7 +272,7 @@ public class AgentRuntimeTest {
     }
 
     @Test
-    public void startSession_toolGroupSelectorException_reasonContainsAllTools() {
+    public void startSession_toolGroupSelectorException_neverContainsAllTools() {
         ToolGroupSelector failingSelector = (intentResult, userInput) -> {
             throw new IllegalStateException("selector failed");
         };
@@ -273,9 +285,55 @@ public class AgentRuntimeTest {
                 () -> 3000L);
 
         RequestSession session = runtime.startSession(createRequest("测试"), null);
-        assertTrue(session.toolGroupSelectionResult().selectionReason()
-                .contains("_all_tools"));
-        assertTrue(session.toolGroupSelectionResult().allToolsFallback());
+        assertFalse(session.toolGroupSelectionResult().selectionReason()
+                .contains("all_tools"));
+        assertFalse(session.toolGroupSelectionResult().allToolsFallback());
+        assertTrue(session.toolGroupSelectionResult().selectedToolNames().isEmpty());
+    }
+
+    @Test
+    public void execute_clarificationRequiredReturnsFixedTextBeforeExecutor() {
+        AtomicInteger executorCalls = new AtomicInteger();
+        ToolGroupSelector selector = (intentResult, userInput) ->
+                ToolGroupSelectionResult.clarificationRequired(
+                        "clarification:test", IntentConfidence.LOW);
+        AgentRuntime runtime = new AgentRuntime(
+                (session, prepareResult) -> {
+                    executorCalls.incrementAndGet();
+                    return AgentResult.success("不应执行", 1, 1L, List.of());
+                },
+                (text, sourceInputType) -> IntentResult.of(
+                        IntentTag.CHAT, IntentConfidence.LOW, List.of(), text,
+                        sourceInputType, "fallback_chat"),
+                selector,
+                () -> "req-fixed",
+                () -> 3000L);
+
+        RuntimeResult result = runtime.execute(runtime.startSession(createRequest("车里不舒服"), null));
+
+        assertTrue(result.success());
+        assertEquals("请明确要控制空调、车窗、座椅、车门还是底盘。", result.output());
+        assertEquals(0, executorCalls.get());
+    }
+
+    @Test
+    public void execute_expiredAdmissionDeadlineStopsBeforeExecutor() {
+        AtomicInteger executorCalls = new AtomicInteger();
+        AgentRuntime runtime = new AgentRuntime(
+                (session, prepareResult) -> {
+                    executorCalls.incrementAndGet();
+                    return AgentResult.success("不应执行", 1, 1L, List.of());
+                },
+                () -> "req-expired",
+                () -> 3_000L);
+        AgentRequest request = createRequest("你好");
+        RequestDeadline expired = new RequestDeadline(1_000L, 1_000L);
+
+        RequestSession session = runtime.startSession(request, null, expired);
+        RuntimeResult result = runtime.execute(session);
+
+        assertEquals("TIMEOUT", result.errorType());
+        assertEquals(0, executorCalls.get());
     }
 
     // ── Test helpers ──

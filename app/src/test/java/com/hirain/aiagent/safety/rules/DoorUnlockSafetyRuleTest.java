@@ -4,6 +4,7 @@ import com.google.gson.JsonParser;
 import com.hirain.aiagent.VirtualStateMachine.VehicleStateMachine;
 import com.hirain.aiagent.safety.SafetyCheckContext;
 import com.hirain.aiagent.safety.SafetyDecision;
+import com.hirain.aiagent.safety.SafetyCheckMode;
 
 import org.junit.Test;
 
@@ -39,12 +40,32 @@ public class DoorUnlockSafetyRuleTest {
     }
 
     @Test
-    public void unlockAtZeroSpeed_allows() {
+    public void unlockAtZeroSpeed_requiresConfirmation() {
         VehicleStateMachine state = stateAtSpeed(0);
 
         SafetyDecision decision = rule.check(context("{\"arg0\":false}"), state);
 
+        assertTrue(decision.requiresConfirmation());
+        assertEquals(SafetyDecision.ReasonCode.HIGH_RISK_CONFIRMATION_REQUIRED,
+                decision.reasonCode());
+    }
+
+    @Test
+    public void confirmedUnlockAtZeroSpeed_allows() {
+        SafetyDecision decision = rule.check(
+                context("{\"arg0\":false}", SafetyCheckMode.CONFIRMED_RECHECK),
+                stateAtSpeed(0));
+
         assertTrue(decision.isAllowed());
+    }
+
+    @Test
+    public void confirmedUnlockAfterVehicleMoves_deniesStateChanged() {
+        SafetyDecision decision = rule.check(
+                context("{\"arg0\":false}", SafetyCheckMode.CONFIRMED_RECHECK),
+                stateAtSpeed(10));
+
+        assertDenied(decision, SafetyDecision.ReasonCode.CONFIRMATION_STATE_CHANGED);
     }
 
     @Test
@@ -88,8 +109,12 @@ public class DoorUnlockSafetyRuleTest {
     }
 
     private static SafetyCheckContext context(String json) {
+        return context(json, SafetyCheckMode.INITIAL);
+    }
+
+    private static SafetyCheckContext context(String json, SafetyCheckMode mode) {
         return new SafetyCheckContext("set_door_lock",
-                JsonParser.parseString(json).getAsJsonObject());
+                JsonParser.parseString(json).getAsJsonObject(), mode);
     }
 
     private static void assertDenied(SafetyDecision decision,

@@ -263,27 +263,37 @@ public class AgentLoopOrchestrator {
                 if (aiMessage.hasToolExecutionRequests()) {
                     List<ToolExecutionRequest> toolReqs = aiMessage.toolExecutionRequests();
 
+                    List<SafetyDecision> safetyDecisions = new ArrayList<>(toolReqs.size());
+                    boolean confirmationRequired = false;
                     for (ToolExecutionRequest toolReq : toolReqs) {
+                        Span safetySpan = trace != null ? trace.startToolSafetyCheck() : null;
+                        SafetyDecision decision = SafetyDecision.allow();
+                        try {
+                            decision = toolSafetyEngine.check(toolReq);
+                            safetyDecisions.add(decision);
+                            confirmationRequired |= decision.requiresConfirmation();
+                        } finally {
+                            if (trace != null) trace.finishToolSafetyCheck(safetySpan, decision);
+                        }
+                    }
+
+                    for (int toolIndex = 0; toolIndex < toolReqs.size(); toolIndex++) {
+                        ToolExecutionRequest toolReq = toolReqs.get(toolIndex);
                         // 工具执行子 span
                         Span toolSpan = trace != null
                                 ? trace.startTool(toolReq, i)
                                 : null;
                         Scope toolScope = toolSpan != null ? toolSpan.makeCurrent() : null;
 
-                        SafetyDecision decision = SafetyDecision.allow();
+                        SafetyDecision decision = safetyDecisions.get(toolIndex);
                         String result = null;
                         try {
-                            Span safetySpan = trace != null
-                                    ? trace.startToolSafetyCheck() : null;
-                            try {
-                                decision = toolSafetyEngine.check(toolReq);
-                            } finally {
-                                if (trace != null) {
-                                    trace.finishToolSafetyCheck(safetySpan, decision);
-                                }
-                            }
-
-                            if (decision.isDenied()) {
+                            if (confirmationRequired) {
+                                result = toolReqs.size() > 1
+                                        ? "[SAFETY_DENY][MULTI_TOOL_CONFIRMATION_NOT_SUPPORTED]\n"
+                                                + "确认型动作不能与其他工具同批执行，请拆分请求。"
+                                        : toolSafetyEngine.formatConfirmationUnavailableResult();
+                            } else if (decision.isDenied()) {
                                 result = toolSafetyEngine.formatDenyResult(decision);
                             } else {
                                 result = config.toolExecutor().execute(toolReq);
@@ -518,7 +528,21 @@ public class AgentLoopOrchestrator {
                         return AgentResult.error(ErrorType.CANCELLED,
                                 "cancelled_before_tool_execution");
                     }
+                    List<SafetyDecision> safetyDecisions = new ArrayList<>(toolReqs.size());
+                    boolean confirmationRequired = false;
                     for (ToolExecutionRequest req : toolReqs) {
+                        Span safetySpan = trace != null ? trace.startToolSafetyCheck() : null;
+                        SafetyDecision decision = SafetyDecision.allow();
+                        try {
+                            decision = toolSafetyEngine.check(req);
+                            safetyDecisions.add(decision);
+                            confirmationRequired |= decision.requiresConfirmation();
+                        } finally {
+                            if (trace != null) trace.finishToolSafetyCheck(safetySpan, decision);
+                        }
+                    }
+                    for (int toolIndex = 0; toolIndex < toolReqs.size(); toolIndex++) {
+                        ToolExecutionRequest req = toolReqs.get(toolIndex);
                         Span toolSpan = trace != null
                                 ? trace.startTool(req, i,
                                         io.opentelemetry.context.Context.current()) : null;
@@ -527,19 +551,15 @@ public class AgentLoopOrchestrator {
                             if (cancelCheck.isCancelled()) {
                                 break;
                             }
-                            Span safetySpan = trace != null
-                                    ? trace.startToolSafetyCheck() : null;
-                            SafetyDecision decision = SafetyDecision.allow();
-                            try {
-                                decision = toolSafetyEngine.check(req);
-                            } finally {
-                                if (trace != null) {
-                                    trace.finishToolSafetyCheck(safetySpan, decision);
-                                }
-                            }
+                            SafetyDecision decision = safetyDecisions.get(toolIndex);
 
                             String toolResult;
-                            if (decision.isDenied()) {
+                            if (confirmationRequired) {
+                                toolResult = toolReqs.size() > 1
+                                        ? "[SAFETY_DENY][MULTI_TOOL_CONFIRMATION_NOT_SUPPORTED]\n"
+                                                + "确认型动作不能与其他工具同批执行，请拆分请求。"
+                                        : toolSafetyEngine.formatConfirmationUnavailableResult();
+                            } else if (decision.isDenied()) {
                                 toolResult = toolSafetyEngine.formatDenyResult(decision);
                             } else {
                                 toolResult = config.toolExecutor().execute(req);

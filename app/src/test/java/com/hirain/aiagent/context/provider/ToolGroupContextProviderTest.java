@@ -49,6 +49,39 @@ public class ToolGroupContextProviderTest {
         ToolContextContribution contrib = (ToolContextContribution) result.contributions().get(0);
         assertEquals(ToolContextContribution.MODE_NONE, contrib.selectionMode());
         assertTrue(contrib.toolSpecifications().isEmpty());
+        assertFalse(new ToolGroupContextProvider().required(session, input));
+    }
+
+    @Test
+    public void clarificationRequired_returnsEmptyToolsAndIsNotRequired() {
+        RequestSession session = TestRequestSessions.clarificationSession(
+                "req-clarify", "conv-1", "车里不舒服");
+        ContextBuildInput input = ContextBuildInput.builder().build();
+
+        ContextProviderResult result = new ToolGroupContextProvider().provide(session, input);
+
+        assertTrue(result.success());
+        ToolContextContribution contribution =
+                (ToolContextContribution) result.contributions().get(0);
+        assertEquals(ToolContextContribution.MODE_NONE, contribution.selectionMode());
+        assertTrue(contribution.toolSpecifications().isEmpty());
+        assertFalse(new ToolGroupContextProvider().required(session, input));
+    }
+
+    @Test
+    public void failedClosed_returnsEmptyToolsAndIsNotRequired() {
+        RequestSession session = TestRequestSessions.failedClosedSession(
+                "req-failed", "conv-1", "测试");
+        ContextBuildInput input = ContextBuildInput.builder().build();
+
+        ContextProviderResult result = new ToolGroupContextProvider().provide(session, input);
+
+        assertTrue(result.success());
+        ToolContextContribution contribution =
+                (ToolContextContribution) result.contributions().get(0);
+        assertEquals(ToolContextContribution.MODE_NONE, contribution.selectionMode());
+        assertTrue(contribution.toolSpecifications().isEmpty());
+        assertFalse(new ToolGroupContextProvider().required(session, input));
     }
 
     @Test
@@ -64,5 +97,6 @@ public class ToolGroupContextProviderTest {
 
         // 无 toolRegistry → 返回 FAILED
         assertFalse(result.success());
+        assertTrue(new ToolGroupContextProvider().required(session, input));
     }
 }

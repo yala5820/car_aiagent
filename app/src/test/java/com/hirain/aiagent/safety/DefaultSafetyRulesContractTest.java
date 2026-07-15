@@ -25,6 +25,7 @@ public class DefaultSafetyRulesContractTest {
     @Test
     public void defaultRules_matchRealToolNamesAndArg0Schema() {
         Map<String, List<SafetyRule>> rules = DefaultSafetyRules.create();
+        assertEquals(DefaultSafetyRules.highRiskToolNames(), rules.keySet());
         assertEquals(List.of(VehicleDoorManager.TOOL_SET_DOOR_LOCK,
                         VehicleChassisManager.TOOL_SET_CHASSIS_MODE),
                 List.copyOf(rules.keySet()));

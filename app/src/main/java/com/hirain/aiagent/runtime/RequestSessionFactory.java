@@ -41,6 +41,16 @@ public class RequestSessionFactory {
                                  TraceContext traceContext, IntentResult intentResult,
                                  ToolGroupSelectionResult toolGroupSelectionResult,
                                  String resolvedSessionId) {
+        return create(request, traceContext, intentResult, toolGroupSelectionResult,
+                resolvedSessionId, null);
+    }
+
+    /** 使用 Runtime 前准入阶段创建的统一 deadline。 */
+    public RequestSession create(AgentRequest request,
+                                 TraceContext traceContext, IntentResult intentResult,
+                                 ToolGroupSelectionResult toolGroupSelectionResult,
+                                 String resolvedSessionId,
+                                 RequestDeadline requestDeadline) {
         // ── intentResult 空值降级（request 可能为 null） ──
         if (intentResult == null) {
             String safeText = request != null ? nonEmpty(request.getText(), "") : "";
@@ -49,18 +59,19 @@ public class RequestSessionFactory {
         }
 
         // ── toolGroupSelectionResult 空值降级 ──
-        // 生产主路径的全量兜底由 AgentRuntime.selectToolGroupsSafely() 保证，
-        // Factory 这里是最后防线，保留轻量降级（CHAT_ONLY_GROUP + 空 toolNames）。
+        // Factory 作为最后防线也必须失败关闭，禁止空选择被解释为普通对话或全量工具。
         if (toolGroupSelectionResult == null) {
-            toolGroupSelectionResult = ToolGroupSelectionResult.fallback("missing_tool_group_selection");
+            toolGroupSelectionResult = ToolGroupSelectionResult.failedClosed("missing_tool_group_selection");
         }
 
         // ── request 空值时创建最小可用 RequestSession ──
         if (request == null) {
             long now = timeProvider.nowMillis();
+            RequestDeadline deadline = requestDeadline != null
+                    ? requestDeadline : RequestDeadline.standard(now);
             return new RequestSession(null, idGenerator.newRequestId(), null, "default_user",
                     "unknown", "TEXT", "chat", null, "",
-                    now, traceContext, intentResult, toolGroupSelectionResult, new HashMap<>());
+                    deadline, traceContext, intentResult, toolGroupSelectionResult, new HashMap<>());
         }
 
         // ── 规范化 requestId ──
@@ -103,10 +114,12 @@ public class RequestSessionFactory {
         }
 
         long now = timeProvider.nowMillis();
+        RequestDeadline deadline = requestDeadline != null
+                ? requestDeadline : RequestDeadline.standard(now);
 
         return new RequestSession(request, requestId, sessionId, userId,
                 sourceApp, inputType, normalizedPersonaId, clientMessageId, userInput,
-                now, traceContext, intentResult, toolGroupSelectionResult, context);
+                deadline, traceContext, intentResult, toolGroupSelectionResult, context);
     }
 
     private static String nonEmpty(String value, String fallback) {

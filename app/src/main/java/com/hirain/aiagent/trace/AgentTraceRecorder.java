@@ -213,7 +213,7 @@ public class AgentTraceRecorder {
                     decision.type().name());
             writer.putString(span, TraceAttributeKeys.TOOL_SAFETY_REASON_CODE,
                     decision.reasonCode().name());
-            if (decision.isDenied()) {
+            if (!decision.isAllowed()) {
                 writer.putString(span, TraceAttributeKeys.TOOL_SAFETY_REASON,
                         decision.reason());
             }
@@ -292,7 +292,7 @@ public class AgentTraceRecorder {
                     decision.type().name());
             writer.putString(span, TraceAttributeKeys.TOOL_SAFETY_REASON_CODE,
                     decision.reasonCode().name());
-            if (decision.isDenied()) {
+            if (!decision.isAllowed()) {
                 writer.putString(span, TraceAttributeKeys.TOOL_SAFETY_REASON,
                         decision.reason());
             }

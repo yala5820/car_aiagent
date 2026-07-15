@@ -13,7 +13,10 @@ import com.hirain.aiagent.memory.ContextMemoryGateway;
 import com.hirain.aiagent.runtime.RequestSession;
 import com.hirain.aiagent.safety.SafetyDecision;
 import com.hirain.aiagent.safety.ToolSafetyEngine;
+import com.hirain.aiagent.safety.confirmation.ToolConfirmationCoordinator;
+import com.hirain.aiagent.safety.confirmation.PendingToolAction;
 import com.hirain.aiagent.trace.AgentTraceRecorder;
+import com.hirain.aiagent.trace.TraceAttributeKeys;
 import com.hirain.aiagent.trace.TraceContext;
 import com.hirain.aiagent.trace.TraceSession;
 import com.hirain.aiagent.core.component.ModelCaller;
@@ -21,6 +24,7 @@ import com.hirain.aiagent.core.component.PostProcessor;
 import com.hirain.aiagent.core.component.ToolExecutor;
 
 import java.util.List;
+import java.util.ArrayList;
 
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -49,12 +53,21 @@ public class TextAgentLoopOrchestrator {
     private final ContextMemoryGateway memoryGateway;
     private final ContextAssemblyGateway contextAssemblyGateway;
     private final ToolSafetyEngine toolSafetyEngine;
+    private final ToolConfirmationCoordinator confirmationCoordinator;
     private final AgentLoopState state = new AgentLoopState();
 
     public TextAgentLoopOrchestrator(AgentConfig config,
                                      ContextMemoryGateway memoryGateway,
                                      ContextAssemblyGateway contextAssemblyGateway,
                                      ToolSafetyEngine toolSafetyEngine) {
+        this(config, memoryGateway, contextAssemblyGateway, toolSafetyEngine, null);
+    }
+
+    public TextAgentLoopOrchestrator(AgentConfig config,
+                                     ContextMemoryGateway memoryGateway,
+                                     ContextAssemblyGateway contextAssemblyGateway,
+                                     ToolSafetyEngine toolSafetyEngine,
+                                     ToolConfirmationCoordinator confirmationCoordinator) {
         if (config == null) throw new IllegalArgumentException("config must not be null");
         if (memoryGateway == null) throw new IllegalArgumentException("memoryGateway must not be null");
         if (contextAssemblyGateway == null) throw new IllegalArgumentException("contextAssemblyGateway must not be null");
@@ -63,6 +76,7 @@ public class TextAgentLoopOrchestrator {
         this.memoryGateway = memoryGateway;
         this.contextAssemblyGateway = contextAssemblyGateway;
         this.toolSafetyEngine = toolSafetyEngine;
+        this.confirmationCoordinator = confirmationCoordinator;
     }
 
     // ── 公开接口 ──
@@ -124,10 +138,11 @@ public class TextAgentLoopOrchestrator {
                 Scope iterScope = iterSpan != null ? iterSpan.makeCurrent() : null;
                 try {
 
-                    // 超时检查
-                    if (System.currentTimeMillis() - loopCtx.startTimeMs() > config.timeout().toMillis()) {
+                    // TEXT 全链只读取 RequestSession 的绝对 deadline，不再启动 AgentLoop 独立计时器。
+                    if (session.deadline().isExpired(System.currentTimeMillis())) {
                         state.markTimeout();
-                        return AgentResult.error(AgentResult.ErrorType.TIMEOUT, "Agent loop timed out");
+                        return AgentResult.error(AgentResult.ErrorType.TIMEOUT,
+                                "request_deadline_exceeded_before_context_assembly");
                     }
     
                     // Context Assembly
@@ -159,6 +174,12 @@ public class TextAgentLoopOrchestrator {
     
                     List<ChatMessage> requestMessages = assemblyResult.messages();
                     List<ToolSpecification> requestTools = assemblyResult.toolSpecifications();
+
+                    if (session.deadline().isExpired(System.currentTimeMillis())) {
+                        state.markTimeout();
+                        return AgentResult.error(AgentResult.ErrorType.TIMEOUT,
+                                "request_deadline_exceeded_before_model_call");
+                    }
     
                     // 模型调用前检查取消
                     if (cancelCheck.isCancelled()) {
@@ -200,7 +221,12 @@ public class TextAgentLoopOrchestrator {
                         if (llmSpan != null) llmSpan.end();
                     }
     
-                    // 模型返回后、写 AiMessage 前检查取消
+                    // 模型返回后、写 AiMessage 前先检查 deadline，再检查用户取消。
+                    if (session.deadline().isExpired(System.currentTimeMillis())) {
+                        state.markTimeout();
+                        return AgentResult.error(AgentResult.ErrorType.TIMEOUT,
+                                "request_deadline_exceeded_after_model_call");
+                    }
                     if (cancelCheck.isCancelled()) {
                         state.markError();
                         return AgentResult.error(AgentResult.ErrorType.CANCELLED,
@@ -212,11 +238,79 @@ public class TextAgentLoopOrchestrator {
                     // LLM 请求了工具调用 → ToolSafetyEngine → ToolExecutor → 回填
                     if (aiMessage.hasToolExecutionRequests()) {
                         List<ToolExecutionRequest> toolReqs = aiMessage.toolExecutionRequests();
+                        if (session.deadline().isExpired(System.currentTimeMillis())) {
+                            state.markTimeout();
+                            return AgentResult.error(AgentResult.ErrorType.TIMEOUT,
+                                    "request_deadline_exceeded_before_tool_execution");
+                        }
                         if (cancelCheck.isCancelled()) {
                             state.markError();
                             return AgentResult.error(AgentResult.ErrorType.CANCELLED,
                                     "cancelled_before_tool_execution");
                         }
+                        // 整批先完成一次 Safety 预检，确认型动作出现时保证零部分执行。
+                        List<SafetyDecision> safetyDecisions = new ArrayList<>(toolReqs.size());
+                        boolean confirmationRequired = false;
+                        for (ToolExecutionRequest req : toolReqs) {
+                            Span safetySpan = trace != null ? trace.startToolSafetyCheck() : null;
+                            SafetyDecision decision = SafetyDecision.allow();
+                            try {
+                                decision = toolSafetyEngine.check(req);
+                                safetyDecisions.add(decision);
+                                confirmationRequired |= decision.requiresConfirmation();
+                            } finally {
+                                if (trace != null) trace.finishToolSafetyCheck(safetySpan, decision);
+                            }
+                        }
+
+                        if (confirmationRequired) {
+                            String confirmationText;
+                            if (toolReqs.size() != 1) {
+                                confirmationText = "本次包含多个工具操作且其中有高风险动作，"
+                                        + "为避免部分执行，请拆分后重新请求。";
+                            } else if (confirmationCoordinator == null) {
+                                confirmationText = "该高风险操作需要文本二次确认，但当前确认通道不可用，本次未执行。";
+                            } else if (session.deadline().isExpired(System.currentTimeMillis())
+                                    || cancelCheck.isCancelled()) {
+                                state.markError();
+                                return AgentResult.error(AgentResult.ErrorType.CANCELLED,
+                                        "cancelled_before_pending_confirmation");
+                            } else {
+                                ToolExecutionRequest pendingRequest = toolReqs.get(0);
+                                SafetyDecision pendingDecision = safetyDecisions.get(0);
+                                confirmationText = confirmationCoordinator.createPending(
+                                        session.sessionId(), session.requestId(), pendingRequest,
+                                        pendingDecision.reason());
+                                PendingToolAction pendingAction =
+                                        confirmationCoordinator.pendingAction();
+                                if (pendingAction != null && session.traceContext() != null
+                                        && session.traceContext().session() != null) {
+                                    session.traceContext().session().setAttribute(
+                                            TraceAttributeKeys.CONFIRMATION_ID,
+                                            pendingAction.confirmationId());
+                                    session.traceContext().session().setAttribute(
+                                            TraceAttributeKeys.CONFIRMATION_STATUS, "PENDING");
+                                }
+                                if (session.deadline().isExpired(System.currentTimeMillis())
+                                        || cancelCheck.isCancelled()) {
+                                    confirmationCoordinator.cancelPendingForOriginalRequest(
+                                            session.requestId());
+                                    state.markError();
+                                    return AgentResult.error(AgentResult.ErrorType.CANCELLED,
+                                            "cancelled_after_pending_confirmation");
+                                }
+                            }
+
+                            for (ToolExecutionRequest req : toolReqs) {
+                                chatMemory.add(new ToolExecutionResultMessage(
+                                        req.id(), req.name(),
+                                        "[CONFIRMATION_REQUIRED] " + confirmationText));
+                            }
+                            chatMemory.add(AiMessage.from(confirmationText));
+                            state.markCompleted();
+                            return AgentResult.success(confirmationText, i + 1, 0L, List.of());
+                        }
+
                         for (int toolIdx = 0; toolIdx < toolReqs.size(); toolIdx++) {
                             ToolExecutionRequest req = toolReqs.get(toolIdx);
                             Span toolSpan = trace != null
@@ -224,6 +318,18 @@ public class TextAgentLoopOrchestrator {
                                             io.opentelemetry.context.Context.current()) : null;
                             Scope toolScope = toolSpan != null ? toolSpan.makeCurrent() : null;
                             try {
+                                if (session.deadline().isExpired(System.currentTimeMillis())) {
+                                    // 为未执行 Tool 闭合 ToolExchange，但绝不进入 Safety 或 dispatch。
+                                    for (int remaining = toolIdx; remaining < toolReqs.size(); remaining++) {
+                                        ToolExecutionRequest unexReq = toolReqs.get(remaining);
+                                        chatMemory.add(new ToolExecutionResultMessage(
+                                                unexReq.id(), unexReq.name(),
+                                                "[TIMEOUT] request deadline exceeded"));
+                                    }
+                                    state.markTimeout();
+                                    return AgentResult.error(AgentResult.ErrorType.TIMEOUT,
+                                            "request_deadline_exceeded_during_tool_execution");
+                                }
                                 if (cancelCheck.isCancelled()) {
                                     // 为所有未执行工具写入 cancelled ToolResult，保证 ToolExchange 闭合
                                     for (int remaining = toolIdx; remaining < toolReqs.size(); remaining++) {
@@ -236,22 +342,24 @@ public class TextAgentLoopOrchestrator {
                                     return AgentResult.error(AgentResult.ErrorType.CANCELLED,
                                             "cancelled_during_tool_execution");
                                 }
-                                // Stage 1: tool.safety_check
-                                Span safetySpan = trace != null ? trace.startToolSafetyCheck() : null;
-                                SafetyDecision decision = SafetyDecision.allow();
-                                try {
-                                    decision = toolSafetyEngine.check(req);
-                                } finally {
-                                    if (trace != null) {
-                                        trace.finishToolSafetyCheck(safetySpan, decision);
-                                    }
-                                }
+                                SafetyDecision decision = safetyDecisions.get(toolIdx);
     
                                 String toolResult;
                                 boolean executionSucceeded = false;
                                 if (decision.isDenied()) {
                                     toolResult = toolSafetyEngine.formatDenyResult(decision);
                                 } else {
+                                    if (session.deadline().isExpired(System.currentTimeMillis())) {
+                                        for (int remaining = toolIdx; remaining < toolReqs.size(); remaining++) {
+                                            ToolExecutionRequest unexReq = toolReqs.get(remaining);
+                                            chatMemory.add(new ToolExecutionResultMessage(
+                                                    unexReq.id(), unexReq.name(),
+                                                    "[TIMEOUT] request deadline exceeded"));
+                                        }
+                                        state.markTimeout();
+                                        return AgentResult.error(AgentResult.ErrorType.TIMEOUT,
+                                                "request_deadline_exceeded_before_tool_dispatch");
+                                    }
                                     // Stage 2: tool.dispatch（接入真实 DispatchDiagnostics）
                                     Span dispatchSpan = trace != null ? trace.startToolDispatch(req.name()) : null;
                                     long dispatchStartMs = System.currentTimeMillis();
@@ -330,6 +438,12 @@ public class TextAgentLoopOrchestrator {
                             }
                         }
     
+                        if (session.deadline().isExpired(System.currentTimeMillis())) {
+                            state.markTimeout();
+                            return AgentResult.error(AgentResult.ErrorType.TIMEOUT,
+                                    "request_deadline_exceeded_after_tool_execution");
+                        }
+
                         // 工具循环因取消中断 → 返回
                         if (cancelCheck.isCancelled()) {
                             state.markError();
@@ -349,6 +463,11 @@ public class TextAgentLoopOrchestrator {
                         }
                     }
     
+                    if (session.deadline().isExpired(System.currentTimeMillis())) {
+                        state.markTimeout();
+                        return AgentResult.error(AgentResult.ErrorType.TIMEOUT,
+                                "request_deadline_exceeded_before_result");
+                    }
                     if (cancelCheck.isCancelled()) {
                         state.markError();
                         return AgentResult.error(AgentResult.ErrorType.CANCELLED,

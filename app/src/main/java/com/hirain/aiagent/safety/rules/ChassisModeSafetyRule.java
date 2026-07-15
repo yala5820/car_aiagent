@@ -4,6 +4,7 @@ import com.google.gson.JsonElement;
 import com.hirain.aiagent.VirtualStateMachine.VehicleStateMachine;
 import com.hirain.aiagent.safety.SafetyCheckContext;
 import com.hirain.aiagent.safety.SafetyDecision;
+import com.hirain.aiagent.safety.SafetyCheckMode;
 import com.hirain.aiagent.safety.SafetyRule;
 
 /** 底盘模式规则：不区分座舱位置，车辆只有在完全静止时才允许切换。 */
@@ -32,10 +33,16 @@ public final class ChassisModeSafetyRule implements SafetyRule {
         }
 
         if (speedKmh == 0) {
-            return SafetyDecision.allow();
+            return context.mode() == SafetyCheckMode.CONFIRMED_RECHECK
+                    ? SafetyDecision.allow()
+                    : SafetyDecision.requireConfirmation("车辆静止状态下切换底盘模式");
         }
+        SafetyDecision.ReasonCode reasonCode =
+                context.mode() == SafetyCheckMode.CONFIRMED_RECHECK
+                        ? SafetyDecision.ReasonCode.CONFIRMATION_STATE_CHANGED
+                        : SafetyDecision.ReasonCode.CHASSIS_MODE_REQUIRES_STOPPED;
         return SafetyDecision.deny(
-                SafetyDecision.ReasonCode.CHASSIS_MODE_REQUIRES_STOPPED,
+                reasonCode,
                 "当前车速为 " + speedKmh + " km/h，车辆完全静止后才能切换底盘模式。"
         );
     }

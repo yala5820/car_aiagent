@@ -73,4 +73,28 @@ public class RuntimeResponseMapperTest {
         assertEquals("CANCELLED", response.getStatus());
         assertEquals("用户取消", response.getErrorDetail());
     }
+
+    @Test
+    public void toAgentResponse_mapsBusyWithoutChangingAidlShape() {
+        RuntimeResult busy = RuntimeResult.busy(
+                "req-2", "session-1", "user-1", "chat", "client-2", 2_000L);
+
+        AgentResponse response = new RuntimeResponseMapper().toAgentResponse(busy);
+
+        assertEquals(false, response.isSuccess());
+        assertEquals("BUSY", response.getErrorType());
+        assertEquals("BUSY", response.getStatus());
+        assertTrue(response.getText().contains("系统正忙"));
+    }
+
+    @Test
+    public void toAgentResponse_mapsDuplicateRequest() {
+        RuntimeResult duplicate = RuntimeResult.duplicate(
+                "req-1", "session-1", "user-1", "chat", "client-1", 2_000L);
+
+        AgentResponse response = new RuntimeResponseMapper().toAgentResponse(duplicate);
+
+        assertEquals("DUPLICATE_REQUEST", response.getErrorType());
+        assertEquals("DUPLICATE_REQUEST", response.getStatus());
+    }
 }

@@ -8,6 +8,9 @@ public final class TraceAttributeKeys {
     public static final String INPUT_TYPE = "input.type";
     public static final String USER_INPUT = "user.input";
     public static final String USER_INPUT_LENGTH = "user.input.length";
+    public static final String REQUEST_ADMISSION_STATUS = "request.admission.status";
+    public static final String REQUEST_DEADLINE_AT_MS = "request.deadline.at_ms";
+    public static final String REQUEST_TIMEOUT_MS = "request.timeout_ms";
 
     public static final String AGENT_PERSONA = "agent.persona";
     public static final String AGENT_ITERATION = "agent.iteration";
@@ -50,6 +53,10 @@ public final class TraceAttributeKeys {
     public static final String TOOL_INVOKE_SUCCESS = "tool.invoke_success";
     public static final String TOOL_WRITEBACK_RESULT = "tool.writeback_result";
     public static final String TOOL_WRITEBACK_TO_MEMORY = "tool.writeback_to_memory";
+
+    public static final String CONFIRMATION_ID = "safety.confirmation.id";
+    public static final String CONFIRMATION_STATUS = "safety.confirmation.status";
+    public static final String CONFIRMATION_REASON_CODE = "safety.confirmation.reason_code";
 
     public static final String MEMORY_OPERATION = "memory.operation";
     public static final String MEMORY_INPUT_CHARS = "memory.input_chars";

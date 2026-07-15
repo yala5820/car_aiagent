@@ -13,6 +13,7 @@ import com.hirain.aiagent.runtime.RequestSession;
 import com.hirain.aiagent.toolgroup.ToolGroupId;
 import com.hirain.aiagent.toolgroup.ToolGroupRegistry;
 import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
+import com.hirain.aiagent.toolgroup.ToolGroupSelectionStatus;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,8 +22,8 @@ import java.util.Map;
 import dev.langchain4j.agent.tool.ToolSpecification;
 
 /**
- * 工具组上下文 Provider — 输出选中工具组的 ToolSpecification 列表。
- * CHAT_ONLY 时返回 MODE_NONE 空集合。
+ * 工具组上下文 Provider — 仅为 SELECTED 状态输出 ToolSpecification 列表。
+ * 其他状态均返回 MODE_NONE，避免原因文本变化导致工具边界被意外放宽。
  */
 public class ToolGroupContextProvider implements ContextProvider {
 
@@ -38,10 +39,8 @@ public class ToolGroupContextProvider implements ContextProvider {
 
     @Override
     public boolean required(RequestSession session, ContextBuildInput input) {
-        // 非 CHAT_ONLY 时 required
         ToolGroupSelectionResult sel = session != null ? session.toolGroupSelectionResult() : null;
-        if (sel == null || sel.selectionReason() == null) return true;
-        return !"CHAT_ONLY".equals(sel.selectionReason());
+        return sel == null || sel.status() == ToolGroupSelectionStatus.SELECTED;
     }
 
     @Override
@@ -52,19 +51,23 @@ public class ToolGroupContextProvider implements ContextProvider {
         List<String> toolNames = selection != null
                 ? selection.selectedToolNames() : List.of();
 
-        // CHAT_ONLY: 返回 MODE_NONE 空集合 SUCCESS
-        if (selection != null && "CHAT_ONLY".equals(selection.selectionReason())) {
+        // Runtime 正常情况下会提前截断澄清与失败关闭；Provider 仍坚持空工具防线。
+        if (selection == null || selection.status() != ToolGroupSelectionStatus.SELECTED) {
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("selection_status", selection != null ? selection.status().name() : "MISSING");
+            metadata.put("selection_reason", selection != null ? selection.selectionReason() : "");
             return ContextProviderResult.success(name(), List.of(
                     new ToolContextContribution("tool_group", ContextVisibility.MODEL_VISIBLE,
                             ContextTrustLevel.TRUSTED_SYSTEM, ContextPriority.CRITICAL,
                             ContextLifecycle.REQUEST_STATIC, false, name(),
-                            ToolContextContribution.MODE_NONE, List.of(), Map.of())));
+                            ToolContextContribution.MODE_NONE, List.of(), metadata)));
         }
 
         // 非 CHAT_ONLY: 从 ToolRegistry 解析规格
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("selected_group_count", groupIds.size());
         metadata.put("selected_tool_count", toolNames.size());
+        metadata.put("selection_status", selection.status().name());
         metadata.put("selection_reason", selection != null ? selection.selectionReason() : "");
 
         List<ToolSpecification> specs;

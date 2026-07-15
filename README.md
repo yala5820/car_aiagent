@@ -13,7 +13,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 - 使用 LangChain4j 1.16.3 的消息、模型与 Tool Calling 原语，自研 Runtime / Context / AgentLoop 负责业务编排
 - 集中式反射工具调度（ToolRegistry + ToolDispatcher），消除样板代码
 - 组件化 Agent 循环（AgentLoopOrchestrator / TextAgentLoopOrchestrator）
-- 独立确定性的车控安全审核（ToolSafetyEngine），在工具执行前结合标准化参数与车辆状态作出 ALLOW / DENY 决策
+- 独立确定性的车控安全审核（ToolSafetyEngine），支持 ALLOW / DENY / REQUIRE_CONFIRMATION，并通过下一条普通 TEXT 请求完成高风险动作二次确认
 - 外部化 Prompt 管理（`assets/prompts/` + PromptTemplate），支持 TEXT Persona 模板选择
 - 四层记忆系统（Session / 长期记忆 / 压缩 / 提取）
 - 全链路追踪（OpenTelemetry + Phoenix）
@@ -43,6 +43,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 | **Phase 17** | **Context 上下文模块骨架**：建立 ContextFrame、Provider、预算、Trace 与 Runtime 取消检查，并验证上下文能够进入模型可见输入 |
 | **Phase 18** | **Context TEXT 独占切换**：11 个 Provider 统一输出 Contribution；按 `prepare` / `assemble` 分离静态与动态上下文；`ContextMessageAssembler` 独占生成 TEXT 消息和工具规格；补齐预算、消息序列、工具交换、取消和端到端测试 |
 | **Phase 19** | **Context / Agent Trace 收口**：建立 `agent.request → agent.loop → iteration → context / gen_ai / tool → response.dispatch` Trace 树，补充 Provider、消息、工具 schema 与 Tool 执行阶段诊断；仍保留少量准确性和设备侧验收项 |
+| **Phase 20** | **P0 运行时与车控安全收口**：单 TEXT 准入、统一 30 秒 deadline、模型 HTTP Call 取消、ToolGroup fail-closed、高风险动作文本二次确认 |
 
 ---
 
@@ -80,7 +81,8 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 │  │  运行时协调层（Service 与 AgentLoop 之间）   │            │
 │  │  IntentRouter → ToolGroupSelector            │            │
 │  │  ├─ RequestSession（请求事实快照）           │            │
-│  │  ├─ ActiveRequestRegistry（终态抢占）        │            │
+│  │  ├─ ActiveRequestRegistry（单槽位准入 + 终态抢占）│         │
+│  │  ├─ RequestDeadline / RequestCallRegistry    │            │
 │  │  └─ ContextOrchestrator.prepare()            │            │
 │  │      8 个 REQUEST_STATIC Provider            │            │
 │  └──────────────────┬──────────────────────────┘            │
@@ -94,6 +96,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 │  │  ├─ 预算与消息序列校验                      │            │
 │  │  └─ ChatRequest(messages, toolSpecifications)│           │
 │  │     → ModelCaller → ToolSafetyEngine → Tool│            │
+│  │       高风险动作 → 普通 TEXT 二次确认       │            │
 │  │     → PostProcessor → Terminator → Collector│            │
 │  ├─────────────────────────────────────────────┤            │
 │  │           Tool 调用层（集中式反射调度）         │            │
@@ -187,6 +190,9 @@ AIAgent/
 │   │   │   │   ├── RuntimeResponseMapper.java # RuntimeResult → AgentResponse 映射（含 status/errorDetail 等元信息）
 │   │   │   │   ├── ActiveRequest.java            # 运行中请求 + CAS 终态抢占
 │   │   │   │   ├── ActiveRequestRegistry.java    # 请求注册 + 取消 + finished 60s 缓存
+│   │   │   │   ├── RequestAdmission.java         # Runtime 前准入快照
+│   │   │   │   ├── RequestDeadline.java          # TEXT 端到端 30 秒绝对期限
+│   │   │   │   ├── RequestCallRegistry.java      # requestId → 同步模型 HTTP Call
 │   │   │   │   ├── IdGenerator.java / UuidIdGenerator.java
 │   │   │   │   └── TimeProvider.java / SystemTimeProvider.java
 │   │   │   │
@@ -203,6 +209,7 @@ AIAgent/
 │   │   │   │   ├── ToolGroupRegistry.java       # 注册表（defaultRegistry 全量 46 个 toolName 注册）
 │   │   │   │   ├── ToolGroupSelector.java       # 选择器接口
 │   │   │   │   ├── DefaultToolGroupSelector.java # 基于 IntentResult + 弱车载关键词的选择
+│   │   │   │   ├── ToolGroupSelectionStatus.java # 四种稳定选择状态
 │   │   │   │   └── ToolGroupSelectionResult.java # 选择结果
 │   │   │   │
 │   │   │   ├── conversation/                  # 会话管理门面
@@ -262,9 +269,11 @@ AIAgent/
 │   │   │   ├── safety/                     # 独立 Tool 执行前安全审核
 │   │   │   │   ├── ToolSafetyEngine.java       # 统一审核入口与规则调度
 │   │   │   │   ├── SafetyCheckContext.java     # 工具名 + 标准化参数
-│   │   │   │   ├── SafetyDecision.java         # ALLOW / DENY + 稳定原因码
+│   │   │   │   ├── SafetyDecision.java         # ALLOW / DENY / REQUIRE_CONFIRMATION
+│   │   │   │   ├── SafetyCheckMode.java        # INITIAL / CONFIRMED_RECHECK
 │   │   │   │   ├── SafetyRule.java             # 单条规则接口
 │   │   │   │   ├── DefaultSafetyRules.java     # 工具名到规则列表的固定映射
+│   │   │   │   ├── confirmation/               # 单 Session 文本确认状态机
 │   │   │   │   └── rules/                      # 车控业务安全规则
 │   │   │   │       ├── DoorUnlockSafetyRule.java
 │   │   │   │       └── ChassisModeSafetyRule.java
@@ -355,13 +364,13 @@ AIAgent/
 - **Camera 接入**：每 1 秒请求一次前向摄像头抓拍
 - **场景识别循环**：抓拍 → SceneMatch 识别 → 场景变化 → AgentLoopOrchestrator 主动响应
 - **Listener 回调推送**：`onAIResponse(AgentResponse)` 统一回调
-- **15 秒超时保护**（经 ActiveRequestRegistry 终态抢占）
+- **TEXT 统一 30 秒端到端 deadline**（经 ActiveRequestRegistry 终态抢占，并可取消同步模型 HTTP Call）
 
 ### 4.2 TextAgentLoopOrchestrator（TEXT 专用循环引擎）
 
 **文件：** `core/TextAgentLoopOrchestrator.java`
 
-TEXT 请求的唯一 Agent 执行入口。构造器接收 `AgentConfig`、`ContextMemoryGateway`、`ContextAssemblyGateway` 和共享的 `ToolSafetyEngine`，不持有 PromptManager 或固定工具规格。每轮模型调用使用的消息和工具全部来自 `ContextAssemblyResult`：
+TEXT 请求的唯一 Agent 执行入口。构造器接收 `AgentConfig`、`ContextMemoryGateway`、`ContextAssemblyGateway`、共享的 `ToolSafetyEngine` 与确认协调器，不持有 PromptManager 或固定工具规格。每轮模型调用使用的消息和工具全部来自 `ContextAssemblyResult`：
 
 ```
 execute(session, prepareResult)
@@ -372,7 +381,9 @@ execute(session, prepareResult)
            → ContextAssemblyResult(messages, toolSpecifications, budgetReport)
       ② 预算 & 取消检查
       ③ ChatRequest(messages, toolSpecifications) → ModelCaller
-      ④ LLM 返回 ToolCall → ToolSafetyEngine → ToolExecutor / 拒绝结果写回 → continue
+      ④ LLM 返回 ToolCall → 整批 Safety 预检
+           ├─ ALLOW / DENY → 执行或拒绝结果写回
+           └─ REQUIRE_CONFIRMATION → 整批零执行，保存单个原始动作并返回确认文本
       ⑤ LLM 返回文本 → PostProcessor → Terminator → ResultCollector → return
   → max iterations → AgentResult.error()
 ```
@@ -465,13 +476,15 @@ execute(session, prepareResult)
 
 **文件：** `runtime/ActiveRequest.java` / `runtime/ActiveRequestRegistry.java`
 
-提供协作式请求取消能力，不承诺硬中断 LLM HTTP 调用：
+为当前单 Session 场景提供 TEXT 单槽位准入、统一 deadline、底层模型调用取消和唯一终态：
 
 - `ActiveRequest`：不可变请求快照（requestId/sessionId/userId/personaId/clientMessageId） + CAS 终态标记
 - `ActiveRequest.TerminalState`：RUNNING → COMPLETED / CANCELLED / TIMEOUT / FAILED（只有 RUNNING→终态一次有效）
-- `ActiveRequestRegistry`：`ConcurrentHashMap` 管理活跃请求 + `finishedRequests` 缓存（60s TTL 防 race）
+- `ActiveRequestRegistry`：原子单槽位；第二个 TEXT 请求立即返回 BUSY，不进入 Runtime 或排队；完成 requestId 缓存 60 秒防重放
+- `RequestDeadline`：从 Service 准入时开始计算绝对 30 秒期限，贯穿 Runtime、Context、AgentLoop 和模型 adapter
+- `RequestCallRegistry`：同步 OkHttp `Call` 按 requestId 登记；cancel / timeout 会调用 `Call.cancel()`，并处理“先取消、后登记”的竞态
 - **四路终态抢占**：cancel AIDL、timeout runnable、worker success、worker exception 通过 `tryComplete` 竞争终态；只有首次抢占成功方允许发送 listener 响应
-- **竞态修复**：取消后 Worker 的 `isCancelled` 路径不调用 `finish()`，将请求清理责任留给 cancel handler 独占
+- **槽位释放**：终态响应可以先发出，但执行体真正退出前不释放单槽位，避免旧调用与新调用重叠
 
 ### 4.10 VehicleStateMachine（虚拟车辆状态机）
 
@@ -532,10 +545,10 @@ handleTextRequest() → traceManager.startAgentRequest() → agentRuntime.startS
 
 - 13 个 `ToolGroupId`：11 个基础/领域组 + `COMMON_VEHICLE_GROUP`（车辆聚合）+ `ALL_SAFE_DEMO_GROUP`（全量）
 - `ToolGroupRegistry.defaultRegistry()`：全量 46 个 toolName 注册，支持按 toolName 反查、多组合并去重
-- `DefaultToolGroupSelector`：11 种 IntentTag → ToolGroupId 映射，车辆意图附加 `BASIC_STATUS_GROUP`，UNKNOWN 含弱车载关键词时选 `COMMON_VEHICLE_GROUP`
-- `ToolGroupSelectionResult`：除 group/tool/reason/confidence 外，还携带 requiredContextKeys、风险级别、全量兜底和聚合组标记
-- `CHAT_ONLY_GROUP` 生成空工具集；明确意图生成所选组工具；UNKNOWN 无弱车载关键词时通过 `ALL_SAFE_DEMO_GROUP` 兜底全量工具
-- `ToolGroupContextProvider` 从 `ToolRegistry` 解析规格，最终由 `ContextMessageAssembler` 写入 `ChatRequest.toolSpecifications()`
+- `DefaultToolGroupSelector`：明确意图只选择对应业务组；普通 CHAT / UNKNOWN 使用空工具；弱车控表达要求先澄清
+- `ToolGroupSelectionResult`：使用 `SELECTED / CHAT_ONLY / CLARIFICATION_REQUIRED / FAILED_CLOSED` 稳定状态，不再解析原因文本决定权限
+- Selector 返回 null、抛异常、返回全量或聚合组时，Runtime 失败关闭并在 Context / LLM 前终止
+- `ToolGroupContextProvider` 只有在 `SELECTED` 状态下解析规格；其他状态一律输出空工具
 - 聚合组 `riskLevel` 遵循最高风险上浮规则（`COMMON_VEHICLE_GROUP` 和 `ALL_SAFE_DEMO_GROUP` 均为 HIGH）
 - ToolGroup 不负责执行工具；实际调用由 ToolSafetyEngine 先审核，再由 ToolRegistry / ToolDispatcher 完成
 
@@ -611,12 +624,15 @@ Service worker → Context.prepare → Runtime gate → iteration/assemble → m
 
 **文件：** `safety/`
 
-ToolSafetyEngine 是独立、轻量、确定性的车控安全审核入口。AgentLoop 在 ToolExecutor 执行前只调用一次 `check(ToolExecutionRequest)`；Engine 从请求中提取工具名称和标准化 JSON 参数，规则再按需从 `VehicleStateMachine` 读取车辆状态，不依赖完整的 `AgentLoopContext`。
+ToolSafetyEngine 是独立、轻量、确定性的车控安全审核入口。AgentLoop 在 ToolExecutor 前对整批 Tool 完成一次 `INITIAL` 审核；确认请求使用同一个 Engine 的 `CONFIRMED_RECHECK` 再读实时状态，不依赖完整的 `AgentLoopContext`。
 
 - `DefaultSafetyRules` 使用固定的 `Map<String, List<SafetyRule>>` 保存工具与规则的对应关系，后续新增十余条规则时仍可直接定位和测试
 - 已注册安全工具若配置为空规则列表、null 规则或非法工具名，会在 Engine 创建时直接失败，避免配置错误静默变成默认放行
-- 当前 `DoorUnlockSafetyRule` 只在解锁时生效，要求车速等于 0；上锁不受该规则限制
-- 当前 `ChassisModeSafetyRule` 要求车速等于 0，与座舱位置和 Persona 无关
+- 当前 `DoorUnlockSafetyRule` 在静止解锁时要求二次确认；上锁直接放行，行驶中解锁直接拒绝
+- 当前 `ChassisModeSafetyRule` 在静止切换时要求二次确认；行驶中直接拒绝
+- 只接受 trim 后完全等于“确认执行”或“取消执行”的普通 TEXT；PendingAction 仅存内存、TTL 30 秒、原子消费且只保存原始 Tool 与参数
+- 确认前重新读取车速；状态变化、过期、取消、重复或并发确认均不执行；多 Tool 确认批次零部分执行
+- VOICE / scene / legacy 路径遇到 REQUIRE_CONFIRMATION 时返回确认通道不可用，不会 dispatch
 - 没有专用规则的低风险工具默认 ALLOW；有专用规则但参数、车速不可用或规则异常时返回稳定的 DENY 原因码
 - DENY 时不执行工具，而是把结构化拒绝结果作为 ToolResult 写回模型，由模型自然向用户说明原因
 - `VehicleStateMachine` 继续负责执行阶段的参数校验与状态收敛，安全模块只承担执行前业务判断
@@ -729,13 +745,13 @@ session.close() → scope.close() + rootSpan.end()
 | 模块 | 阶段状态 | 当前结论与主要缺口 |
 |------|----------|--------------------|
 | 对外 AIDL 协议 | 已完成 | 主请求、会话 CRUD、取消与 Listener 接口已落地；仍需调用方与车机联调 |
-| AgentRuntime | 基本完成 | TEXT 已统一经过 Session、Intent、ToolGroup、Context、取消与结果映射；VOICE/SCENE 等仍使用兼容链路 |
+| AgentRuntime | 基本完成 | TEXT 已具备单槽位准入、30 秒 deadline、HTTP Call 取消、唯一终态与 requestId 防重放；VOICE/SCENE 等仍使用兼容链路 |
 | TEXT Context | 基本完成 | 8 静态 + 3 动态 Provider；消息和工具规格已由 Context 独占生成；长会话恢复与 Legacy 清理未完成 |
-| TEXT AgentLoop | 基本完成 | 多轮模型/工具循环、ToolSafetyEngine 审核、写回和终止链路已接通；真实网络取消仍是协作式而非硬中断 |
+| TEXT AgentLoop | 基本完成 | 多轮循环、整批 Safety 预检、确认与状态复核已接通；模型同步 HTTP Call 可取消，真实车控执行仍未接入 |
 | IntentRouter | Demo 完成 | 11 类关键词/正则意图，低成本且可解释；复杂自然语言仍依赖 fallback |
-| ToolGroup | Demo 完成 | 13 个工具组；通过 Context 实际限制 TEXT 可见工具；全量 fallback 仍保留 Demo 容错边界 |
+| ToolGroup | P0 基线完成 | 13 个工具组；明确意图最小暴露，普通聊天空工具，不确定/异常/聚合结果失败关闭 |
 | ToolRegistry / Dispatcher | 基本完成 | 46 个 `@Tool` 统一反射注册和调度；工具失败聚合状态仍有少量 Trace 语义待统一 |
-| Tool Safety Engine | Demo 完成 | 统一执行前入口、固定规则映射、稳定拒绝码和 LLM 自然解释链路已接通；当前仅覆盖车门解锁与底盘模式两类显式规则 |
+| Tool Safety Engine | P0 基线完成 | 统一入口、HIGH 规则漏配拒绝、文本确认、30 秒 PendingAction、确认前复核和最多一次执行已接通；仍不是量产功能安全方案 |
 | Prompt / Persona | 基本完成 | 11 个模板；支持 chat/friendly/concise TEXT System Prompt；更复杂动态策略未实现 |
 | Session 记忆 | 基本完成 | SQLite 持久化、会话 CRUD 和模型可见历史切换已接通；固定 50 条窗口可能切断 ToolExchange |
 | 长期记忆 | 可用 | 提取、存储、按 userId 注入已接通；降级状态报告和衰减策略仍待完善 |
@@ -757,8 +773,8 @@ session.close() → scope.close() + rootSpan.end()
 
 ### 6.2 当前验证基线
 
-- JVM 单元测试结果：277 tests，0 failures，0 errors，0 skipped。
-- 本轮执行 `.\gradlew.bat testDebugUnitTest assembleDebug`：`BUILD SUCCESSFUL`；Gradle 判定单测任务为 up-to-date，并完成 Debug APK 打包。
+- JVM 单元测试结果：339 tests，0 failures，0 errors，0 skipped。
+- 本轮执行 `.\gradlew.bat :app:testDebugUnitTest` 与 `.\gradlew.bat :app:assembleDebug`：均 `BUILD SUCCESSFUL`。
 - 尚未由 JVM 测试证明：真实 Qwen token 偏差、Phoenix 长字段展示、真实 SQLite 超长工具会话、车机并发/取消竞争和真车 SOA 控制。
 
 ---
@@ -815,6 +831,9 @@ adb reverse tcp:6006 tcp:6006
 - [ToolGroup 模块概览](docs/overview/toolgroup-module-overview.md)
 - [Memory 模块概览](docs/overview/memory-module-overview.md)
 - [Trace 模块概览](docs/overview/trace-module-overview.md)
+- [Agent 架构与运行流程评估](docs/overview/agent-architecture-and-runtime-flow-evaluation.md)
+- [Tool Safety 当前实现与边界](docs/overview/tool-safety-policy-engine-current-state.md)
+- [三个 P0 改进计划与实施状态](docs/plan/2026-07-13-agent-p0-runtime-tool-safety-improvement-plan.md)
 - [Context Full Control 设计](docs/design/2026-07-11-context-full-control-design.md)
 
-**当前结论：** AIAgent 的 AIDL 协议、TEXT Runtime、Context 输入控制、工具调度、Prompt、会话记忆和 Trace 骨架已经成型，项目已处于“可运行 Demo + 核心架构收口”阶段。下一步重点不是重写现有架构，而是完成长会话预算恢复、Trace 准确性与设备侧验收，并将虚拟车控逐步替换为真实 SOA 能力。
+**当前结论：** AIAgent 的 AIDL 协议、TEXT Runtime、Context 输入控制、工具调度、Prompt、会话记忆和 Trace 骨架已经成型；三个 P0 已形成“真实车辆接入前的本地安全基础”。下一步重点是长会话预算恢复、设备侧故障评测、调用方鉴权，以及真实 SOA 的回执、幂等、执行后状态确认与补偿。
