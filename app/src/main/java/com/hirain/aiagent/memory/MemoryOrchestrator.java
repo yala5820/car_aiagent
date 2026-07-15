@@ -82,7 +82,7 @@ public class MemoryOrchestrator implements SessionIdResolver, ContextMemoryGatew
      * <p>
      * 注意：此重载压缩写回直接调用 {@code sessionStore.updateMessages()}，
      * 不通过 {@link SessionChatMemoryProvider#replaceMessages}，因此不会同步 provider 缓存中的 live ChatMemory。
-     * 这是 legacy 路径的限制。Phase 4 起 TEXT 主路径必须使用带 {@code sessionId} 的重载。
+     * 这是非 TEXT 兼容路径的限制；TEXT 主路径使用带 {@code sessionId} 的重载。
      */
     public void onTurnComplete(String userId, List<ChatMessage> currentMessages,
                                 int tokenEstimate, String userMessage, String aiResponse,
@@ -106,10 +106,10 @@ public class MemoryOrchestrator implements SessionIdResolver, ContextMemoryGatew
     /**
      * 每轮对话完成后调用：带 sessionId 的重载。
      * <p>
-     * 设计原因：Phase 4 起 TEXT 主路径使用此重载，压缩写回通过
+     * TEXT 主路径使用此重载，压缩写回通过
      * {@link SessionChatMemoryProvider#replaceMessages} 同步 live ChatMemory 与 store。
      *
-     * @param sessionId Phase 0 已解析的 sessionId（非空）
+     * @param sessionId Runtime 已解析的 sessionId（非空）
      */
     public void onTurnComplete(String userId, String sessionId, List<ChatMessage> currentMessages,
                                 int tokenEstimate, String userMessage, String aiResponse,
@@ -254,11 +254,16 @@ public class MemoryOrchestrator implements SessionIdResolver, ContextMemoryGatew
     /**
      * 获取指定 session 的 ChatMemory（TEXT 主路径使用）。
      *
-     * @param sessionId  Phase 0 已解析的非空 sessionId
-     * @param maxMessages 窗口大小（通常来自 config.maxMemoryMessages()）
+     * @param sessionId Runtime 已解析的非空 sessionId
+     * @param maxMessages 兼容参数；TEXT 持久化历史不使用固定消息窗口
      */
     public dev.langchain4j.memory.ChatMemory chatMemoryForSession(String sessionId, int maxMessages) {
-        return sessionChatMemoryProvider.getOrCreate(sessionId, maxMessages);
+        return sessionChatMemoryProvider.getOrCreate(sessionId);
+    }
+
+    @Override
+    public dev.langchain4j.memory.ChatMemory chatMemoryForSession(String sessionId) {
+        return sessionChatMemoryProvider.getOrCreate(sessionId);
     }
 
     /**
@@ -296,13 +301,26 @@ public class MemoryOrchestrator implements SessionIdResolver, ContextMemoryGatew
      * 新 Provider 应优先调用此方法而非 {@link #getMemorySnapshot(String)}。
      */
     public MemorySnapshot sessionMemorySnapshot(String sessionId, int maxMessages) {
-        List<ChatMessage> messages = readSessionMessages(sessionId);
-        int max = Math.max(maxMessages, 1);
-        List<ChatMessage> windowed = messages.size() > max
-                ? messages.subList(messages.size() - max, messages.size())
-                : messages;
-        return new MemorySnapshot(sessionId, windowed,
-                estimateTokensForSnapshot(windowed), extractExistingSummary(windowed), true);
+        return sessionMemorySnapshot(sessionId);
+    }
+
+    @Override
+    public MemorySnapshot sessionMemorySnapshot(String sessionId) {
+        Object lock = sessionChatMemoryProvider.sessionLock(sessionId);
+        synchronized (lock) {
+            List<ChatMessage> original = readSessionMessages(sessionId);
+            SessionHistorySequenceValidator.ValidationResult validation =
+                    SessionHistorySequenceValidator.validate(original);
+            if (validation.repaired()) {
+                sessionChatMemoryProvider.replaceMessages(sessionId, validation.messages());
+            }
+            List<ChatMessage> storedMessages = validation.messages();
+            String summary = extractExistingSummary(storedMessages);
+            List<ChatMessage> messages = withoutSummaryMessage(storedMessages);
+            return new MemorySnapshot(sessionId, messages,
+                    estimateTokensForSnapshot(storedMessages), summary, true,
+                    validation.repaired(), validation.removedMessageCount(), validation.repairReason());
+        }
     }
 
     /**
@@ -339,21 +357,38 @@ public class MemoryOrchestrator implements SessionIdResolver, ContextMemoryGatew
     /**
      * 生成短期记忆压缩计划（不调用模型、不写 Store）。
      * <p>
-     * Phase 4 生产影子链路只调用此方法，不触发真实压缩写回。
+     * 此方法只做无副作用规划；真实写回由 executeCompactionPlan 执行。
      */
     public MemoryCompactionPlan planSessionCompaction(String sessionId, int targetTokens) {
-        List<ChatMessage> currentMessages = readSessionMessages(sessionId);
-        int currentTokens = estimateTokensForSnapshot(currentMessages);
-        List<ChatMessage> proposed = compressor.planCompact(currentMessages, targetTokens);
-        int proposedTokens = estimateTokensForSnapshot(proposed);
+        List<ChatMessage> original = readSessionMessages(sessionId);
+        SessionHistorySequenceValidator.ValidationResult validation =
+                SessionHistorySequenceValidator.validate(original);
+        if (validation.repaired()) {
+            sessionChatMemoryProvider.replaceMessages(sessionId, validation.messages());
+            original = validation.messages();
+        }
+        String summary = extractExistingSummary(original);
+        List<ChatMessage> dialog = withoutSummaryMessage(original);
+        List<List<ChatMessage>> turns = splitCompleteTurns(dialog);
+        if (turns.size() <= 2 || targetTokens <= 0) {
+            return new MemoryCompactionPlan(sessionId, targetTokens,
+                    estimateTokensForSnapshot(original), fingerprint(original), original,
+                    summary, List.of(), dialog);
+        }
+        List<ChatMessage> compactable = new ArrayList<>();
+        List<ChatMessage> protectedMessages = new ArrayList<>();
+        for (int i = 0; i < turns.size(); i++) {
+            (i < turns.size() - 2 ? compactable : protectedMessages).addAll(turns.get(i));
+        }
         return new MemoryCompactionPlan(sessionId, targetTokens,
-                currentTokens, proposed, proposedTokens);
+                estimateTokensForSnapshot(original), fingerprint(original), original,
+                summary, compactable, protectedMessages);
     }
 
     /**
      * 执行压缩计划 — 调用摘要模型并原子写回 Store。
      * <p>
-     * Phase 4 仅测试环境调用，生产影子不调用此方法。
+     * 生产 Context 在预算恢复时调用，摘要失败或快照过期均保持原存储不变。
      *
      * @param plan 压缩计划
      * @param trace Trace recorder（可为 null）
@@ -361,13 +396,50 @@ public class MemoryOrchestrator implements SessionIdResolver, ContextMemoryGatew
      */
     public MemoryCompactionResult executeCompactionPlan(MemoryCompactionPlan plan,
                                                          AgentTraceRecorder trace) {
+        return executeCompactionPlan(plan, trace, () -> false);
+    }
+
+    @Override
+    public MemoryCompactionResult executeCompactionPlan(
+            MemoryCompactionPlan plan, AgentTraceRecorder trace,
+            java.util.function.BooleanSupplier cancelChecker) {
         if (plan == null) {
             return MemoryCompactionResult.notExecuted();
         }
         try {
-            sessionChatMemoryProvider.replaceMessages(plan.sessionId(), plan.proposedMessages());
+            if (cancelChecker != null && cancelChecker.getAsBoolean()) {
+                return new MemoryCompactionResult(false, false, plan.currentTokens(),
+                        plan.currentTokens(), false, "CANCELLED_BEFORE_SUMMARY");
+            }
+            if (!plan.hasCompactableHistory()) {
+                return new MemoryCompactionResult(false, false, plan.currentTokens(),
+                        plan.currentTokens(), false, "NO_COMPACTABLE_TURNS");
+            }
+            List<ChatMessage> candidate = compressor.compressForTarget(plan, trace);
+            if (candidate.isEmpty()) {
+                return new MemoryCompactionResult(true, false, plan.currentTokens(),
+                        plan.currentTokens(), false, "SUMMARY_EMPTY_OR_MODEL_FAILED");
+            }
+            // 摘要模型调用不持锁；取消后不得进入 CAS 写回，原始历史保持不变。
+            if (cancelChecker != null && cancelChecker.getAsBoolean()) {
+                return new MemoryCompactionResult(true, false, plan.currentTokens(),
+                        plan.currentTokens(), false, "CANCELLED_BEFORE_WRITEBACK");
+            }
+            SessionHistorySequenceValidator.validate(candidate);
+            int afterTokens = estimateTokensForSnapshot(candidate);
+            if (afterTokens >= plan.currentTokens() || afterTokens > plan.targetTokens()) {
+                return new MemoryCompactionResult(true, false, plan.currentTokens(),
+                        afterTokens, false, "COMPACTION_NO_BUDGET_GAIN");
+            }
+            boolean replaced = sessionChatMemoryProvider.replaceMessagesIfUnchanged(
+                    plan.sessionId(), plan.originalMessages(), candidate);
+            if (!replaced) {
+                return new MemoryCompactionResult(true, false, plan.currentTokens(),
+                        afterTokens, false, "STALE_PLAN", false);
+            }
+            sessionMemorySnapshot(plan.sessionId());
             return new MemoryCompactionResult(true, true,
-                    plan.currentTokens(), plan.estimatedTokens(), true, null);
+                    plan.currentTokens(), afterTokens, false, null, true);
         } catch (Exception e) {
             return new MemoryCompactionResult(true, false,
                     plan.currentTokens(), plan.estimatedTokens(), false, e.getMessage());
@@ -385,11 +457,52 @@ public class MemoryOrchestrator implements SessionIdResolver, ContextMemoryGatew
             if (message instanceof UserMessage) {
                 String text = ((UserMessage) message).singleText();
                 if (text != null && text.startsWith("【对话摘要】")) {
-                    return text;
+                    return text.substring("【对话摘要】".length()).trim();
                 }
             }
         }
         return "";
+    }
+
+    private static List<ChatMessage> withoutSummaryMessage(List<ChatMessage> messages) {
+        List<ChatMessage> result = new ArrayList<>();
+        for (ChatMessage message : messages) {
+            if (message instanceof UserMessage) {
+                String text = ((UserMessage) message).singleText();
+                if (text != null && text.startsWith("【对话摘要】")) continue;
+            }
+            result.add(message);
+        }
+        return result;
+    }
+
+    private static List<List<ChatMessage>> splitCompleteTurns(List<ChatMessage> messages) {
+        List<List<ChatMessage>> turns = new ArrayList<>();
+        List<ChatMessage> current = null;
+        for (ChatMessage message : messages) {
+            if (message instanceof UserMessage) {
+                if (current != null && !current.isEmpty()) turns.add(current);
+                current = new ArrayList<>();
+            }
+            if (current == null) throw new SessionHistorySequenceValidator.InvalidSessionHistoryException(
+                    "invalid_session_history: turn does not start with UserMessage");
+            current.add(message);
+        }
+        if (current != null && !current.isEmpty()) turns.add(current);
+        return turns;
+    }
+
+    private static String fingerprint(List<ChatMessage> messages) {
+        try {
+            String json = dev.langchain4j.data.message.ChatMessageSerializer.messagesToJson(messages);
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder out = new StringBuilder(digest.length * 2);
+            for (byte b : digest) out.append(String.format("%02x", b));
+            return out.toString();
+        } catch (Exception e) {
+            throw new IllegalStateException("Unable to fingerprint session history", e);
+        }
     }
 
     /** 粗略估算消息列表 Token 数（中英文混合约 2 chars/token）。 */

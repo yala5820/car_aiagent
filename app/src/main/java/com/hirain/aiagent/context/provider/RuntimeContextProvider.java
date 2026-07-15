@@ -25,6 +25,8 @@ public class RuntimeContextProvider implements ContextProvider {
         return "RuntimeContextProvider";
     }
 
+    @Override public String sourceKey() { return com.hirain.aiagent.context.ContextPolicies.RUNTIME; }
+
     @Override
     public ContextLifecycle lifecycle() {
         return ContextLifecycle.REQUEST_STATIC;
@@ -32,8 +34,7 @@ public class RuntimeContextProvider implements ContextProvider {
 
     @Override
     public boolean required(RequestSession session, ContextBuildInput input) {
-        // TEXT 路径始终必需；校验身份在 provide 中完成
-        return true;
+        return com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input).required();
     }
 
     @Override
@@ -49,8 +50,7 @@ public class RuntimeContextProvider implements ContextProvider {
         metadata.put("input_type", session.inputType());
 
         TextContextContribution contribution = new TextContextContribution(
-                "runtime", ContextVisibility.POLICY_ONLY, ContextTrustLevel.TRUSTED_DATA,
-                ContextPriority.CRITICAL, ContextLifecycle.REQUEST_STATIC, true,
+                com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input),
                 name(), TextContextContribution.TARGET_CONTEXT_DATA,
                 content, metadata);
         return ContextProviderResult.success(name(), List.of(contribution));

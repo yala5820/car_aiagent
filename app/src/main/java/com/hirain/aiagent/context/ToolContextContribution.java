@@ -55,6 +55,15 @@ public final class ToolContextContribution implements ContextContribution {
                 metadata != null ? metadata : Map.of()));
     }
 
+    public ToolContextContribution(ResolvedContextPolicy policy,
+                                   String providerName, String selectionMode,
+                                   List<ToolSpecification> toolSpecifications,
+                                   Map<String, Object> metadata) {
+        this(policy.sourceKey(), policy.visibility(), policy.trustLevel(), policy.priority(),
+                policy.lifecycle(), policy.required(), providerName, selectionMode,
+                toolSpecifications, metadata);
+    }
+
     @Override
     public String sourceKey() { return sourceKey; }
 

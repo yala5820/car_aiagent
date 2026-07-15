@@ -6,7 +6,6 @@ import java.util.Map;
 
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.memory.ChatMemory;
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 
 /**
@@ -20,8 +19,8 @@ public class SessionChatMemoryProvider {
     private static final int DEFAULT_MAX_CACHED_SESSIONS = 50;
 
     private final ChatMemoryStore store;
-    private final int defaultMaxMessages;
     private final Map<String, ChatMemory> cache;
+    private final Map<String, Object> sessionLocks = new LinkedHashMap<>();
 
     public SessionChatMemoryProvider(ChatMemoryStore store, int defaultMaxMessages) {
         this(store, defaultMaxMessages, DEFAULT_MAX_CACHED_SESSIONS);
@@ -29,7 +28,6 @@ public class SessionChatMemoryProvider {
 
     public SessionChatMemoryProvider(ChatMemoryStore store, int defaultMaxMessages, int maxCachedSessions) {
         this.store = store;
-        this.defaultMaxMessages = Math.max(1, defaultMaxMessages);
         int safeMaxCachedSessions = Math.max(1, maxCachedSessions);
         this.cache = new LinkedHashMap<>(16, 0.75f, true) {
             @Override
@@ -43,7 +41,13 @@ public class SessionChatMemoryProvider {
      * 获取或创建指定 session 的 ChatMemory（使用默认窗口大小）。
      */
     public synchronized ChatMemory getOrCreate(String sessionId) {
-        return getOrCreate(sessionId, defaultMaxMessages);
+        String memoryId = SessionMemoryIds.shortTermMemoryId(sessionId);
+        ChatMemory existing = cache.get(memoryId);
+        if (existing != null) return existing;
+        Object sessionLock = sessionLocks.computeIfAbsent(memoryId, ignored -> new Object());
+        ChatMemory created = new PersistentSessionChatMemory(memoryId, store, sessionLock);
+        cache.put(memoryId, created);
+        return created;
     }
 
     /**
@@ -53,19 +57,9 @@ public class SessionChatMemoryProvider {
      * 后续如需不同 persona/场景窗口，应把窗口大小固化为 session memory policy，
      * 而不是让同一 session 在不同轮次切换窗口。
      */
+    @Deprecated
     public synchronized ChatMemory getOrCreate(String sessionId, int maxMessages) {
-        String memoryId = SessionMemoryIds.shortTermMemoryId(sessionId);
-        ChatMemory existing = cache.get(memoryId);
-        if (existing != null) {
-            return existing;
-        }
-        ChatMemory created = MessageWindowChatMemory.builder()
-                .id(memoryId)
-                .maxMessages(Math.max(1, maxMessages))
-                .chatMemoryStore(store)
-                .build();
-        cache.put(memoryId, created);
-        return created;
+        return getOrCreate(sessionId);
     }
 
     /**
@@ -76,19 +70,15 @@ public class SessionChatMemoryProvider {
      */
     public synchronized void replaceMessages(String sessionId, List<ChatMessage> messages) {
         String memoryId = SessionMemoryIds.shortTermMemoryId(sessionId);
-        if (store instanceof SessionMemoryStore) {
+        ChatMemory memory = getOrCreate(sessionId);
+        if (memory instanceof PersistentSessionChatMemory) {
+            ((PersistentSessionChatMemory) memory).replaceAll(messages);
+        } else if (store instanceof SessionMemoryStore) {
             ((SessionMemoryStore) store).replaceMessagesOrThrow(memoryId, messages);
+            cache.remove(memoryId);
         } else {
-            // 回退到旧行为（非 SessionMemoryStore 场景）
-            ChatMemory memory = getOrCreate(sessionId);
-            memory.clear();
-            for (ChatMessage message : messages) {
-                memory.add(message);
-            }
-            return;
+            memory.set(messages);
         }
-        // 成功后失效缓存
-        cache.remove(memoryId);
     }
 
     /**
@@ -97,6 +87,30 @@ public class SessionChatMemoryProvider {
     public synchronized void clear(String sessionId) {
         String memoryId = SessionMemoryIds.shortTermMemoryId(sessionId);
         cache.remove(memoryId);
+        sessionLocks.remove(memoryId);
         store.deleteMessages(memoryId);
+    }
+
+    synchronized Object sessionLock(String sessionId) {
+        String memoryId = SessionMemoryIds.shortTermMemoryId(sessionId);
+        return sessionLocks.computeIfAbsent(memoryId, ignored -> new Object());
+    }
+
+    public boolean replaceMessagesIfUnchanged(String sessionId,
+                                              List<ChatMessage> expected,
+                                              List<ChatMessage> replacement) {
+        String memoryId = SessionMemoryIds.shortTermMemoryId(sessionId);
+        Object lock = sessionLock(sessionId);
+        synchronized (lock) {
+            if (store instanceof SessionMemoryStore) {
+                return ((SessionMemoryStore) store).replaceMessagesIfUnchanged(
+                        memoryId, expected, replacement);
+            }
+            List<ChatMessage> current = store.getMessages(memoryId);
+            if (!current.equals(expected)) return false;
+            PersistentSessionChatMemory memory = (PersistentSessionChatMemory) getOrCreate(sessionId);
+            memory.replaceAll(replacement);
+            return true;
+        }
     }
 }

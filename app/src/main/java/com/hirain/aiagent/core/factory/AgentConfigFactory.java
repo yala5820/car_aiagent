@@ -137,6 +137,7 @@ public class AgentConfigFactory {
                 .preProcessors(List.of())
                 .modelCaller(new Lc4jModelCaller(buildQwenTurbo(requestCallRegistry)))
                 .toolExecutor(toolRegistry::dispatch)
+                .toolRegistry(toolRegistry)
                 .toolSubset(null)
                 .postProcessors(List.of(
                         new NoOpPostProcessor(),

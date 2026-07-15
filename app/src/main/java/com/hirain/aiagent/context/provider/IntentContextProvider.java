@@ -27,6 +27,8 @@ public class IntentContextProvider implements ContextProvider {
         return "IntentContextProvider";
     }
 
+    @Override public String sourceKey() { return com.hirain.aiagent.context.ContextPolicies.INTENT; }
+
     @Override
     public ContextLifecycle lifecycle() {
         return ContextLifecycle.REQUEST_STATIC;
@@ -34,7 +36,7 @@ public class IntentContextProvider implements ContextProvider {
 
     @Override
     public boolean required(RequestSession session, ContextBuildInput input) {
-        return false;
+        return com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input).required();
     }
 
     @Override
@@ -60,8 +62,7 @@ public class IntentContextProvider implements ContextProvider {
         metadata.put("matched_keywords", keywords);
 
         TextContextContribution contribution = new TextContextContribution(
-                "intent", ContextVisibility.POLICY_ONLY, ContextTrustLevel.TRUSTED_DATA,
-                ContextPriority.OPTIONAL, ContextLifecycle.REQUEST_STATIC, false,
+                com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input),
                 name(), TextContextContribution.TARGET_CONTEXT_DATA,
                 content, metadata);
         return ContextProviderResult.success(name(), List.of(contribution));

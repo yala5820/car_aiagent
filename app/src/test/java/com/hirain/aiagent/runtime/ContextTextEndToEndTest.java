@@ -64,6 +64,7 @@ public class ContextTextEndToEndTest {
     /** JVM 友好的 ToolRegistry — 以内存 Map 操作，不调用 ToolDispatcher/Log.d。 */
     public static class JvmToolRegistry extends ToolRegistry {
         final Map<String, ToolSpecification> specs = new LinkedHashMap<>();
+        ToolExecutor executor;
         public JvmToolRegistry(ToolSpecification... specs) {
             for (ToolSpecification s : specs) { if (s != null) this.specs.put(s.name(), s); }
         }
@@ -76,6 +77,22 @@ public class ContextTextEndToEndTest {
         @Override public List<ToolSpecification> enabledToolSpecifications() { return new ArrayList<>(specs.values()); }
         @Override public List<ToolSpecification> getToolSpecifications() { return new ArrayList<>(specs.values()); }
         @Override public int size() { return specs.size(); }
+        @Override public com.hirain.aiagent.ai.langchain4j.tool.ToolDispatchOutcome dispatchWithOutcome(
+                ToolExecutionRequest request) {
+            if (executor == null) {
+                return com.hirain.aiagent.ai.langchain4j.tool.ToolDispatchOutcome.failure(
+                        false, false, "error: no test executor", "TEST_EXECUTOR_MISSING",
+                        "no test executor", "JvmToolRegistry", request.name());
+            }
+            try {
+                return com.hirain.aiagent.ai.langchain4j.tool.ToolDispatchOutcome.success(
+                        executor.execute(request), "JvmToolRegistry", request.name());
+            } catch (Exception e) {
+                return com.hirain.aiagent.ai.langchain4j.tool.ToolDispatchOutcome.failure(
+                        true, true, "error: " + e.getMessage(), "TEST_DISPATCH_FAILED",
+                        e.getMessage(), "JvmToolRegistry", request.name());
+            }
+        }
     }
 
     // ═══════════════════════════════════════════
@@ -129,7 +146,11 @@ public class ContextTextEndToEndTest {
         };
     }
 
-    private static AgentConfig configWith(CapturingModelCaller caller, ToolExecutor toolExec) {
+    private static AgentConfig configWith(
+            com.hirain.aiagent.core.component.ModelCaller caller,
+            ToolExecutor toolExec) {
+        JvmToolRegistry executionRegistry = defaultToolRegistry();
+        executionRegistry.executor = toolExec;
         return AgentConfig.builder("chat")
                 .modelName("qwen-turbo")
                 .systemPromptTemplateName("prompts/system/assistant_default")
@@ -137,6 +158,7 @@ public class ContextTextEndToEndTest {
                 .memoryPolicy(AgentConfig.MemoryPolicy.PERSISTENT)
                 .modelCaller(caller)
                 .toolExecutor(toolExec)
+                .toolRegistry(executionRegistry)
                 .toolSubset(null)
                 .postProcessors(List.of(new NoOpPostProcessor()))
                 .terminator(new NoToolCallTerminator())
@@ -384,7 +406,7 @@ public class ContextTextEndToEndTest {
     }
 
     @Test
-    public void allToolsFallback_isRejectedBeforeContextAndModel() {
+    public void allToolsFallback_reachesContextAndModelWithAllTools() {
         ToolGroupRegistry groupRegistry = ToolGroupRegistry.defaultRegistry();
         JvmToolRegistry toolRegistry = defaultToolRegistry();
         FakeMemoryGateway mg = new FakeMemoryGateway();
@@ -407,10 +429,14 @@ public class ContextTextEndToEndTest {
 
         RuntimeResult result = runtime.execute(runtime.startSession(request("模糊指令"), null));
 
-        assertFalse("All-tools fallback request must fail closed", result.success());
-        assertEquals("TOOL_SELECTION_FAILED", result.errorType());
-        assertTrue("Model must not be called for all-tools fallback",
-                caller.capturedRequests().isEmpty());
+        assertTrue("Demo all-tools fallback request must remain executable", result.success());
+        assertEquals(1, caller.capturedRequests().size());
+        List<String> names = caller.capturedRequests().get(0).toolSpecifications().stream()
+                .map(ToolSpecification::name)
+                .toList();
+        assertEquals("All-tools fallback must expose every registered tool exactly once",
+                toolRegistry.size(), names.size());
+        assertTrue(names.containsAll(toolRegistry.specs.keySet()));
     }
 
     @Test
@@ -450,7 +476,7 @@ public class ContextTextEndToEndTest {
                 "req-1", "conv-1", "user-a", "chat", "cl-1", "hi");
         ContextPrepareResult pr = orch.prepare(session, ContextCancelChecker.neverCancelled());
         com.hirain.aiagent.context.ContextBudgetPolicy tinyBudget =
-                new com.hirain.aiagent.context.ContextBudgetPolicy(200, 50, 50);
+                new com.hirain.aiagent.context.ContextBudgetPolicy(101, 50, 50);
         com.hirain.aiagent.context.ContextAssemblyGateway tinyBudgetGateway = request -> orch.assemble(
                 new com.hirain.aiagent.context.ContextAssemblyRequest(
                         request.frame(), request.iteration(), tinyBudget,
@@ -508,21 +534,10 @@ public class ContextTextEndToEndTest {
                         ToolExecutionRequest.builder().id("r2").name("tool_b").arguments("{}").build()))
                 .build();
 
-        AgentConfig config = AgentConfig.builder("chat")
-                .modelName("qwen-turbo").systemPromptTemplateName("prompts/system/assistant_default")
-                .maxIterations(10).maxMemoryMessages(50)
-                .memoryPolicy(AgentConfig.MemoryPolicy.PERSISTENT)
-                .modelCaller(toolCaller)
-                .toolExecutor(req -> {
+        AgentConfig config = configWith(toolCaller, req -> {
                     if ("tool_a".equals(req.name())) cancelAfterFirst.set(true);
                     return "{\"ok\":true}";
-                })
-                .toolSubset(null)
-                .postProcessors(List.of(new NoOpPostProcessor()))
-                .terminator(new NoToolCallTerminator())
-                .resultCollector(new DirectTextCollector())
-                .timeout(java.time.Duration.ofSeconds(30))
-                .build();
+                });
 
         ContextOrchestrator orch = createOrchestrator(testPrompt(), defaultToolRegistry(), mg);
         TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(

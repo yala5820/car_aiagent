@@ -1,6 +1,7 @@
 package com.hirain.aiagent.trace;
 
 import com.hirain.aiagent.safety.SafetyDecision;
+import com.hirain.aiagent.ai.langchain4j.tool.ToolDispatchOutcome;
 
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
@@ -108,6 +109,10 @@ public class AgentTraceRecorder {
     }
 
     public void enrichLlmResponse(Span span, ChatResponse response) {
+        enrichLlmResponse(span, response, -1);
+    }
+
+    public void enrichLlmResponse(Span span, ChatResponse response, int estimatedInputTokens) {
         if (span == null || response == null) return;
         AiMessage aiMessage = response.aiMessage();
         if (aiMessage != null) {
@@ -123,10 +128,19 @@ public class AgentTraceRecorder {
         }
         try {
             dev.langchain4j.model.output.TokenUsage usage = response.tokenUsage();
+            writer.putBoolean(span, TraceAttributeKeys.GEN_AI_USAGE_AVAILABLE, usage != null);
             if (usage != null) {
                 if (usage.inputTokenCount() != null) {
                     writer.putLong(span, TraceAttributeKeys.GEN_AI_INPUT_TOKENS,
                             usage.inputTokenCount());
+                    if (estimatedInputTokens >= 0) {
+                        writer.putLong(span, TraceAttributeKeys.GEN_AI_INPUT_TOKEN_ESTIMATE_DELTA,
+                                usage.inputTokenCount() - estimatedInputTokens);
+                        if (estimatedInputTokens > 0) {
+                            span.setAttribute(TraceAttributeKeys.GEN_AI_INPUT_TOKEN_ESTIMATE_RATIO,
+                                    (double) usage.inputTokenCount() / estimatedInputTokens);
+                        }
+                    }
                 }
                 if (usage.outputTokenCount() != null) {
                     writer.putLong(span, TraceAttributeKeys.GEN_AI_OUTPUT_TOKENS,
@@ -138,6 +152,7 @@ public class AgentTraceRecorder {
                 }
             }
         } catch (Exception ignored) {
+            writer.putBoolean(span, TraceAttributeKeys.GEN_AI_USAGE_AVAILABLE, false);
         }
     }
 
@@ -145,9 +160,20 @@ public class AgentTraceRecorder {
     public void recordLlmRequest(Span span, String modelName, int iteration,
                                   List<ChatMessage> messages,
                                   List<ToolSpecification> toolSpecs) {
+        recordLlmRequest(span, modelName, iteration, messages, toolSpecs, -1);
+    }
+
+    public void recordLlmRequest(Span span, String modelName, int iteration,
+                                 List<ChatMessage> messages,
+                                 List<ToolSpecification> toolSpecs,
+                                 int estimatedInputTokens) {
         if (span == null) return;
         writer.putString(span, "gen_ai.request.model", modelName != null ? modelName : "");
         writer.putLong(span, "gen_ai.request.iteration", iteration);
+        if (estimatedInputTokens >= 0) {
+            writer.putLong(span, TraceAttributeKeys.GEN_AI_ESTIMATED_INPUT_TOKENS,
+                    estimatedInputTokens);
+        }
         if (messages != null) {
             writer.putLong(span, "gen_ai.request.message_count", messages.size());
             StringBuilder sb = new StringBuilder();
@@ -221,6 +247,21 @@ public class AgentTraceRecorder {
         writer.putResult(span, TraceAttributeKeys.TOOL_OUTPUT, result);
         if (decision == null || (safetyAllowed && !executionSucceeded)) {
             span.setStatus(StatusCode.ERROR, "tool_failed");
+        }
+    }
+
+    /** 由结构化 dispatch outcome 结束 TEXT 工具 span。 */
+    public void finishTool(Span span, SafetyDecision decision, ToolDispatchOutcome outcome) {
+        String result = outcome != null ? outcome.resultText() : "";
+        boolean succeeded = outcome != null && outcome.dispatchSuccess();
+        finishTool(span, result, decision, succeeded);
+        if (span == null) return;
+        String state = decision != null && decision.isDenied()
+                ? "VETOED" : succeeded ? "SUCCESS" : "FAILED";
+        writer.putString(span, TraceAttributeKeys.TOOL_OUTCOME, state);
+        if (outcome != null) {
+            writer.putString(span, TraceAttributeKeys.TOOL_ERROR_TYPE, outcome.errorType());
+            writer.putString(span, TraceAttributeKeys.TOOL_ERROR_DETAIL, outcome.errorDetail());
         }
     }
 

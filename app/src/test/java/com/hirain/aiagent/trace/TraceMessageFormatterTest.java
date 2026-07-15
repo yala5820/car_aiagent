@@ -1,5 +1,6 @@
 package com.hirain.aiagent.trace;
 
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -37,13 +38,13 @@ public class TraceMessageFormatterTest {
     }
 
     @Test
-    public void truncatesLongMessageOutput() {
+    public void preservesLongMessageOutputForCaptureModeWriter() {
         TraceMessageFormatter formatter = new TraceMessageFormatter(40);
 
         String result = formatter.formatMessages(List.of(UserMessage.from(repeat("a", 120))));
 
-        assertTrue(result.length() <= 60);
-        assertTrue(result.contains("truncated"));
+        assertTrue(result.length() > 100);
+        assertFalse(result.contains("truncated"));
     }
 
     @Test

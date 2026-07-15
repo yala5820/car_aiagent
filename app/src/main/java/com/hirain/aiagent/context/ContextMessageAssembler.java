@@ -41,6 +41,90 @@ public final class ContextMessageAssembler {
                                                    ContextBudgetPolicy budgetPolicy,
                                                    ContextTokenEstimator tokenEstimator,
                                                    int iteration) {
+        ContextAssemblyAttempt attempt = attempt(frame, budgetPolicy, tokenEstimator, iteration, 1);
+        ContextAssemblyResult candidate = attempt.candidate();
+        if (candidate == null || !candidate.success()) return candidate;
+        if (candidate.budgetReport() != null && candidate.budgetReport().withinBudget()) {
+            return candidate;
+        }
+        ContextBudgetReport report = candidate.budgetReport();
+        ContextAssemblyDebugInfo debug = new ContextAssemblyDebugInfo(
+                candidate.providerOutcomes(), 0, 0, "context_budget_exceeded",
+                attempt.contributionDecisions(), attempt.compressionRecommended(),
+                attempt.targetSessionMemoryTokens());
+        return ContextAssemblyResult.failure(ContextErrorCode.CONTEXT_BUDGET_EXCEEDED,
+                "Context budget exceeded", report, debug, false, candidate.providerOutcomes());
+    }
+
+    static ContextAssemblyAttempt attempt(ContextFrame frame,
+                                          ContextBudgetPolicy budgetPolicy,
+                                          ContextTokenEstimator tokenEstimator,
+                                          int iteration,
+                                          int attemptIndex) {
+        ContextAssemblyDraft draft = new ContextAssemblyDraft(frame);
+        ContextAssemblyResult initial = assembleRaw(draft.frame(), budgetPolicy, tokenEstimator, iteration);
+        if (initial == null || !initial.success() || initial.budgetReport() == null
+                || initial.budgetReport().withinBudget()) {
+            return new ContextAssemblyAttempt(initial, false, 0,
+                    decisions(draft.contributions(), List.of(), attemptIndex, iteration));
+        }
+
+        int beforeTokens = initial.budgetReport().estimatedInputTokens();
+        int maxTokens = initial.budgetReport().maxInputTokens();
+        List<ContextContribution> remaining = new ArrayList<>(draft.contributions());
+        List<ContextContribution> trimmable = new ArrayList<>();
+        for (ContextContribution contribution : remaining) {
+            if (isTrimmableContextData(contribution)) trimmable.add(contribution);
+        }
+        trimmable.sort((left, right) -> Integer.compare(trimRank(left.priority()), trimRank(right.priority())));
+
+        List<ContextContribution> removed = new ArrayList<>();
+        List<ContextBudgetDecision.TrimAction> actions = new ArrayList<>();
+        ContextAssemblyResult current = initial;
+        for (ContextContribution contribution : trimmable) {
+            if (current.budgetReport().withinBudget()) break;
+            int actionBefore = current.budgetReport().estimatedInputTokens();
+            remaining.remove(contribution);
+            removed.add(contribution);
+            ContextFrame trimmedFrame = ContextFrameBuilder.fromFrame(frame)
+                    .contributions(remaining).build();
+            current = assembleRaw(trimmedFrame, budgetPolicy, tokenEstimator, iteration);
+            if (current == null || !current.success()) {
+                return new ContextAssemblyAttempt(current, false, 0,
+                        decisions(draft.contributions(), removed, attemptIndex, iteration));
+            }
+            actions.add(new ContextBudgetDecision.TrimAction(contribution.sourceKey(),
+                    "remove_optional_context_data", actionBefore,
+                    current.budgetReport().estimatedInputTokens()));
+        }
+
+        int finalTokens = current.budgetReport().estimatedInputTokens();
+        boolean within = finalTokens <= maxTokens;
+        boolean hasSessionMemory = hasNonEmptySessionMemory(remaining);
+        int nonSessionTokens = estimateWithoutSessionMemory(frame, remaining,
+                budgetPolicy, tokenEstimator, iteration);
+        int targetMemoryTokens = Math.max(0, maxTokens - nonSessionTokens);
+        boolean compressionRecommended = !within && hasSessionMemory && targetMemoryTokens > 0;
+        ContextBudgetReport report = new ContextBudgetReport(finalTokens, maxTokens, within,
+                beforeTokens, actions, compressionRecommended);
+        ContextAssemblyDebugInfo debug = new ContextAssemblyDebugInfo(
+                current.providerOutcomes(), current.messages().size(),
+                current.toolSpecifications().size(), within ? null : "context_budget_exceeded",
+                decisions(draft.contributions(), removed, attemptIndex, iteration),
+                compressionRecommended, targetMemoryTokens);
+        ContextAssemblyResult candidate = within
+                ? ContextAssemblyResult.success(current.messages(), current.toolSpecifications(),
+                report, debug, current.providerOutcomes())
+                : ContextAssemblyResult.failure(ContextErrorCode.CONTEXT_BUDGET_EXCEEDED,
+                "Context budget exceeded", report, debug, false, current.providerOutcomes());
+        return new ContextAssemblyAttempt(candidate, compressionRecommended,
+                targetMemoryTokens, debug.contributionDecisions());
+    }
+
+    private static ContextAssemblyResult assembleRaw(ContextFrame frame,
+                                                   ContextBudgetPolicy budgetPolicy,
+                                                   ContextTokenEstimator tokenEstimator,
+                                                   int iteration) {
         if (frame == null) {
             return ContextAssemblyResult.failure(ContextErrorCode.CONTEXT_INTERNAL_ERROR,
                     "ContextFrame is null", new ContextAssemblyDebugInfo(List.of(), 0, 0, "null frame"));
@@ -216,5 +300,81 @@ public final class ContextMessageAssembler {
         return ContextAssemblyResult.success(messages, toolSpecs, budgetReport,
                 new ContextAssemblyDebugInfo(outcomes, messages.size(), toolSpecs.size(), null),
                 outcomes);
+    }
+
+    private static boolean isTrimmableContextData(ContextContribution contribution) {
+        return ContextBudgetManager.isTrimEligible(contribution);
+    }
+
+    private static int trimRank(ContextPriority priority) {
+        if (priority == ContextPriority.OPTIONAL) return 0;
+        if (priority == ContextPriority.NORMAL) return 1;
+        if (priority == ContextPriority.HIGH) return 2;
+        return 3;
+    }
+
+    private static boolean hasNonEmptySessionMemory(List<ContextContribution> contributions) {
+        for (ContextContribution contribution : contributions) {
+            if (contribution instanceof MessageContextContribution message
+                    && MessageContextContribution.SOURCE_SESSION_MEMORY.equals(message.messageSource())) {
+                return message.messages() != null && !message.messages().isEmpty();
+            }
+        }
+        return false;
+    }
+
+    private static int estimateWithoutSessionMemory(ContextFrame original,
+                                                    List<ContextContribution> contributions,
+                                                    ContextBudgetPolicy policy,
+                                                    ContextTokenEstimator estimator,
+                                                    int iteration) {
+        List<ContextContribution> withoutHistory = new ArrayList<>();
+        for (ContextContribution contribution : contributions) {
+            if (contribution instanceof MessageContextContribution message
+                    && MessageContextContribution.SOURCE_SESSION_MEMORY.equals(message.messageSource())) {
+                withoutHistory.add(new MessageContextContribution(message.sourceKey(), message.visibility(),
+                        message.trustLevel(), message.priority(), message.lifecycle(), message.required(),
+                        message.providerName(), message.messageSource(), List.of(), message.metadata()));
+            } else {
+                withoutHistory.add(contribution);
+            }
+        }
+        ContextAssemblyResult result = assembleRaw(ContextFrameBuilder.fromFrame(original)
+                .contributions(withoutHistory).build(), policy, estimator, iteration);
+        return result != null && result.budgetReport() != null
+                ? result.budgetReport().estimatedInputTokens() : Integer.MAX_VALUE;
+    }
+
+    private static List<ContextContributionDecision> decisions(
+            List<ContextContribution> produced, List<ContextContribution> removed,
+            int attemptIndex, int iteration) {
+        List<ContextContributionDecision> result = new ArrayList<>();
+        for (ContextContribution contribution : produced) {
+            boolean trimmed = removed.contains(contribution);
+            boolean included = !trimmed && isActuallyIncluded(contribution, iteration);
+            result.add(new ContextContributionDecision(contribution.sourceKey(), true,
+                    included,
+                    trimmed, trimmed ? "OPTIONAL_CONTEXT_BUDGET" : null, attemptIndex));
+        }
+        return result;
+    }
+
+    /** 与 assembleRaw 保持同一套实际入模判断，避免诊断把空集合或后续迭代用户消息标成 included。 */
+    private static boolean isActuallyIncluded(ContextContribution contribution, int iteration) {
+        if (contribution.visibility() != ContextVisibility.MODEL_VISIBLE) return false;
+        if (contribution instanceof TextContextContribution text) {
+            return text.content() != null && !text.content().isEmpty();
+        }
+        if (contribution instanceof MessageContextContribution message) {
+            if (MessageContextContribution.SOURCE_CURRENT_USER.equals(message.messageSource())
+                    && iteration > 0) {
+                return false;
+            }
+            return message.messages() != null && !message.messages().isEmpty();
+        }
+        if (contribution instanceof ToolContextContribution tools) {
+            return tools.toolSpecifications() != null && !tools.toolSpecifications().isEmpty();
+        }
+        return false;
     }
 }

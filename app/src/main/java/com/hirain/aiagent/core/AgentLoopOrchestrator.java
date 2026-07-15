@@ -100,10 +100,9 @@ public class AgentLoopOrchestrator {
     }
 
     /**
-     * 带 ContextAssemblyGateway 的构造器。
-     * Phase 3 影子装配使用：gateway 不为 null 时，每轮模型调用前执行 shadow assemble。
-     * @deprecated TEXT 路径已由 execute(RequestSession, ContextPrepareResult) 接管，
-     * PromptManager 和 allToolSpecs 参数仅 SCENE/VL 路径仍需使用。
+     * 非 TEXT 兼容构造器。
+     * @deprecated TEXT 路径由 {@link TextAgentLoopOrchestrator} 接管；
+     * PromptManager 和 allToolSpecs 参数仅 Scene/VL 等非 TEXT 路径仍需使用。
      */
     @Deprecated
     public AgentLoopOrchestrator(AgentConfig config, Context context,
@@ -225,9 +224,6 @@ public class AgentLoopOrchestrator {
                                 effectiveToolSpecs)
                         : null;
                 if (promptSpan != null) promptSpan.end();
-
-                // Phase 6: 影子装配已删除，Context 独占链路通过新 execute() 方法运行
-
 
                 // ② ModelCaller → LLM 调用
                 ChatRequest request = ChatRequest.builder()
@@ -645,7 +641,7 @@ public class AgentLoopOrchestrator {
     /**
      * 构建本轮 transient SystemMessage（含长期记忆和 persona 模板）。
      * <p>
-     * 设计原因：Phase 4 起长期记忆不再持久化进 session ChatMemory，改为每轮 transient 注入。
+     * 长期记忆不持久化进 session ChatMemory，而是在非 TEXT 兼容链中每轮临时注入。
      * 避免多人共享短期历史后把 user_a 的长期记忆暴露给 user_b。
      * <p>
      * 模板选择：优先使用 {@link AgentConfig#systemPromptTemplateName()} 中声明的人格模板。

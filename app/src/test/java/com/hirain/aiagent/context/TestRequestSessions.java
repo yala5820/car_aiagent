@@ -9,6 +9,7 @@ import com.hirain.aiagent.runtime.RequestSessionFactory;
 import com.hirain.aiagent.runtime.RequestDeadline;
 import com.hirain.aiagent.toolgroup.ToolGroupId;
 import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
+import com.hirain.aiagent.toolgroup.ToolGroupRegistry;
 
 import java.util.List;
 
@@ -30,9 +31,9 @@ public final class TestRequestSessions {
                 .create(request, null,
                         IntentResult.of(IntentTag.VEHICLE_AC, IntentConfidence.HIGH,
                                 List.of("空调"), text, "TEXT", "matched:VEHICLE_AC"),
-                        ToolGroupSelectionResult.of(
+                        ToolGroupSelectionResult.enriched(
+                                ToolGroupRegistry.defaultRegistry(),
                                 List.of(ToolGroupId.AC_GROUP, ToolGroupId.BASIC_STATUS_GROUP),
-                                List.of("set_ac_status"),
                                 "intent:VEHICLE_AC",
                                 IntentConfidence.HIGH,
                                 false));

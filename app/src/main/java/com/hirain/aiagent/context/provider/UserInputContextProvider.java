@@ -24,11 +24,15 @@ public class UserInputContextProvider implements ContextProvider {
     @Override
     public String name() { return "UserInputContextProvider"; }
 
+    @Override public String sourceKey() { return com.hirain.aiagent.context.ContextPolicies.CURRENT_USER; }
+
     @Override
     public ContextLifecycle lifecycle() { return ContextLifecycle.REQUEST_STATIC; }
 
     @Override
-    public boolean required(RequestSession session, ContextBuildInput input) { return true; }
+    public boolean required(RequestSession session, ContextBuildInput input) {
+        return com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input).required();
+    }
 
     @Override
     public ContextProviderResult provide(RequestSession session, ContextBuildInput input) {
@@ -40,8 +44,7 @@ public class UserInputContextProvider implements ContextProvider {
         UserMessage currentUserMessage = UserMessage.from(formattedText);
 
         MessageContextContribution contribution = new MessageContextContribution(
-                "user_input", ContextVisibility.MODEL_VISIBLE, ContextTrustLevel.TRUSTED_DATA,
-                ContextPriority.CRITICAL, ContextLifecycle.REQUEST_STATIC, true,
+                com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input),
                 name(), MessageContextContribution.SOURCE_CURRENT_USER,
                 List.of(currentUserMessage),
                 Map.of("raw_user_input", rawInput,

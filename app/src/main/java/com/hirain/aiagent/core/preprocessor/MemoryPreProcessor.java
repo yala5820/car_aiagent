@@ -13,7 +13,7 @@ import dev.langchain4j.data.message.ChatMessage;
  * <p>
  * 仅在首轮迭代（iteration = 0）时注入，避免重复。
  * <p>
- * 注意：Phase 4 起长期记忆唯一注入点已收敛到 AgentLoop 的 transient SystemMessage
+ * 非 TEXT 兼容链的长期记忆注入点位于 AgentLoop 的 transient SystemMessage
  * （{@code AgentLoopOrchestrator.buildSystemPromptMessage()}）。
  * 此 preprocessor 仅保留给旧配置兼容，不能再把长期记忆拼入用户消息。
  * TEXT / VOICE 主路径已不再使用此 preprocessor。
@@ -28,7 +28,7 @@ public class MemoryPreProcessor implements PreProcessor {
 
     @Override
     public List<ChatMessage> prepare(AgentLoopContext ctx) {
-        // Phase 4 起长期记忆唯一注入点已收敛到 AgentLoop 的 transient SystemMessage。
+        // 长期记忆由非 TEXT AgentLoop 的 transient SystemMessage 注入。
         // 此 preprocessor 仅保留给旧配置兼容，不再注入长期记忆。
         return List.of();
     }

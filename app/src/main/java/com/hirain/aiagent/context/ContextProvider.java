@@ -3,12 +3,15 @@ package com.hirain.aiagent.context;
 import com.hirain.aiagent.runtime.RequestSession;
 
 /**
- * Context 片段提供者接口 — 每个 Provider 负责构建一个 {@link ContextSection}。
+ * Context 提供者接口 — 每个 Provider 负责读取一个业务来源并输出强类型 Contribution。
  */
 public interface ContextProvider {
 
     /** Provider 名称，用于诊断和 Trace。 */
     String name();
+
+    /** Provider 的稳定生产来源键；旧测试 Provider 默认沿用名称。 */
+    default String sourceKey() { return name(); }
 
 
     /**
@@ -18,7 +21,9 @@ public interface ContextProvider {
      * 迭代级 Provider（SessionMemory、Vehicle、Time）应重写为 {@link ContextLifecycle#ITERATION_DYNAMIC}。
      */
     default ContextLifecycle lifecycle() {
-        return ContextLifecycle.REQUEST_STATIC;
+        return ContextPolicies.isRegistered(sourceKey())
+                ? ContextPolicies.source(sourceKey()).lifecycle()
+                : ContextLifecycle.REQUEST_STATIC;
     }
 
     /**
@@ -31,7 +36,10 @@ public interface ContextProvider {
      * @param input   构建期依赖容器
      * @return true 表示失败时应中断流程
      */
-    boolean required(RequestSession session, ContextBuildInput input);
+    default boolean required(RequestSession session, ContextBuildInput input) {
+        return ContextPolicies.isRegistered(sourceKey())
+                && ContextPolicies.resolve(sourceKey(), session, input).required();
+    }
 
     /**
      * 构建上下文片段。

@@ -69,6 +69,27 @@ public class ContextMessageAssemblerTest {
                 msgs, Map.of());
     }
 
+    @Test
+    public void contributionDecisions_matchActualIterationAndEmptyContent() {
+        ContextFrame frame = createFrameWithContributions(List.of(
+                systemPrompt("You are a car assistant"),
+                contextData("empty_context", "", ContextTrustLevel.UNTRUSTED_DATA),
+                sessionMemory(List.of()),
+                currentUser("本轮问题")));
+
+        ContextAssemblyAttempt attempt = ContextMessageAssembler.attempt(
+                frame, null, null, 1, 1);
+
+        assertTrue(attempt.candidate().success());
+        Map<String, ContextContributionDecision> decisions = attempt.contributionDecisions().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        ContextContributionDecision::sourceKey, decision -> decision));
+        assertTrue(decisions.get("prompt").included());
+        assertFalse(decisions.get("empty_context").included());
+        assertFalse(decisions.get("session_memory").included());
+        assertFalse(decisions.get("user_input").included());
+    }
+
     // ── 正常装配 ──
 
     @Test

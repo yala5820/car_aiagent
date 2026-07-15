@@ -123,12 +123,36 @@ public class TextAgentLoopOrchestratorTest {
                 .memoryPolicy(AgentConfig.MemoryPolicy.PERSISTENT)
                 .modelCaller(caller)
                 .toolExecutor(toolExec)
+                .toolRegistry(new TestToolRegistry(toolExec))
                 .toolSubset(null)
                 .postProcessors(List.of(new NoOpPostProcessor()))
                 .terminator(new NoToolCallTerminator())
                 .resultCollector(new DirectTextCollector())
                 .timeout(java.time.Duration.ofSeconds(30))
                 .build();
+    }
+
+    /** 在 ToolRegistry 边界替换反射层，消息仍经过真实 TextAgentLoop。 */
+    private static final class TestToolRegistry
+            extends com.hirain.aiagent.ai.langchain4j.tool.ToolRegistry {
+        private final ToolExecutor executor;
+
+        private TestToolRegistry(ToolExecutor executor) {
+            this.executor = executor;
+        }
+
+        @Override
+        public com.hirain.aiagent.ai.langchain4j.tool.ToolDispatchOutcome dispatchWithOutcome(
+                ToolExecutionRequest request) {
+            try {
+                return com.hirain.aiagent.ai.langchain4j.tool.ToolDispatchOutcome.success(
+                        executor.execute(request), "TestToolRegistry", request.name());
+            } catch (Exception e) {
+                return com.hirain.aiagent.ai.langchain4j.tool.ToolDispatchOutcome.failure(
+                        true, true, "error: " + e.getMessage(), "TEST_DISPATCH_FAILED",
+                        e.getMessage(), "TestToolRegistry", request.name());
+            }
+        }
     }
 
     private static ToolSafetyEngine allowAllSafetyEngine() {
@@ -420,7 +444,6 @@ public class TextAgentLoopOrchestratorTest {
 
     @Test
     public void multiToolCancel_cancelAfterFirstTool_secondHasCancelledResult() {
-        CountingToolExecutor toolExec = new CountingToolExecutor();
         AtomicBoolean cancelFlag = new AtomicBoolean(false);
         CapturingModelCaller caller = new CapturingModelCaller(List.of(
                 ChatResponse.builder().aiMessage(AiMessage.from(
@@ -428,22 +451,10 @@ public class TextAgentLoopOrchestratorTest {
                         ToolExecutionRequest.builder().id("r2").name("tool_b").arguments("{}").build()))
                         .build()));
 
-        AgentConfig config = AgentConfig.builder("chat")
-                .modelName("qwen-turbo")
-                .systemPromptTemplateName("prompts/system/assistant_default")
-                .maxIterations(10).maxMemoryMessages(50)
-                .memoryPolicy(AgentConfig.MemoryPolicy.PERSISTENT)
-                .modelCaller(caller)
-                .toolExecutor(req -> {
+        AgentConfig config = configWith(caller, req -> {
                     if ("tool_a".equals(req.name())) cancelFlag.set(true);
                     return "{\"ok\":true}";
-                })
-                .toolSubset(null)
-                .postProcessors(List.of(new NoOpPostProcessor()))
-                .terminator(new NoToolCallTerminator())
-                .resultCollector(new DirectTextCollector())
-                .timeout(java.time.Duration.ofSeconds(30))
-                .build();
+                });
 
         FakeMemoryGateway mg = new FakeMemoryGateway();
         TextAgentLoopOrchestrator loop = newLoop(config, mg,

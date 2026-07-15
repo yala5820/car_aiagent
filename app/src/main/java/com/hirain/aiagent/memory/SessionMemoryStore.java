@@ -87,6 +87,35 @@ public class SessionMemoryStore implements ChatMemoryStore {
         }
     }
 
+    /**
+     * 仅当当前 JSON 与压缩计划的原始快照一致时原子替换，防止旧计划覆盖并发新消息。
+     */
+    public boolean replaceMessagesIfUnchanged(Object memoryId,
+                                              List<ChatMessage> expected,
+                                              List<ChatMessage> replacement) {
+        String id = memoryId.toString();
+        String expectedJson = ChatMessageSerializer.messagesToJson(expected);
+        String replacementJson = ChatMessageSerializer.messagesToJson(replacement);
+        SQLiteDatabase db = dbHelper.getWritableDatabase();
+        db.beginTransaction();
+        try (Cursor cursor = db.rawQuery(
+                "SELECT messages FROM session_messages WHERE memory_id = ?",
+                new String[]{id})) {
+            String currentJson = cursor.moveToFirst() ? cursor.getString(0)
+                    : ChatMessageSerializer.messagesToJson(List.of());
+            if (!expectedJson.equals(currentJson)) return false;
+            db.execSQL("INSERT OR REPLACE INTO session_messages (memory_id, messages) VALUES (?, ?)",
+                    new Object[]{id, replacementJson});
+            db.setTransactionSuccessful();
+            return true;
+        } catch (Exception e) {
+            throw new MemoryPersistenceException(id,
+                    "Failed to compare-and-set messages for " + id, e);
+        } finally {
+            db.endTransaction();
+        }
+    }
+
     @Override
     public void deleteMessages(Object memoryId) {
         String id = memoryId.toString();

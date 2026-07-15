@@ -11,9 +11,9 @@ public final class SessionMemoryIds {
 
     /**
      * 短期记忆 key：仅由 sessionId 决定。
-     * 设计原因：Phase 1 起，短期记忆归属于座舱会话 sessionId，不是 userId 或 personaId。
+     * 设计原因：短期记忆归属于座舱会话 sessionId，不是 userId 或 personaId。
      *
-     * @param sessionId 已解析的非空 sessionId（Phase 0 保证）
+     * @param sessionId Runtime 已解析的非空 sessionId
      * @return 规范化短期 memoryId
      * @throws IllegalArgumentException sessionId 为 null 或空白
      */

@@ -17,6 +17,9 @@ public final class MemorySnapshot {
     private final List<ChatMessage> messages;
     private final int tokenEstimate;
     private final String summary;
+    private final boolean repaired;
+    private final int removedMessageCount;
+    private final String repairReason;
 
     /**
      * 构造短期记忆快照。
@@ -26,12 +29,7 @@ public final class MemorySnapshot {
      */
     public MemorySnapshot(String sessionId, List<ChatMessage> messages,
                           int tokenEstimate, String summary) {
-        this.sessionId = SessionMemoryIds.shortTermMemoryId(sessionId);
-        this.messages = messages != null
-                ? Collections.unmodifiableList(new ArrayList<>(messages))
-                : List.of();
-        this.tokenEstimate = tokenEstimate;
-        this.summary = summary != null ? summary : "";
+        this(sessionId, messages, tokenEstimate, summary, false, false, 0, null);
     }
 
     /**
@@ -42,12 +40,21 @@ public final class MemorySnapshot {
      */
     public MemorySnapshot(String sessionId, List<ChatMessage> messages,
                           int tokenEstimate, String summary, boolean rawSessionId) {
+        this(sessionId, messages, tokenEstimate, summary, rawSessionId, false, 0, null);
+    }
+
+    public MemorySnapshot(String sessionId, List<ChatMessage> messages,
+                          int tokenEstimate, String summary, boolean rawSessionId,
+                          boolean repaired, int removedMessageCount, String repairReason) {
         this.sessionId = rawSessionId ? sessionId : SessionMemoryIds.shortTermMemoryId(sessionId);
         this.messages = messages != null
                 ? Collections.unmodifiableList(new ArrayList<>(messages))
                 : List.of();
         this.tokenEstimate = tokenEstimate;
         this.summary = summary != null ? summary : "";
+        this.repaired = repaired;
+        this.removedMessageCount = Math.max(0, removedMessageCount);
+        this.repairReason = repairReason;
     }
 
     public String sessionId() { return sessionId; }
@@ -65,4 +72,10 @@ public final class MemorySnapshot {
      * Context 阶段不能依赖该字段必定存在。
      */
     public String summary() { return summary; }
+
+    public boolean repaired() { return repaired; }
+
+    public int removedMessageCount() { return removedMessageCount; }
+
+    public String repairReason() { return repairReason; }
 }

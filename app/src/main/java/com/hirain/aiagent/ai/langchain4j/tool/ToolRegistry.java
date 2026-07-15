@@ -111,11 +111,22 @@ public class ToolRegistry {
      * @return 工具执行结果字符串（JSON 格式或普通文本）
      */
     public String dispatch(ToolExecutionRequest request) {
+        return dispatchWithOutcome(request).resultText();
+    }
+
+    /** 所有 TEXT 工具执行的统一结构化入口。 */
+    public ToolDispatchOutcome dispatchWithOutcome(ToolExecutionRequest request) {
+        if (request == null) {
+            return ToolDispatchOutcome.failure(false, false, "无效的工具调用: null",
+                    "INVALID_REQUEST", "request is null", null, null);
+        }
         ToolDispatcher dispatcher = dispatchers.get(request.name());
         if (dispatcher == null) {
-            return "无效的工具调用: " + request.name();
+            return ToolDispatchOutcome.failure(false, false,
+                    "无效的工具调用: " + request.name(), "TOOL_NOT_REGISTERED",
+                    "tool is not registered", null, null);
         }
-        return dispatcher.dispatch(request);
+        return dispatcher.dispatchWithOutcome(request);
     }
 
     /**

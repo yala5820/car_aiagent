@@ -84,6 +84,34 @@ public class MemoryCompressorTraceTest {
         assertEquals(0L, data.getAttributes().get(AttributeKey.longKey(TraceAttributeKeys.MEMORY_OUTPUT_CHARS)).longValue());
     }
 
+    @Test
+    public void targetCompressionReplacesExistingSummaryAndPreservesProtectedTurns() {
+        MemoryCompressor compressor = new MemoryCompressor(
+                new FakeChatModel("合并后的唯一摘要"));
+        List<ChatMessage> oldTurns = List.of(
+                UserMessage.from("旧问题"), AiMessage.from("旧回答"));
+        List<ChatMessage> protectedTurns = List.of(
+                UserMessage.from("最近问题一"), AiMessage.from("最近回答一"),
+                UserMessage.from("最近问题二"), AiMessage.from("最近回答二"));
+        List<ChatMessage> original = new ArrayList<>();
+        original.add(UserMessage.from("【对话摘要】旧摘要"));
+        original.addAll(oldTurns);
+        original.addAll(protectedTurns);
+        MemoryCompactionPlan plan = new MemoryCompactionPlan(
+                "session-1", 500, 900, "fingerprint", original,
+                "旧摘要", oldTurns, protectedTurns);
+
+        List<ChatMessage> result = compressor.compressForTarget(plan, null);
+
+        assertEquals(5, result.size());
+        assertEquals("【对话摘要】合并后的唯一摘要",
+                ((UserMessage) result.get(0)).singleText());
+        assertEquals(protectedTurns, result.subList(1, result.size()));
+        long summaryCount = result.stream().filter(message -> message instanceof UserMessage
+                && ((UserMessage) message).singleText().startsWith("【对话摘要】")).count();
+        assertEquals(1, summaryCount);
+    }
+
     private static List<ChatMessage> longConversation() {
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(SystemMessage.from("system"));

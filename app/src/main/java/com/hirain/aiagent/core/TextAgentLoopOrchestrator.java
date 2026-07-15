@@ -10,6 +10,8 @@ import com.hirain.aiagent.context.ContextErrorCode;
 import com.hirain.aiagent.context.ContextPrepareResult;
 import com.hirain.aiagent.context.ModelContextWindowProfiles;
 import com.hirain.aiagent.memory.ContextMemoryGateway;
+import com.hirain.aiagent.memory.MemoryPersistenceException;
+import com.hirain.aiagent.ai.langchain4j.tool.ToolDispatchOutcome;
 import com.hirain.aiagent.runtime.RequestSession;
 import com.hirain.aiagent.safety.SafetyDecision;
 import com.hirain.aiagent.safety.ToolSafetyEngine;
@@ -108,8 +110,7 @@ public class TextAgentLoopOrchestrator {
         }
 
         String userId = session.userId() != null ? session.userId() : "default_user";
-        ChatMemory chatMemory = memoryGateway.chatMemoryForSession(
-                sessionId, config.maxMemoryMessages());
+        ChatMemory chatMemory = memoryGateway.chatMemoryForSession(sessionId);
         TraceSession traceSession = extractTraceSession(session.orchestratorContext());
         AgentTraceRecorder trace = traceSession != null
                 ? new AgentTraceRecorder(traceSession) : null;
@@ -126,6 +127,7 @@ public class TextAgentLoopOrchestrator {
             // 这样超预算或模型调用前取消的请求不会污染 SessionMemory。
             UserMessage currentMsg = prepareResult.currentUserMessage();
             boolean currentUserCommitted = false;
+            boolean compressionAttemptedForRequest = false;
 
             for (int i = 0; i < config.maxIterations(); i++) {
                 loopCtx.setIteration(i);
@@ -151,8 +153,11 @@ public class TextAgentLoopOrchestrator {
                                     && prepareResult.cancelChecker().isCancelled();
                     ContextAssemblyRequest assemblyReq = new ContextAssemblyRequest(
                             prepareResult.frame(), i, budgetPolicy,
-                            cancelCheck, false, session);
+                            cancelCheck, compressionAttemptedForRequest, session);
                     ContextAssemblyResult assemblyResult = contextAssemblyGateway.assemble(assemblyReq);
+                    if (assemblyResult != null && assemblyResult.compressionAttempted()) {
+                        compressionAttemptedForRequest = true;
+                    }
     
                     if (assemblyResult == null || !assemblyResult.success()) {
                         state.markError();
@@ -204,7 +209,8 @@ public class TextAgentLoopOrchestrator {
                             : null;
                     if (trace != null) {
                         trace.recordLlmRequest(llmSpan, config.modelName(), i,
-                                requestMessages, requestTools);
+                                requestMessages, requestTools,
+                                assemblyResult.budgetReport().estimatedInputTokens());
                     }
                     Scope llmScope = llmSpan != null ? llmSpan.makeCurrent() : null;
                     ChatResponse response;
@@ -212,7 +218,8 @@ public class TextAgentLoopOrchestrator {
                     try {
                         response = config.modelCaller().call(request);
                         aiMessage = response.aiMessage();
-                        if (llmSpan != null) trace.enrichLlmResponse(llmSpan, response);
+                        if (llmSpan != null) trace.enrichLlmResponse(llmSpan, response,
+                                assemblyResult.budgetReport().estimatedInputTokens());
                     } catch (Exception e) {
                         if (trace != null) trace.recordException(llmSpan, e);
                         throw e;
@@ -233,10 +240,10 @@ public class TextAgentLoopOrchestrator {
                                 "cancelled_after_model_call");
                     }
     
-                    chatMemory.add(aiMessage);
-    
                     // LLM 请求了工具调用 → ToolSafetyEngine → ToolExecutor → 回填
                     if (aiMessage.hasToolExecutionRequests()) {
+                        // ToolResult 必须紧跟其声明者，因此 ToolCall AiMessage 在执行工具前持久化。
+                        chatMemory.add(aiMessage);
                         List<ToolExecutionRequest> toolReqs = aiMessage.toolExecutionRequests();
                         if (session.deadline().isExpired(System.currentTimeMillis())) {
                             state.markTimeout();
@@ -345,7 +352,7 @@ public class TextAgentLoopOrchestrator {
                                 SafetyDecision decision = safetyDecisions.get(toolIdx);
     
                                 String toolResult;
-                                boolean executionSucceeded = false;
+                                ToolDispatchOutcome dispatchOutcome = null;
                                 if (decision.isDenied()) {
                                     toolResult = toolSafetyEngine.formatDenyResult(decision);
                                 } else {
@@ -363,37 +370,27 @@ public class TextAgentLoopOrchestrator {
                                     // Stage 2: tool.dispatch（接入真实 DispatchDiagnostics）
                                     Span dispatchSpan = trace != null ? trace.startToolDispatch(req.name()) : null;
                                     long dispatchStartMs = System.currentTimeMillis();
-                                    String targetClass = getTargetClass(req.name());
-                                    String targetMethod = getTargetMethod(req.name());
-                                    com.hirain.aiagent.ai.langchain4j.tool.ToolDispatcher.DispatchDiagnostics diag =
-                                            new com.hirain.aiagent.ai.langchain4j.tool.ToolDispatcher.DispatchDiagnostics();
                                     try {
-                                        // 优先走真实 dispatcher（获取阶段诊断），否则回退到 toolExecutor
-                                        com.hirain.aiagent.ai.langchain4j.tool.ToolDispatcher realDispatcher =
-                                                config.toolRegistry() != null
-                                                        ? config.toolRegistry().dispatcherFor(req.name())
-                                                        : null;
-                                        if (realDispatcher != null) {
-                                            toolResult = realDispatcher.dispatch(req, diag);
-                                            executionSucceeded = diag.argumentParseSuccess
-                                                    && diag.invokeSuccess;
-                                        } else {
-                                            toolResult = config.toolExecutor().execute(req);
-                                            diag.argumentParseSuccess = true;
-                                            diag.invokeSuccess = true;
-                                            executionSucceeded = true;
-                                        }
+                                        dispatchOutcome = config.toolRegistry() != null
+                                                ? config.toolRegistry().dispatchWithOutcome(req)
+                                                : ToolDispatchOutcome.failure(false, false,
+                                                "工具执行失败: TEXT ToolRegistry 未配置",
+                                                "INVALID_CONFIG", "TEXT ToolRegistry is required",
+                                                null, null);
+                                        toolResult = dispatchOutcome.resultText();
                                         if (trace != null) {
                                             trace.finishToolDispatch(dispatchSpan,
-                                                    executionSucceeded, targetClass, targetMethod,
+                                                    dispatchOutcome.dispatchSuccess(),
+                                                    dispatchOutcome.targetClass(), dispatchOutcome.targetMethod(),
                                                     System.currentTimeMillis() - dispatchStartMs,
-                                                    diag.argumentParseSuccess, diag.invokeSuccess);
+                                                    dispatchOutcome.argumentParseSuccess(),
+                                                    dispatchOutcome.invokeSuccess());
                                         }
                                     } catch (Exception dispatchEx) {
                                         if (trace != null) {
-                                            trace.finishToolDispatch(dispatchSpan, false, targetClass, targetMethod,
+                                            trace.finishToolDispatch(dispatchSpan, false, null, null,
                                                     System.currentTimeMillis() - dispatchStartMs,
-                                                    diag.argumentParseSuccess, diag.invokeSuccess);
+                                                    false, false);
                                         }
                                         throw dispatchEx;
                                     }
@@ -409,8 +406,7 @@ public class TextAgentLoopOrchestrator {
                                             toolResult != null ? toolResult : "{}"));
                                     memoryWriteSuccess = true;
                                     if (trace != null) {
-                                        trace.finishTool(toolSpan, toolResult, decision,
-                                                executionSucceeded);
+                                        trace.finishTool(toolSpan, decision, dispatchOutcome);
                                     }
                                     loopCtx.addToolResult(req.name(), req.arguments(),
                                             toolResult, decision);
@@ -421,6 +417,8 @@ public class TextAgentLoopOrchestrator {
                                                 memoryWriteSuccess && loopCtxWriteSuccess);
                                     }
                                 }
+                            } catch (MemoryPersistenceException e) {
+                                throw e;
                             } catch (Exception e) {
                                 if (toolScope != null) {
                                     toolScope.close();
@@ -475,6 +473,8 @@ public class TextAgentLoopOrchestrator {
                     }
     
                     AiMessage processedMsg = AiMessage.from(output);
+                    // 普通文本只写入 PostProcessor 后的最终版本，确保外部回复与 Memory 一致。
+                    chatMemory.add(processedMsg);
                     if (config.terminator().shouldStop(loopCtx,
                             ChatResponse.builder().aiMessage(processedMsg).build())) {
                         if (memoryGateway != null) {

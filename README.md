@@ -18,7 +18,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 - 四层记忆系统（Session / 长期记忆 / 压缩 / 提取）
 - 全链路追踪（OpenTelemetry + Phoenix）
 - **虚拟车辆状态机（VehicleStateMachine）**：Demo 阶段车控 tool 的状态托管中心，参数校验 + 状态收敛
-- **Context 上下文模块**：以 8 个请求级 Provider + 3 个迭代级 Provider 统一采集 Prompt、Memory、Tool、车辆与时间信息；最终 `ChatMessage` 和 `ToolSpecification` 由 Context 独占装配
+- **Context 上下文模块**：以 8 个请求级 Provider + 3 个迭代级 Provider 统一采集 Prompt、Memory、Tool、车辆与时间信息；独占装配 TEXT 模型输入，并支持集中策略、预算裁剪、Memory 摘要恢复和完整 Trace
 
 ### 改造历史
 
@@ -44,6 +44,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 | **Phase 18** | **Context TEXT 独占切换**：11 个 Provider 统一输出 Contribution；按 `prepare` / `assemble` 分离静态与动态上下文；`ContextMessageAssembler` 独占生成 TEXT 消息和工具规格；补齐预算、消息序列、工具交换、取消和端到端测试 |
 | **Phase 19** | **Context / Agent Trace 收口**：建立 `agent.request → agent.loop → iteration → context / gen_ai / tool → response.dispatch` Trace 树，补充 Provider、消息、工具 schema 与 Tool 执行阶段诊断；仍保留少量准确性和设备侧验收项 |
 | **Phase 20** | **P0 运行时与车控安全收口**：单 TEXT 准入、统一 30 秒 deadline、模型 HTTP Call 取消、ToolGroup fail-closed、高风险动作文本二次确认 |
+| **Phase 21** | **Context 长会话与语义收口**：完整 Session 历史、集中 ContextPolicy、可选数据裁剪、真实摘要压缩与一次重装配、结构化 Tool outcome、FULL_DEBUG 全文 Trace、Token 误差字段和 Legacy 清理 |
 
 ---
 
@@ -224,6 +225,9 @@ AIAgent/
 │   │   │   │   ├── ContextPrepareResult.java    # prepare 结果
 │   │   │   │   ├── ContextAssemblyRequest.java  # 单轮装配请求
 │   │   │   │   ├── ContextAssemblyResult.java   # 最终消息、工具与预算结果
+│   │   │   │   ├── ContextAssemblyAttempt.java  # 单次预算/压缩决策
+│   │   │   │   ├── ContextContributionDecision.java # produced/included/trimmed 诊断
+│   │   │   │   ├── ContextPolicies.java         # 生产 source 集中策略
 │   │   │   │   ├── ContextContribution.java     # Provider 统一输出契约
 │   │   │   │   ├── TextContextContribution.java
 │   │   │   │   ├── MessageContextContribution.java
@@ -248,7 +252,8 @@ AIAgent/
 │   │   │   │
 │   │   │   ├── ai/langchain4j/tool/        # 工具调度系统
 │   │   │   │   ├── ToolDispatcher.java     # 反射工具执行器
-│   │   │   │   └── ToolRegistry.java       # 注册中心
+│   │   │   │   ├── ToolRegistry.java       # 注册中心
+│   │   │   │   └── ToolDispatchOutcome.java # 结构化执行结果
 │   │   │   │
 │   │   │   ├── core/                       # Agent 循环引擎
 │   │   │   │   ├── AgentLoopOrchestrator.java  # 非 TEXT / 兼容循环引擎
@@ -284,6 +289,8 @@ AIAgent/
 │   │   │   │   ├── SessionMemoryStore.java  # Session 持久化（含元数据字段）
 │   │   │   │   ├── SessionMemoryIds.java    # memoryId 统一生成工具
 │   │   │   │   ├── SessionChatMemoryProvider.java # 按 sessionId 选择 ChatMemory
+│   │   │   │   ├── PersistentSessionChatMemory.java # 不按消息数静默淘汰历史
+│   │   │   │   ├── SessionHistorySequenceValidator.java # turn/tool exchange 校验与尾部修复
 │   │   │   │   ├── UserMemoryContext.java   # 用户记忆聚合
 │   │   │   │   ├── LongTermMemoryStore.java # 长期记忆
 │   │   │   │   ├── MemoryEntry.java         # 记忆条目
@@ -419,7 +426,7 @@ execute(session, prepareResult)
 |----|------|------|
 | Session 管理 | SessionManager + SessionMemoryStore | 会话生命周期、元数据与 SQLite 消息持久化 |
 | 长期记忆 | LongTermMemoryStore + MemoryExtractor | 跨 Session 持久化用户偏好/事实（SQLite） |
-| 压缩能力 | MemoryCompressor | 提供摘要压缩与原子写回能力；尚未接入 Context 超预算自动恢复闭环 |
+| 压缩能力 | MemoryCompressor + MemoryOrchestrator | Context 超预算时按完整 turn 摘要，CAS 原子写回并重读后最多二次装配一次 |
 | 用户隔离 | UserMemoryContext | userId 维度隔离，多用户支持 |
 
 ### 4.6 TraceManager（全链路追踪）
@@ -428,13 +435,13 @@ execute(session, prepareResult)
 
 基于 OpenTelemetry + Phoenix 的追踪系统：
 - 目标树为 `agent.request → agent.loop → agent.iteration → context / gen_ai / tool → response.dispatch`
-- Context 记录 prepare/assemble、Provider、fragment、message、toolset 与预算信息
+- Context 记录 prepare/assemble、Provider、fragment、message、toolset、裁剪、压缩和 Token 估算误差信息
 - Tool 记录 safety_check、dispatch、result_writeback 等阶段诊断
 - Span 携带模型、消息、工具 schema、Token、HTTP、工具参数与结果等调试信息
 - 开发环境通过 `adb reverse tcp:6006 tcp:6006` 连接 PC 端 Phoenix
 - `TraceConfig.production()` 一键关闭（全局 no-op）
 
-开发模式已经支持较完整的输入来源观测，但 `TraceAttributeWriter` 当前仍保留文本/参数/结果长度上限；Phoenix 对长消息和完整 schema 的设备侧展示也仍需验收。
+Demo `FULL_DEBUG` 在业务层直接记录完整文本、参数、结果和工具 schema，不主动截断。Phoenix/exporter 对超长 attribute 的设备侧展示仍需验收。
 
 ### 4.7 ConversationManager（会话管理门面）
 
@@ -547,8 +554,8 @@ handleTextRequest() → traceManager.startAgentRequest() → agentRuntime.startS
 - `ToolGroupRegistry.defaultRegistry()`：全量 46 个 toolName 注册，支持按 toolName 反查、多组合并去重
 - `DefaultToolGroupSelector`：明确意图只选择对应业务组；普通 CHAT / UNKNOWN 使用空工具；弱车控表达要求先澄清
 - `ToolGroupSelectionResult`：使用 `SELECTED / CHAT_ONLY / CLARIFICATION_REQUIRED / FAILED_CLOSED` 稳定状态，不再解析原因文本决定权限
-- Selector 返回 null、抛异常、返回全量或聚合组时，Runtime 失败关闭并在 Context / LLM 前终止
-- `ToolGroupContextProvider` 只有在 `SELECTED` 状态下解析规格；其他状态一律输出空工具
+- Selector 返回 null、抛异常或普通聚合组时，Runtime 失败关闭；结构合法的 `ALL_SAFE_DEMO_GROUP` 作为 `allToolsFallback` 允许进入 Context
+- `ToolGroupContextProvider` 在 `SELECTED` 状态解析规格，并区分 `SELECTED` 与 `ALL_FALLBACK`；其他状态输出空工具
 - 聚合组 `riskLevel` 遵循最高风险上浮规则（`COMMON_VEHICLE_GROUP` 和 `ALL_SAFE_DEMO_GROUP` 均为 HIGH）
 - ToolGroup 不负责执行工具；实际调用由 ToolSafetyEngine 先审核，再由 ToolRegistry / ToolDispatcher 完成
 
@@ -565,7 +572,7 @@ Provider 分为 REQUEST_STATIC（8 个，prepare 执行）和 ITERATION_DYNAMIC�
 - **REQUEST_STATIC**：Runtime、Persona、Prompt、UserInput、Intent、ToolGroup、LongTermMemory、CallerExtra
 - **ITERATION_DYNAMIC**：SessionMemory、VehicleState、Time
 
-每个 Provider 输出 `List<ContextContribution>`，包含可见性、信任级别、优先级和来源标记。Provider 不再直接操作 `ContextSection`。
+每个 Provider 输出 `List<ContextContribution>`。`ContextPolicies` 集中定义 lifecycle、required、visibility、trust、priority 和 trim eligibility，Orchestrator 会校验生产 Provider 与 Contribution 是否发生策略漂移。旧 `ContextSection`、`ContextSectionType` 和 `ContextDebugInfo` 已删除。
 
 #### 消息装配
 
@@ -593,7 +600,9 @@ Service worker → Context.prepare → Runtime gate → iteration/assemble → m
 | `ContextMessageAssembler` | 纯函数装配 System、Context Data、SessionMemory、CurrentUser 与 ToolSpecification |
 | `ContextMessageSequenceValidator` | 校验唯一 System、当前用户唯一性和 ToolExchange 原子序列 |
 | `ContextBudgetPolicy` | qwen-turbo Demo 窗口 32768，预留输出 2048、安全余量 1024，最大输入 29696 tokens |
-| `ContextTraceRecorder` | 记录 prepare/assemble、Provider、fragment、message、toolset 和预算诊断 |
+| `ContextPolicies` | 集中管理所有生产 source 的生命周期、required、可见性、信任、优先级和裁剪资格 |
+| `ContextAssemblyAttempt` | 保存裁剪结果、压缩建议、SessionMemory 目标预算和最终 Contribution 决策 |
+| `ContextTraceRecorder` | 记录 prepare/assemble、Provider、fragment、message、toolset、预算与压缩诊断 |
 | `ContextMemoryGateway` | Context 与 Memory 间窄接口，提供 Session/长期记忆快照和压缩协议 |
 
 #### 11 个 Provider
@@ -617,8 +626,9 @@ Service worker → Context.prepare → Runtime gate → iteration/assemble → m
 - required Provider 只有 `SUCCESS` 才放行；返回 `FALLBACK` / `FAILED` 或抛异常都会中止当前请求
 - optional Provider 可降级，状态和错误写入 Provider outcome / Trace，其余 Provider 继续执行
 - assemble 会拒绝重复 System、缺少当前用户、孤立 ToolResult、ToolExchange 不闭合和工具 schema 冲突
-- 超出 Context 预算时返回 `CONTEXT_BUDGET_EXCEEDED`，不会调用模型，也不会写入当前用户消息
-- 当前尚未启用“裁剪 → Memory 压缩 → 重读 → 二次 assemble”的自动恢复流程
+- 超预算时先按优先级删除允许裁剪的 optional Context Data，再请求 Memory 按完整 turn 摘要并 CAS 写回，随后重读动态 Provider 并最多二次 assemble 一次
+- Prompt、CURRENT_USER、SessionMemory、摘要、required 数据和工具规格不会被普通裁剪；恢复后仍超限才返回 `CONTEXT_BUDGET_EXCEEDED`
+- 失败结果不会调用模型，也不会在预算通过前写入当前用户消息
 
 ### 4.15 ToolSafetyEngine（Tool 执行前安全审核）
 
@@ -746,17 +756,17 @@ session.close() → scope.close() + rootSpan.end()
 |------|----------|--------------------|
 | 对外 AIDL 协议 | 已完成 | 主请求、会话 CRUD、取消与 Listener 接口已落地；仍需调用方与车机联调 |
 | AgentRuntime | 基本完成 | TEXT 已具备单槽位准入、30 秒 deadline、HTTP Call 取消、唯一终态与 requestId 防重放；VOICE/SCENE 等仍使用兼容链路 |
-| TEXT Context | 基本完成 | 8 静态 + 3 动态 Provider；消息和工具规格已由 Context 独占生成；长会话恢复与 Legacy 清理未完成 |
+| TEXT Context | 代码完成、部分设备验收 | 8 静态 + 3 动态 Provider；独占消息和工具规格；集中策略、裁剪、压缩重试和 Legacy 清理已完成；Automotive 模拟器 AIDL、基础 TEXT、会话/用户隔离与 52 条消息长历史已通过，压缩、工具和 Phoenix 专项仍待验收 |
 | TEXT AgentLoop | 基本完成 | 多轮循环、整批 Safety 预检、确认与状态复核已接通；模型同步 HTTP Call 可取消，真实车控执行仍未接入 |
 | IntentRouter | Demo 完成 | 11 类关键词/正则意图，低成本且可解释；复杂自然语言仍依赖 fallback |
 | ToolGroup | P0 基线完成 | 13 个工具组；明确意图最小暴露，普通聊天空工具，不确定/异常/聚合结果失败关闭 |
-| ToolRegistry / Dispatcher | 基本完成 | 46 个 `@Tool` 统一反射注册和调度；工具失败聚合状态仍有少量 Trace 语义待统一 |
+| ToolRegistry / Dispatcher | 基本完成 | 46 个 `@Tool` 统一反射注册和调度；TEXT 使用结构化 ToolDispatchOutcome，不再从错误文本猜测成功状态 |
 | Tool Safety Engine | P0 基线完成 | 统一入口、HIGH 规则漏配拒绝、文本确认、30 秒 PendingAction、确认前复核和最多一次执行已接通；仍不是量产功能安全方案 |
 | Prompt / Persona | 基本完成 | 11 个模板；支持 chat/friendly/concise TEXT System Prompt；更复杂动态策略未实现 |
-| Session 记忆 | 基本完成 | SQLite 持久化、会话 CRUD 和模型可见历史切换已接通；固定 50 条窗口可能切断 ToolExchange |
-| 长期记忆 | 可用 | 提取、存储、按 userId 注入已接通；降级状态报告和衰减策略仍待完善 |
-| Memory 压缩 | 能力已存在 | 已有计划/执行接口与摘要能力，但 Context 超预算时尚未自动压缩并二次装配 |
-| Trace | 基本完成 | 主 Trace 树、Context 来源、最终消息、工具 schema 和 Tool 阶段已接通；长内容截断与 Phoenix 设备显示待收口 |
+| Session 记忆 | 代码完成、基础设备验收通过 | SQLite 持久化、会话 CRUD、完整历史和 ToolExchange 校验已接通；Automotive 模拟器实测 52 条消息连续有序、首尾保留，含 ToolExchange 的超长会话和目标车机仍待验收 |
+| 长期记忆 | 可用 | 提取、存储、按 userId 注入和 FALLBACK 状态已接通；衰减策略仍可后续完善 |
+| Memory 压缩 | 代码完成 | Context 超预算时按完整 turn 摘要、CAS 写回、动态重读并最多重装配一次；真实摘要模型待设备验收 |
+| Trace | 代码完成 | 主 Trace 树、Context 来源、最终消息、工具 schema、裁剪/压缩和 Tool 阶段已接通；业务层全文输出，Phoenix 设备显示待验收 |
 | 虚拟车辆状态机 | Demo 完成 | 8 个状态子系统、参数校验和状态收敛已用于 Demo 车控 |
 | SoaService 真车通信 | 未完成 | 方法体仍为空；当前车控结果来自 VehicleStateMachine，不代表真实车辆执行 |
 | 场景 / VLM / VR | 部分完成 | 已有模型、Camera SDK 和闭源 VR/TTS 适配；依赖目标设备、外部服务与实车验收 |
@@ -764,18 +774,18 @@ session.close() → scope.close() + rootSpan.end()
 
 ### 6.1 Context 当前剩余边界
 
-- `SessionMemoryContextProvider` 最多读取 50 条消息，窗口边界可能切断一次 Tool Call / Tool Result 交换。
-- Context 超预算目前直接返回 `CONTEXT_BUDGET_EXCEEDED`；优先级裁剪、Memory 压缩、重读和二次 assemble 尚未接入生产链。
-- Token 预算使用启发式估算，不是 Qwen 精确 tokenizer，需要用真实 usage 数据校准。
-- `LongTermMemoryContextProvider` 的异常/未配置降级状态当前可能被记录为 success，虽然不影响正常有数据路径，但会降低诊断准确性。
-- 开发 Trace 已采集完整消息和工具 schema，但 `TraceAttributeWriter` 仍有长度限制；Phoenix 设备侧还需验证普通对话、工具成功和工具失败三类请求。
-- Context 当前只独占 TEXT 输入；VOICE、SCENE、VLM 等兼容链路尚未统一迁移。
+- Token 预算仍使用完整结构的启发式估算，不是 Qwen 精确 tokenizer；Trace 已提供 estimated/actual/delta/ratio，需用至少 10 个真实请求校准。
+- 压缩摘要当前以头部 `【对话摘要】` UserMessage 持久化，Provider 会把它分离为 UNTRUSTED Context Data；未来可单独迁移为 SQLite 结构化字段。
+- Runtime/Context 已支持 allToolsFallback，但默认 Selector 当前对普通 UNKNOWN 返回 CHAT_ONLY，不主动触发全量兜底；是否改变匹配规则属于独立 ToolGroup 策略任务。
+- FULL_DEBUG 在业务层不截断；Phoenix/exporter 是否限制超长 attribute 仍需设备验证。
+- Context 当前只独占 TEXT 输入；VOICE、SCENE、VLM 等兼容链路仍保留旧 AgentLoop/PreProcessor。
 
 ### 6.2 当前验证基线
 
-- JVM 单元测试结果：339 tests，0 failures，0 errors，0 skipped。
-- 本轮执行 `.\gradlew.bat :app:testDebugUnitTest` 与 `.\gradlew.bat :app:assembleDebug`：均 `BUILD SUCCESSFUL`。
-- 尚未由 JVM 测试证明：真实 Qwen token 偏差、Phoenix 长字段展示、真实 SQLite 超长工具会话、车机并发/取消竞争和真车 SOA 控制。
+- 自动门禁已通过 62 个测试类、354 个 JVM 测试，以及 Debug APK 构建和 Android Lint。
+- 已验证完整历史、裁剪、压缩重装配、stale CAS、allToolsFallback、结构化 Tool outcome、PostProcessor 写回和 FULL_DEBUG 长正文。
+- Automotive 模拟器已验证外部 TestApp AIDL 绑定、真实 DashScope TEXT 回复、同 Session 记忆召回、新 Session 隔离、不同用户长期记忆隔离，以及 SQLite 52 条消息不截断且序列错误为 0。
+- 尚未完成外部验收：持久化 ToolExchange 长会话、真实超预算摘要、同 sessionId 切换 user、快速请求终态、异常工具/安全拒绝、真实 Qwen token 偏差、Phoenix 长字段与父子 Span 展示、目标车机和真车 SOA 控制。
 
 ---
 
@@ -836,4 +846,4 @@ adb reverse tcp:6006 tcp:6006
 - [三个 P0 改进计划与实施状态](docs/plan/2026-07-13-agent-p0-runtime-tool-safety-improvement-plan.md)
 - [Context Full Control 设计](docs/design/2026-07-11-context-full-control-design.md)
 
-**当前结论：** AIAgent 的 AIDL 协议、TEXT Runtime、Context 输入控制、工具调度、Prompt、会话记忆和 Trace 骨架已经成型；三个 P0 已形成“真实车辆接入前的本地安全基础”。下一步重点是长会话预算恢复、设备侧故障评测、调用方鉴权，以及真实 SOA 的回执、幂等、执行后状态确认与补偿。
+**当前结论：** AIAgent 的 AIDL 协议、TEXT Runtime、Context 输入控制、工具调度、Prompt、会话记忆和 Trace 已形成可运行闭环；Context 长会话预算恢复和 Legacy 收口已经完成代码与自动化门禁，Automotive 模拟器也已通过基础 AIDL、TEXT、隔离和 52 条 SQLite 历史验收。下一步重点是目标车机上的压缩、工具、切换与取消专项，Phoenix/真实 Qwen token 校准、设备侧故障评测、调用方鉴权，以及真实 SOA 的回执、幂等、执行后状态确认与补偿。

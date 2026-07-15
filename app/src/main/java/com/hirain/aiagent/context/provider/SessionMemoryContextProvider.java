@@ -9,6 +9,7 @@ import com.hirain.aiagent.context.ContextProviderResult;
 import com.hirain.aiagent.context.ContextTrustLevel;
 import com.hirain.aiagent.context.ContextVisibility;
 import com.hirain.aiagent.context.MessageContextContribution;
+import com.hirain.aiagent.context.TextContextContribution;
 import com.hirain.aiagent.memory.ContextMemoryGateway;
 import com.hirain.aiagent.memory.MemorySnapshot;
 import com.hirain.aiagent.runtime.RequestSession;
@@ -26,12 +27,12 @@ import dev.langchain4j.data.message.ChatMessage;
  */
 public class SessionMemoryContextProvider implements ContextProvider {
 
-    private static final int DEFAULT_MAX_MESSAGES = 50;
-
     @Override
     public String name() {
         return "SessionMemoryContextProvider";
     }
+
+    @Override public String sourceKey() { return com.hirain.aiagent.context.ContextPolicies.SESSION_MEMORY; }
 
     @Override
     public ContextLifecycle lifecycle() {
@@ -40,7 +41,7 @@ public class SessionMemoryContextProvider implements ContextProvider {
 
     @Override
     public boolean required(RequestSession session, ContextBuildInput input) {
-        return true;
+        return com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input).required();
     }
 
     public ContextProviderResult provide(RequestSession session, ContextBuildInput input) {
@@ -59,19 +60,35 @@ public class SessionMemoryContextProvider implements ContextProvider {
 
         List<ChatMessage> messages;
         try {
-            MemorySnapshot snapshot = memory.sessionMemorySnapshot(sessionId, DEFAULT_MAX_MESSAGES);
+            MemorySnapshot snapshot = memory.sessionMemorySnapshot(sessionId);
             messages = snapshot.messages();
+            Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+            metadata.put("session_id", sessionId);
+            metadata.put("history_repaired", snapshot.repaired());
+            metadata.put("removed_message_count", snapshot.removedMessageCount());
+            if (snapshot.repairReason() != null) {
+                metadata.put("repair_reason", snapshot.repairReason());
+            }
+            List<com.hirain.aiagent.context.ContextContribution> contributions = new java.util.ArrayList<>();
+            if (snapshot.summary() != null && !snapshot.summary().isEmpty()) {
+                contributions.add(new TextContextContribution(
+                        com.hirain.aiagent.context.ContextPolicies.resolve(
+                                com.hirain.aiagent.context.ContextPolicies.SESSION_MEMORY_SUMMARY,
+                                session, input), name(),
+                        TextContextContribution.TARGET_CONTEXT_DATA, snapshot.summary(),
+                        Map.of("summary_origin", "MemoryCompressor")));
+            }
+            MessageContextContribution contribution = new MessageContextContribution(
+                    com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input),
+                    name(), MessageContextContribution.SOURCE_SESSION_MEMORY,
+                    messages, metadata);
+            contributions.add(contribution);
+            return ContextProviderResult.success(name(), contributions);
         } catch (Exception e) {
             return ContextProviderResult.failure(name(),
                     "session_memory_read_failed: " + e.getMessage(),
                     ContextErrorCode.REQUIRED_PROVIDER_FAILED);
         }
 
-        MessageContextContribution contribution = new MessageContextContribution(
-                "session_memory", ContextVisibility.MODEL_VISIBLE, ContextTrustLevel.TRUSTED_DATA,
-                ContextPriority.HIGH, ContextLifecycle.ITERATION_DYNAMIC,
-                true, name(), MessageContextContribution.SOURCE_SESSION_MEMORY,
-                messages, Map.of("session_id", sessionId));
-        return ContextProviderResult.success(name(), List.of(contribution));
     }
 }

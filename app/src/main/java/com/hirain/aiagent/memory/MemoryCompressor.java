@@ -157,6 +157,36 @@ public class MemoryCompressor {
         }
     }
 
+    /**
+     * 按 Context 给出的目标预算生成“单一摘要 + 最近完整 turns”候选。
+     * 此方法只调用摘要模型，不写 Store。
+     */
+    public List<ChatMessage> compressForTarget(MemoryCompactionPlan plan,
+                                               AgentTraceRecorder trace) {
+        if (plan == null || !plan.hasCompactableHistory() || summaryModel == null) return List.of();
+        List<ChatMessage> summaryInput = new ArrayList<>();
+        if (!plan.existingSummary().isEmpty()) {
+            summaryInput.add(UserMessage.from(SUMMARY_PREFIX + plan.existingSummary()));
+        }
+        summaryInput.addAll(plan.compactableMessages());
+        Span span = trace != null ? trace.startMemory("compress", inputChars(summaryInput)) : null;
+        try {
+            SummaryResult summaryResult = summarize(summaryInput);
+            if (summaryResult.error != null || summaryResult.summary.isEmpty()) {
+                if (trace != null && summaryResult.error != null) trace.recordException(span, summaryResult.error);
+                finishCompress(trace, span, false, summaryResult.prompt, summaryResult.summary);
+                return List.of();
+            }
+            List<ChatMessage> candidate = new ArrayList<>();
+            candidate.add(UserMessage.from(SUMMARY_PREFIX + summaryResult.summary));
+            candidate.addAll(plan.protectedMessages());
+            finishCompress(trace, span, true, summaryResult.prompt, summaryResult.summary);
+            return candidate;
+        } finally {
+            if (span != null) span.end();
+        }
+    }
+
     // ── 内部方法 ──
 
     private SummaryResult summarize(List<ChatMessage> messages) {
@@ -175,9 +205,8 @@ public class MemoryCompressor {
                 }
             } else if (msg instanceof ToolExecutionResultMessage) {
                 ToolExecutionResultMessage tr = (ToolExecutionResultMessage) msg;
-                String abbrev = tr.text() != null && tr.text().length() > 80
-                        ? tr.text().substring(0, 80) + "…" : tr.text();
-                dialogText.append("工具[").append(tr.toolName()).append("]：").append(abbrev).append("\n");
+                dialogText.append("工具[").append(tr.toolName()).append("]：")
+                        .append(tr.text() != null ? tr.text() : "").append("\n");
             }
         }
 

@@ -28,6 +28,10 @@ public final class TraceAttributeKeys {
     public static final String GEN_AI_INPUT_TOKENS = "gen_ai.usage.input_tokens";
     public static final String GEN_AI_OUTPUT_TOKENS = "gen_ai.usage.output_tokens";
     public static final String GEN_AI_TOTAL_TOKENS = "gen_ai.usage.total_tokens";
+    public static final String GEN_AI_ESTIMATED_INPUT_TOKENS = "gen_ai.usage.estimated_input_tokens";
+    public static final String GEN_AI_INPUT_TOKEN_ESTIMATE_DELTA = "gen_ai.usage.input_estimate_delta";
+    public static final String GEN_AI_INPUT_TOKEN_ESTIMATE_RATIO = "gen_ai.usage.input_estimate_ratio";
+    public static final String GEN_AI_USAGE_AVAILABLE = "gen_ai.usage.available";
     public static final String GEN_AI_OUTPUT = "gen_ai.output";
     public static final String GEN_AI_TOOL_CALLS = "gen_ai.tool_calls";
 
@@ -51,6 +55,9 @@ public final class TraceAttributeKeys {
     public static final String TOOL_DISPATCH_TARGET_METHOD = "tool.target_method";
     public static final String TOOL_ARGUMENT_PARSE_SUCCESS = "tool.argument_parse_success";
     public static final String TOOL_INVOKE_SUCCESS = "tool.invoke_success";
+    public static final String TOOL_OUTCOME = "tool.outcome";
+    public static final String TOOL_ERROR_TYPE = "tool.error_type";
+    public static final String TOOL_ERROR_DETAIL = "tool.error_detail";
     public static final String TOOL_WRITEBACK_RESULT = "tool.writeback_result";
     public static final String TOOL_WRITEBACK_TO_MEMORY = "tool.writeback_to_memory";
 

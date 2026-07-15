@@ -7,10 +7,7 @@ import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * 不可变上下文快照 — 由 {@link ContextOrchestrator} 构建，包含所有 provider 生成的上下文信息。
@@ -33,14 +30,6 @@ public final class ContextFrame {
     private final List<ToolGroupId> selectedGroupIds;
     private final List<String> selectedToolNames;
     private final String effectivePersonaId;
-    private final String memorySummary;
-    private final String vehicleStateSnapshot;
-    private final String timeContext;
-    private final String promptContext;
-    private final String renderedExtraContext;
-    private final int tokenEstimate;
-    private final ContextDebugInfo debugInfo;
-    private final List<ContextSection> sections;
     private final List<ContextContribution> contributions;
 
     // Used only by ContextFrameBuilder
@@ -51,11 +40,7 @@ public final class ContextFrame {
                  ToolGroupSelectionResult toolGroupSelectionResult,
                  List<ToolGroupId> selectedGroupIds,
                  List<String> selectedToolNames,
-                 String effectivePersonaId, String memorySummary,
-                 String vehicleStateSnapshot, String timeContext,
-                 String promptContext, String renderedExtraContext,
-                 int tokenEstimate,
-                 ContextDebugInfo debugInfo, List<ContextSection> sections,
+                 String effectivePersonaId,
                  List<ContextContribution> contributions) {
         this.requestId = requestId;
         this.clientMessageId = clientMessageId;
@@ -74,16 +59,6 @@ public final class ContextFrame {
                 ? Collections.unmodifiableList(new ArrayList<>(selectedToolNames))
                 : List.of();
         this.effectivePersonaId = effectivePersonaId;
-        this.memorySummary = memorySummary != null ? memorySummary : "";
-        this.vehicleStateSnapshot = vehicleStateSnapshot != null ? vehicleStateSnapshot : "";
-        this.timeContext = timeContext != null ? timeContext : "";
-        this.promptContext = promptContext != null ? promptContext : "";
-        this.renderedExtraContext = renderedExtraContext != null ? renderedExtraContext : "";
-        this.tokenEstimate = tokenEstimate;
-        this.debugInfo = debugInfo;
-        this.sections = sections != null
-                ? Collections.unmodifiableList(new ArrayList<>(sections))
-                : List.of();
         this.contributions = contributions != null
                 ? Collections.unmodifiableList(new ArrayList<>(contributions))
                 : List.of();
@@ -107,19 +82,6 @@ public final class ContextFrame {
     public List<ToolGroupId> selectedGroupIds() { return selectedGroupIds; }
     public List<String> selectedToolNames() { return selectedToolNames; }
 
-    // ── Provider 上下文 ──
-
     public String effectivePersonaId() { return effectivePersonaId; }
-    public String memorySummary() { return memorySummary; }
-    public String vehicleStateSnapshot() { return vehicleStateSnapshot; }
-    public String timeContext() { return timeContext; }
-    public String promptContext() { return promptContext; }
-
-    // ── 渲染结果 / 模式 / 预算 / 调试 ──
-
-    public String renderedExtraContext() { return renderedExtraContext; }
-    public int tokenEstimate() { return tokenEstimate; }
-    public ContextDebugInfo debugInfo() { return debugInfo; }
-    public List<ContextSection> sections() { return sections; }
     public List<ContextContribution> contributions() { return contributions; }
 }

@@ -15,6 +15,8 @@ import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class SessionChatMemoryProviderTest {
 
@@ -66,6 +68,51 @@ public class SessionChatMemoryProviderTest {
                 ((UserMessage) provider.getOrCreate("session-1").messages().get(0)).singleText());
         assertEquals("summary",
                 ((UserMessage) store.getMessages("session-1").get(0)).singleText());
+    }
+
+    @Test
+    public void persistentMemoryDoesNotEvictAtLegacyWindowBoundary() {
+        FakeStore store = new FakeStore();
+        SessionChatMemoryProvider provider = new SessionChatMemoryProvider(store, 50);
+        ChatMemory memory = provider.getOrCreate("session-long", 50);
+
+        for (int i = 0; i < 100; i++) {
+            memory.add(UserMessage.from("message-" + i));
+        }
+
+        assertEquals(100, memory.messages().size());
+        assertEquals(100, store.getMessages("session-long").size());
+    }
+
+    @Test
+    public void compareAndSetRejectsStaleSnapshotWithoutOverwritingNewMessage() {
+        FakeStore store = new FakeStore();
+        SessionChatMemoryProvider provider = new SessionChatMemoryProvider(store, 50);
+        ChatMemory memory = provider.getOrCreate("session-cas");
+        memory.add(UserMessage.from("original"));
+        List<ChatMessage> staleSnapshot = memory.messages();
+        memory.add(UserMessage.from("concurrent"));
+
+        boolean replaced = provider.replaceMessagesIfUnchanged("session-cas",
+                staleSnapshot, List.of(UserMessage.from("summary")));
+
+        assertFalse(replaced);
+        assertEquals(2, memory.messages().size());
+        assertEquals("concurrent", ((UserMessage) memory.messages().get(1)).singleText());
+    }
+
+    @Test
+    public void compareAndSetUpdatesLiveMemoryWhenSnapshotMatches() {
+        FakeStore store = new FakeStore();
+        SessionChatMemoryProvider provider = new SessionChatMemoryProvider(store, 50);
+        ChatMemory memory = provider.getOrCreate("session-cas-ok");
+        memory.add(UserMessage.from("original"));
+
+        boolean replaced = provider.replaceMessagesIfUnchanged("session-cas-ok",
+                memory.messages(), List.of(UserMessage.from("summary")));
+
+        assertTrue(replaced);
+        assertEquals("summary", ((UserMessage) memory.messages().get(0)).singleText());
     }
 
     private static final class FakeStore implements ChatMemoryStore {

@@ -31,14 +31,6 @@ public final class ContextFrameBuilder {
 
     // ── 可选字段（通过 setter 覆盖） ──
     private String effectivePersonaId;
-    private String memorySummary;
-    private String vehicleStateSnapshot;
-    private String timeContext;
-    private String promptContext;
-    private String renderedExtraContext;
-    private int tokenEstimate;
-    private ContextDebugInfo debugInfo;
-    private List<ContextSection> sections;
     private List<ContextContribution> contributions;
 
     ContextFrameBuilder() {
@@ -65,6 +57,26 @@ public final class ContextFrameBuilder {
         return builder;
     }
 
+    /** 复制现有 Frame 身份与诊断字段，供预算尝试只替换 Contributions。 */
+    public static ContextFrameBuilder fromFrame(ContextFrame frame) {
+        ContextFrameBuilder builder = new ContextFrameBuilder();
+        builder.requestId = frame.requestId();
+        builder.clientMessageId = frame.clientMessageId();
+        builder.userId = frame.userId();
+        builder.sessionId = frame.sessionId();
+        builder.personaId = frame.personaId();
+        builder.inputType = frame.inputType();
+        builder.rawUserInput = frame.rawUserInput();
+        builder.normalizedUserInput = frame.normalizedUserInput();
+        builder.intentResult = frame.intentResult();
+        builder.toolGroupSelectionResult = frame.toolGroupSelectionResult();
+        builder.selectedGroupIds = frame.selectedGroupIds();
+        builder.selectedToolNames = frame.selectedToolNames();
+        builder.effectivePersonaId = frame.effectivePersonaId();
+        builder.contributions = frame.contributions();
+        return builder;
+    }
+
     // ── Setter 链式方法 ──
 
     public ContextFrameBuilder requestId(String value) { this.requestId = value; return this; }
@@ -80,14 +92,6 @@ public final class ContextFrameBuilder {
     public ContextFrameBuilder selectedGroupIds(List<ToolGroupId> value) { this.selectedGroupIds = value; return this; }
     public ContextFrameBuilder selectedToolNames(List<String> value) { this.selectedToolNames = value; return this; }
     public ContextFrameBuilder effectivePersonaId(String value) { this.effectivePersonaId = value; return this; }
-    public ContextFrameBuilder memorySummary(String value) { this.memorySummary = value; return this; }
-    public ContextFrameBuilder vehicleStateSnapshot(String value) { this.vehicleStateSnapshot = value; return this; }
-    public ContextFrameBuilder timeContext(String value) { this.timeContext = value; return this; }
-    public ContextFrameBuilder promptContext(String value) { this.promptContext = value; return this; }
-    public ContextFrameBuilder renderedExtraContext(String value) { this.renderedExtraContext = value; return this; }
-    public ContextFrameBuilder tokenEstimate(int value) { this.tokenEstimate = value; return this; }
-    public ContextFrameBuilder debugInfo(ContextDebugInfo value) { this.debugInfo = value; return this; }
-    public ContextFrameBuilder sections(List<ContextSection> value) { this.sections = value; return this; }
     public ContextFrameBuilder contributions(List<ContextContribution> value) { this.contributions = value; return this; }
 
     /**
@@ -103,8 +107,6 @@ public final class ContextFrameBuilder {
                 inputType, rawUserInput, normalizedUserInput,
                 intentResult, toolGroupSelectionResult,
                 selectedGroupIds, selectedToolNames,
-                effectivePersona, memorySummary, vehicleStateSnapshot,
-                timeContext, promptContext, renderedExtraContext,
-                tokenEstimate, debugInfo, sections, contributions);
+                effectivePersona, contributions);
     }
 }

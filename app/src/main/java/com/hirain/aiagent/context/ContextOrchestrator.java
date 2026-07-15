@@ -14,8 +14,12 @@ import com.hirain.aiagent.context.provider.TimeContextProvider;
 import com.hirain.aiagent.context.provider.ToolGroupContextProvider;
 import com.hirain.aiagent.context.provider.UserInputContextProvider;
 import com.hirain.aiagent.context.provider.VehicleStateContextProvider;
+import com.hirain.aiagent.memory.ContextMemoryGateway;
+import com.hirain.aiagent.memory.MemoryCompactionPlan;
+import com.hirain.aiagent.memory.MemoryCompactionResult;
 import com.hirain.aiagent.runtime.RequestSession;
 import com.hirain.aiagent.runtime.RequestSessionFactory;
+import com.hirain.aiagent.trace.AgentTraceRecorder;
 import dev.langchain4j.data.message.UserMessage;
 
 import java.util.ArrayList;
@@ -24,7 +28,7 @@ import java.util.List;
 /**
  * Context 构建总入口 — 实现 {@link ContextPreparer} 和 {@link ContextAssemblyGateway}。
  * <p>
- * Phase 2 新增 prepare() 和 assemble() 两条链路：
+ * TEXT Context 分为 prepare() 和 assemble() 两条链路：
  * <ul>
  *   <li>prepare() — 只运行请求级静态 Provider，每个 RequestSession 只执行一次</li>
  *   <li>assemble() — 每次迭代运行动态 Provider</li>
@@ -116,6 +120,7 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
                 long provStartMs = System.currentTimeMillis();
                 try {
                     ContextProviderResult result = provider.provide(session, input);
+                    validateProductionContributions(provider, result, session);
                     long provDurationMs = System.currentTimeMillis() - provStartMs;
                     allContributions.addAll(result.contributions());
                     if (result.outcome() != null) {
@@ -215,7 +220,7 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
 
     /**
      * 每轮迭代装配 — 运行 iteration-dynamic Provider 并调用 ContextMessageAssembler。
-     * Phase 2 仅建立方法骨架，Phase 3 影子装配才完整调用。
+     * 每轮动态读取并完成预算、必要时压缩恢复，返回唯一可发送给模型的结果。
      */
     public ContextAssemblyResult assemble(ContextAssemblyRequest request) {
         ContextTraceRecorder traceRecorder = request != null && request.session() != null
@@ -261,6 +266,7 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
                 long provStartMs = System.currentTimeMillis();
                 try {
                     ContextProviderResult result = provider.provide(reqSession, input);
+                    validateProductionContributions(provider, result, reqSession);
                     long provDurationMs = System.currentTimeMillis() - provStartMs;
                     if (result.outcome() != null) {
                         outcomes.add(result.outcome());
@@ -319,13 +325,27 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
             }
             allContributions.addAll(dynamicContributions);
 
-            // 调用 ContextMessageAssembler 生成消息
+            // 先执行一次纯装配预算评估；只有可选贡献裁剪后仍超限，才允许 Memory 恢复一次。
             ContextFrame mergedFrame = ContextFrameBuilder.fromSession(reqSession)
                     .contributions(allContributions)
                     .build();
             ContextTokenEstimator estimator = input.tokenEstimator();
-            ContextAssemblyResult assembleResult = ContextMessageAssembler.assemble(
-                    mergedFrame, request.budgetPolicy(), estimator, request.iteration());
+            ContextAssemblyAttempt attempt = ContextMessageAssembler.attempt(
+                    mergedFrame, request.budgetPolicy(), estimator, request.iteration(),
+                    request.compressionAlreadyAttempted() ? 2 : 1);
+            ContextAssemblyResult assembleResult = attempt.candidate();
+
+            if (attempt.compressionRecommended() && !request.compressionAlreadyAttempted()) {
+                assembleResult = compactAndRetry(request, reqSession, attempt, outcomes, assembleSpan);
+            } else if (assembleResult != null && !assembleResult.success()
+                    && assembleResult.errorCode() == ContextErrorCode.CONTEXT_BUDGET_EXCEEDED
+                    && request.compressionAlreadyAttempted()) {
+                assembleResult = ContextAssemblyResult.failure(
+                        ContextErrorCode.CONTEXT_BUDGET_EXCEEDED,
+                        "Context budget exceeded after one memory compaction attempt",
+                        assembleResult.budgetReport(), assembleResult.debugInfo(),
+                        true, outcomes);
+            }
 
             // 合并 outcomes：Assembler 内部不创建 Provider outcome，将 assemble 阶段的 outcomes 附加到结果
             if (assembleResult.success()
@@ -355,16 +375,14 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
                 }
             }
 
-            // 记录装配消息内容到 span（兼容旧字段 — 主排障已迁移至下方 fragment/message span）
-            // legacy recordAssembledMessages / recordAssembleMessagesAsEvents 已停止默认写入，
-            // 如需恢复可在调试阶段取消下面注释。
-            // traceRecorder.recordAssembledMessages(assembleSpan, assembleResult.messages(), assembleResult.toolSpecifications());
-            // traceRecorder.recordAssembleMessagesAsEvents(assembleSpan, assembleResult.messages());
-            if (assembleResult.success()) {
+            if (assembleResult.success() && !assembleResult.memoryCompacted()) {
                 // 记录模型输入片段（fragment / message / toolset），parent = Context.current() = assemble span
                 // 遍历合并后的 allContributions，覆盖静态+动态 Provider
                 if (traceRecorder != null) {
                     for (ContextContribution contrib : allContributions) {
+                        if (!includedInFinalAttempt(contrib, assembleResult.debugInfo())) {
+                            continue;
+                        }
                         if (contrib instanceof TextContextContribution tc
                                 && tc.visibility() == ContextVisibility.MODEL_VISIBLE) {
                             traceRecorder.recordFragment(tc);
@@ -384,6 +402,129 @@ public class ContextOrchestrator implements ContextPreparer, ContextAssemblyGate
             if (assembleScope != null) assembleScope.close();
             if (assembleSpan != null) assembleSpan.end();
         }
+    }
+
+    /**
+     * 执行唯一一次 Memory 压缩恢复并重新装配。
+     * Context 只决定目标预算和重试次数，摘要生成与原子写回仍由 Memory 模块负责。
+     */
+    private ContextAssemblyResult compactAndRetry(ContextAssemblyRequest request,
+                                                   RequestSession session,
+                                                   ContextAssemblyAttempt attempt,
+                                                   List<ContextProviderOutcome> outcomes,
+                                                   Span assembleSpan) {
+        if (request.cancelChecker() != null && request.cancelChecker().isCancelled()) {
+            return ContextAssemblyResult.failure(ContextErrorCode.CONTEXT_CANCELLED,
+                    "cancelled_before_memory_compaction", attempt.candidate().budgetReport(),
+                    attempt.candidate().debugInfo(), false, outcomes);
+        }
+        ContextMemoryGateway memoryGateway = input.memoryGateway();
+        if (memoryGateway == null) {
+            return compactionFailure("Memory gateway is unavailable", attempt, outcomes, false);
+        }
+
+        MemoryCompactionPlan plan = memoryGateway.planSessionCompaction(
+                session.sessionId(), attempt.targetSessionMemoryTokens());
+        if (assembleSpan != null) {
+            assembleSpan.setAttribute("context.compression.recommended", true);
+            assembleSpan.setAttribute("context.compression.target_session_tokens",
+                    attempt.targetSessionMemoryTokens());
+            assembleSpan.setAttribute("context.compression.tokens_before",
+                    plan != null ? plan.currentTokens() : 0);
+        }
+        if (plan == null || !plan.hasCompactableHistory()) {
+            return compactionFailure("No complete historical turns can be compacted",
+                    attempt, outcomes, false);
+        }
+
+        AgentTraceRecorder trace = session.traceContext() != null
+                && session.traceContext().session() != null
+                ? new AgentTraceRecorder(session.traceContext().session()) : null;
+        MemoryCompactionResult result = memoryGateway.executeCompactionPlan(plan, trace,
+                () -> request.cancelChecker() != null
+                        && request.cancelChecker().isCancelled());
+        if (assembleSpan != null && result != null) {
+            assembleSpan.setAttribute("context.compression.executed", result.executed());
+            assembleSpan.setAttribute("context.compression.success", result.success());
+            assembleSpan.setAttribute("context.compression.tokens_after", result.tokensAfter());
+            assembleSpan.setAttribute("context.compression.snapshot_match", result.snapshotMatch());
+            assembleSpan.setAttribute("context.compression.reload_required", result.reloadRequired());
+        }
+        if (result == null || !result.success()) {
+            String detail = result != null && result.errorDetail() != null
+                    ? result.errorDetail() : "unknown compaction failure";
+            if (detail.startsWith("CANCELLED_")) {
+                return ContextAssemblyResult.failure(ContextErrorCode.CONTEXT_CANCELLED,
+                        detail, attempt.candidate().budgetReport(),
+                        attempt.candidate().debugInfo(), result.executed(), outcomes);
+            }
+            return compactionFailure(detail, attempt, outcomes,
+                    result != null && result.executed());
+        }
+        if (request.cancelChecker() != null && request.cancelChecker().isCancelled()) {
+            return ContextAssemblyResult.failure(ContextErrorCode.CONTEXT_CANCELLED,
+                    "cancelled_after_memory_compaction", attempt.candidate().budgetReport(),
+                    attempt.candidate().debugInfo(), true, outcomes);
+        }
+
+        // 重新运行动态 Provider，确保第二次装配读取压缩后的持久化快照，而不是复用旧 Contribution。
+        ContextAssemblyResult retry = assemble(new ContextAssemblyRequest(
+                request.frame(), request.iteration(), request.budgetPolicy(),
+                request.cancelChecker(), true, session));
+        return retry != null ? retry.withCompressionState(true,
+                result.reloadRequired(), true)
+                : compactionFailure("Retry assembly returned null", attempt, outcomes, true);
+    }
+
+    private static ContextAssemblyResult compactionFailure(
+            String detail, ContextAssemblyAttempt attempt,
+            List<ContextProviderOutcome> outcomes,
+            boolean compressionAttempted) {
+        return ContextAssemblyResult.failure(ContextErrorCode.MEMORY_COMPACTION_FAILED,
+                "Memory compaction failed: " + detail,
+                attempt.candidate() != null ? attempt.candidate().budgetReport() : null,
+                attempt.candidate() != null ? attempt.candidate().debugInfo() : null,
+                compressionAttempted, outcomes);
+    }
+
+    /** 生产 Provider 的 Contribution 资格必须与集中策略完全一致，防止局部常量再次漂移。 */
+    private void validateProductionContributions(ContextProvider provider,
+                                                  ContextProviderResult result,
+                                                  RequestSession session) {
+        if (!ContextPolicies.isRegistered(provider.sourceKey()) || result == null) return;
+        ResolvedContextPolicy providerPolicy = ContextPolicies.resolve(
+                provider.sourceKey(), session, input);
+        if (provider.lifecycle() != providerPolicy.lifecycle()
+                || provider.required(session, input) != providerPolicy.required()) {
+            throw new IllegalStateException("Provider policy mismatch: " + provider.name());
+        }
+        for (ContextContribution contribution : result.contributions()) {
+            if (!ContextPolicies.isRegistered(contribution.sourceKey())) {
+                throw new IllegalStateException("Unknown production sourceKey: "
+                        + contribution.sourceKey());
+            }
+            ResolvedContextPolicy policy = ContextPolicies.resolve(
+                    contribution.sourceKey(), session, input);
+            if (contribution.lifecycle() != policy.lifecycle()
+                    || contribution.visibility() != policy.visibility()
+                    || contribution.trustLevel() != policy.trustLevel()
+                    || contribution.priority() != policy.priority()
+                    || contribution.required() != policy.required()) {
+                throw new IllegalStateException("Contribution policy mismatch: "
+                        + contribution.sourceKey());
+            }
+        }
+    }
+
+    private static boolean includedInFinalAttempt(ContextContribution contribution,
+                                                   ContextAssemblyDebugInfo debugInfo) {
+        if (debugInfo == null || debugInfo.contributionDecisions().isEmpty()) return true;
+        for (ContextContributionDecision decision : debugInfo.contributionDecisions()) {
+            if (contribution.sourceKey().equals(decision.sourceKey())) {
+                return decision.included();
+            }
+        }
+        return false;
     }
 
 }

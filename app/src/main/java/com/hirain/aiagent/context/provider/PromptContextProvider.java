@@ -25,6 +25,8 @@ public class PromptContextProvider implements ContextProvider {
         return "PromptContextProvider";
     }
 
+    @Override public String sourceKey() { return com.hirain.aiagent.context.ContextPolicies.PROMPT; }
+
     @Override
     public ContextLifecycle lifecycle() {
         return ContextLifecycle.REQUEST_STATIC;
@@ -32,7 +34,7 @@ public class PromptContextProvider implements ContextProvider {
 
     @Override
     public boolean required(RequestSession session, ContextBuildInput input) {
-        return true;
+        return com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input).required();
     }
 
     @Override
@@ -56,8 +58,7 @@ public class PromptContextProvider implements ContextProvider {
         }
 
         TextContextContribution contribution = new TextContextContribution(
-                "prompt", ContextVisibility.MODEL_VISIBLE, ContextTrustLevel.TRUSTED_SYSTEM,
-                ContextPriority.CRITICAL, ContextLifecycle.REQUEST_STATIC, true,
+                com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input),
                 name(), TextContextContribution.TARGET_SYSTEM,
                 promptText, Map.of("prompt_owner", "PromptContextProvider"));
         return ContextProviderResult.success(name(), List.of(contribution));

@@ -66,7 +66,8 @@ public class AgentRuntime {
             @Override public java.util.List<dev.langchain4j.agent.tool.ToolSpecification> toolSpecificationsByNames(
                     java.util.List<String> names) {
                 return names != null ? names.stream().map(n -> dev.langchain4j.agent.tool.ToolSpecification.builder()
-                        .name(n).description("default " + n).build()).toList() : java.util.List.of();
+                        .name(n).description("default " + n).build())
+                        .collect(java.util.stream.Collectors.toList()) : java.util.List.of();
             }
             @Override public java.util.List<dev.langchain4j.agent.tool.ToolSpecification> enabledToolSpecifications() {
                 return java.util.List.of();
@@ -418,8 +419,7 @@ public class AgentRuntime {
         if (result.status() == ToolGroupSelectionStatus.SELECTED) {
             return !result.selectedGroupIds().isEmpty()
                     && !result.selectedToolNames().isEmpty()
-                    && !result.allToolsFallback()
-                    && !result.containsAggregationGroup();
+                    && (!result.containsAggregationGroup() || result.allToolsFallback());
         }
         return result.selectedToolNames().isEmpty();
     }

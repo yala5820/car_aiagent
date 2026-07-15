@@ -31,6 +31,8 @@ public class LongTermMemoryContextProvider implements ContextProvider {
         return "LongTermMemoryContextProvider";
     }
 
+    @Override public String sourceKey() { return com.hirain.aiagent.context.ContextPolicies.LONG_TERM_MEMORY; }
+
     @Override
     public ContextLifecycle lifecycle() {
         return ContextLifecycle.REQUEST_STATIC;
@@ -38,7 +40,7 @@ public class LongTermMemoryContextProvider implements ContextProvider {
 
     @Override
     public boolean required(RequestSession session, ContextBuildInput input) {
-        return false;
+        return com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input).required();
     }
 
     public ContextProviderResult provide(RequestSession session, ContextBuildInput input) {
@@ -70,12 +72,12 @@ public class LongTermMemoryContextProvider implements ContextProvider {
         }
 
         TextContextContribution contribution = new TextContextContribution(
-                "long_term_memory", ContextVisibility.MODEL_VISIBLE, ContextTrustLevel.UNTRUSTED_DATA,
-                ContextPriority.NORMAL, ContextLifecycle.REQUEST_STATIC, false,
+                com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input),
                 name(), TextContextContribution.TARGET_CONTEXT_DATA,
                 memoryText, Map.of("memory_owner", "LongTermMemoryStore"));
+        if (status == ContextProviderStatus.FALLBACK) {
+            return ContextProviderResult.fallback(name(), errorDetail, List.of(contribution));
+        }
         return ContextProviderResult.success(name(), List.of(contribution));
-
-
     }
 }

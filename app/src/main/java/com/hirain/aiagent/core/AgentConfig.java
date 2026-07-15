@@ -48,7 +48,7 @@ public final class AgentConfig {
     private final List<PostProcessor> postProcessors;
     private final LoopTerminator terminator;
     private final ResultCollector resultCollector;
-    private final ToolRegistry toolRegistry;  // 可选，仅用于 trace 记录 dispatch target
+    private final ToolRegistry toolRegistry;  // TEXT 真实执行依赖；legacy / 非 TEXT 配置可为空
 
     private AgentConfig(Builder b) {
         this.personaId = b.personaId;

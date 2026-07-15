@@ -27,6 +27,8 @@ public class TimeContextProvider implements ContextProvider {
         return "TimeContextProvider";
     }
 
+    @Override public String sourceKey() { return com.hirain.aiagent.context.ContextPolicies.TIME; }
+
     @Override
     public ContextLifecycle lifecycle() {
         return ContextLifecycle.ITERATION_DYNAMIC;
@@ -34,7 +36,7 @@ public class TimeContextProvider implements ContextProvider {
 
     @Override
     public boolean required(RequestSession session, ContextBuildInput input) {
-        return false;
+        return com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input).required();
     }
 
     @Override
@@ -48,8 +50,7 @@ public class TimeContextProvider implements ContextProvider {
         metadata.put("formatted_time", formattedTime);
 
         TextContextContribution contribution = new TextContextContribution(
-                "time", ContextVisibility.MODEL_VISIBLE, ContextTrustLevel.TRUSTED_DATA,
-                ContextPriority.OPTIONAL, ContextLifecycle.ITERATION_DYNAMIC, false,
+                com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input),
                 name(), TextContextContribution.TARGET_CONTEXT_DATA,
                 formattedTime, metadata);
         return ContextProviderResult.success(name(), List.of(contribution));

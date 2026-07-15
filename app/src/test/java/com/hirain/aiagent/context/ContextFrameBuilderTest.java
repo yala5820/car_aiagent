@@ -4,31 +4,9 @@ import com.hirain.aiagent.runtime.RequestSession;
 
 import org.junit.Test;
 
-import java.util.Map;
-
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertThrows;
 
 public class ContextFrameBuilderTest {
-
-    @Test
-    public void contextSection_isImmutableAndKeepsMetadata() {
-        ContextSection section = new ContextSection(
-                ContextSectionType.RUNTIME,
-                "RuntimeContextProvider",
-                true,
-                "requestId=req-1",
-                15,
-                false,
-                Map.of("request_id", "req-1"));
-
-        assertEquals(ContextSectionType.RUNTIME, section.type());
-        assertEquals("RuntimeContextProvider", section.providerName());
-        assertFalse(section.truncated());
-        assertThrows(UnsupportedOperationException.class,
-                () -> section.metadata().put("x", "y"));
-    }
 
     @Test
     public void buildFromSession_preservesRequestSessionIds() {
@@ -37,8 +15,6 @@ public class ContextFrameBuilderTest {
 
         ContextFrame frame = ContextFrameBuilder.fromSession(session)
                 .effectivePersonaId("friendly")
-                .renderedExtraContext("【Context】\nintent=VEHICLE_AC")
-                .tokenEstimate(12)
                 .build();
 
         assertEquals("req-1", frame.requestId());

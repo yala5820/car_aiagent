@@ -54,6 +54,13 @@ public final class MessageContextContribution implements ContextContribution {
                 metadata != null ? metadata : Map.of()));
     }
 
+    public MessageContextContribution(ResolvedContextPolicy policy,
+                                      String providerName, String messageSource,
+                                      List<ChatMessage> messages, Map<String, Object> metadata) {
+        this(policy.sourceKey(), policy.visibility(), policy.trustLevel(), policy.priority(),
+                policy.lifecycle(), policy.required(), providerName, messageSource, messages, metadata);
+    }
+
     @Override
     public String sourceKey() { return sourceKey; }
 

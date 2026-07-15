@@ -1,8 +1,8 @@
 package com.hirain.aiagent.ai.langchain4j.tool;
 
-import android.util.Log;
-
-import org.json.JSONObject;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -43,8 +43,6 @@ public class ToolDispatcher {
             Class<?>[] paramTypes = method.getParameterTypes();
             bindings.put(toolName, new ToolBinding(method, paramTypes));
         }
-        Log.d(TAG, "Registered " + bindings.size() + " tools for "
-                + target.getClass().getSimpleName());
     }
 
     /** 获取此调度器管理的工具名集合 */
@@ -54,7 +52,7 @@ public class ToolDispatcher {
 
     /** 根据 ToolExecutionRequest 执行对应工具方法 */
     public String dispatch(ToolExecutionRequest request) {
-        return dispatch(request, null);
+        return dispatchWithOutcome(request).resultText();
     }
 
     /**
@@ -62,54 +60,73 @@ public class ToolDispatcher {
      * @param diag 可选的诊断收集器（null 表示不收集），调用方传入以获取参数解析/反射调用状态
      */
     public String dispatch(ToolExecutionRequest request, DispatchDiagnostics diag) {
+        ToolDispatchOutcome outcome = dispatchWithOutcome(request);
+        if (diag != null) {
+            diag.argumentParseSuccess = outcome.argumentParseSuccess();
+            diag.invokeSuccess = outcome.invokeSuccess();
+        }
+        return outcome.resultText();
+    }
+
+    /** 执行工具并返回不依赖文本推断的结构化结果。 */
+    public ToolDispatchOutcome dispatchWithOutcome(ToolExecutionRequest request) {
+        if (request == null) {
+            return ToolDispatchOutcome.failure(false, false, "无效的工具调用: null",
+                    "INVALID_REQUEST", "request is null", null, null);
+        }
         ToolBinding binding = bindings.get(request.name());
         if (binding == null) {
-            return "无效的工具调用: " + request.name();
+            return ToolDispatchOutcome.failure(false, false,
+                    "无效的工具调用: " + request.name(), "TOOL_NOT_REGISTERED",
+                    "tool is not registered", null, null);
         }
+        String targetClass = target.getClass().getSimpleName();
+        String targetMethod = binding.method.getName();
+        boolean parsed = false;
         try {
-            JSONObject args = new JSONObject(request.arguments());
+            JsonElement parsedElement = JsonParser.parseString(request.arguments());
+            if (!parsedElement.isJsonObject()) {
+                throw new IllegalArgumentException("工具参数必须是 JSON object");
+            }
+            JsonObject args = parsedElement.getAsJsonObject();
             Object[] params = resolveParameters(binding, args);
-            if (diag != null) diag.argumentParseSuccess = true;
-
+            parsed = true;
             Object result = binding.method.invoke(target, params);
-            if (diag != null) diag.invokeSuccess = true;
-            return result != null ? result.toString() : "Success";
+            return ToolDispatchOutcome.success(result != null ? result.toString() : "Success",
+                    targetClass, targetMethod);
         } catch (Exception e) {
-            Log.e(TAG, "Failed to execute tool: " + request.name(), e);
             Throwable cause = e;
             if (e instanceof InvocationTargetException) {
-                cause = e.getCause();
-                // 反射调用本身失败，参数解析是成功的（已越过 parse）
-                if (diag != null && !diag.argumentParseSuccess) diag.argumentParseSuccess = true;
-            } else if (diag != null) {
-                // 参数解析阶段失败
-                diag.invokeSuccess = false;
-                diag.argumentParseSuccess = false;
+                cause = e.getCause() != null ? e.getCause() : e;
             }
-            return "工具执行失败: " + cause.getMessage();
+            String errorType = parsed ? "TOOL_INVOCATION_FAILED" : "ARGUMENT_PARSE_FAILED";
+            String detail = cause.getMessage() != null ? cause.getMessage()
+                    : cause.getClass().getSimpleName();
+            return ToolDispatchOutcome.failure(true, parsed, "error: 工具执行失败: " + detail,
+                    errorType, detail, targetClass, targetMethod);
         }
     }
 
     // ── 内部实现 ──
 
     /** 解析方法参数：按 index 从 JSON 中获取 arg0/arg1… */
-    private static Object[] resolveParameters(ToolBinding binding, JSONObject args) throws Exception {
+    private static Object[] resolveParameters(ToolBinding binding, JsonObject args) throws Exception {
         Object[] params = new Object[binding.paramTypes.length];
         for (int i = 0; i < binding.paramTypes.length; i++) {
             Class<?> type = binding.paramTypes[i];
             String key = "arg" + i;
 
-            if (!args.has(key)) {
+            if (!args.has(key) || args.get(key).isJsonNull()) {
                 throw new IllegalArgumentException(
                         "缺少参数: " + key + " (方法: " + binding.method.getName() + ")");
             }
 
             if (type == boolean.class || type == Boolean.class) {
-                params[i] = args.getBoolean(key);
+                params[i] = args.get(key).getAsBoolean();
             } else if (type == int.class || type == Integer.class) {
-                params[i] = args.getInt(key);
+                params[i] = args.get(key).getAsInt();
             } else {
-                params[i] = args.getString(key);
+                params[i] = args.get(key).getAsString();
             }
         }
         return params;

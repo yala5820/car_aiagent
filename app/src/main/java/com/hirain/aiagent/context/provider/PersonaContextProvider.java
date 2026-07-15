@@ -25,6 +25,8 @@ public class PersonaContextProvider implements ContextProvider {
         return "PersonaContextProvider";
     }
 
+    @Override public String sourceKey() { return com.hirain.aiagent.context.ContextPolicies.PERSONA; }
+
     @Override
     public ContextLifecycle lifecycle() {
         return ContextLifecycle.REQUEST_STATIC;
@@ -32,7 +34,7 @@ public class PersonaContextProvider implements ContextProvider {
 
     @Override
     public boolean required(RequestSession session, ContextBuildInput input) {
-        return false;
+        return com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input).required();
     }
 
     @Override
@@ -45,8 +47,7 @@ public class PersonaContextProvider implements ContextProvider {
         metadata.put("persona_id", personaId);
 
         TextContextContribution contribution = new TextContextContribution(
-                "persona", ContextVisibility.POLICY_ONLY, ContextTrustLevel.TRUSTED_DATA,
-                ContextPriority.NORMAL, ContextLifecycle.REQUEST_STATIC, false,
+                com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input),
                 name(), TextContextContribution.TARGET_CONTEXT_DATA,
                 content, metadata);
         return ContextProviderResult.success(name(), List.of(contribution));

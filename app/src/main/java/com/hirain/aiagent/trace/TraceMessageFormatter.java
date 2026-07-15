@@ -12,16 +12,12 @@ import dev.langchain4j.data.message.UserMessage;
 
 public class TraceMessageFormatter {
 
-    private static final int DEFAULT_MAX_LENGTH = 1000;
-
-    private final int maxLength;
-
     public TraceMessageFormatter() {
-        this(DEFAULT_MAX_LENGTH);
     }
 
+    /** @deprecated 正文长度统一由 CaptureMode 决定，Formatter 不再截断。 */
+    @Deprecated
     public TraceMessageFormatter(int maxLength) {
-        this.maxLength = Math.max(20, maxLength);
     }
 
     public String formatMessages(List<? extends ChatMessage> messages) {
@@ -30,7 +26,7 @@ public class TraceMessageFormatter {
         for (ChatMessage message : messages) {
             parts.add(formatMessage(message));
         }
-        return truncate(String.join("\n", parts));
+        return String.join("\n", parts);
     }
 
     public String formatToolSpecifications(List<ToolSpecification> specs) {
@@ -44,7 +40,7 @@ public class TraceMessageFormatter {
 
     public String formatToolNames(List<String> names) {
         if (names == null || names.isEmpty()) return "";
-        return truncate(String.join(", ", names));
+        return String.join(", ", names);
     }
 
     private String formatMessage(ChatMessage message) {
@@ -68,8 +64,4 @@ public class TraceMessageFormatter {
         return message.type() + ":" + message.toString();
     }
 
-    private String truncate(String value) {
-        if (value == null || value.length() <= maxLength) return value;
-        return value.substring(0, maxLength) + "... (truncated)";
-    }
 }

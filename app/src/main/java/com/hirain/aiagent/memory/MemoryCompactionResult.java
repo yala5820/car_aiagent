@@ -11,16 +11,26 @@ public final class MemoryCompactionResult {
     private final long tokensAfter;
     private final boolean reloadRequired;
     private final String errorDetail;
+    private final boolean snapshotMatch;
 
     public MemoryCompactionResult(boolean executed, boolean success,
                                    long tokensBefore, long tokensAfter,
                                    boolean reloadRequired, String errorDetail) {
+        this(executed, success, tokensBefore, tokensAfter, reloadRequired,
+                errorDetail, true);
+    }
+
+    public MemoryCompactionResult(boolean executed, boolean success,
+                                  long tokensBefore, long tokensAfter,
+                                  boolean reloadRequired, String errorDetail,
+                                  boolean snapshotMatch) {
         this.executed = executed;
         this.success = success;
         this.tokensBefore = tokensBefore;
         this.tokensAfter = tokensAfter;
         this.reloadRequired = reloadRequired;
         this.errorDetail = errorDetail;
+        this.snapshotMatch = snapshotMatch;
     }
 
     public boolean executed() { return executed; }
@@ -29,6 +39,7 @@ public final class MemoryCompactionResult {
     public long tokensAfter() { return tokensAfter; }
     public boolean reloadRequired() { return reloadRequired; }
     public String errorDetail() { return errorDetail; }
+    public boolean snapshotMatch() { return snapshotMatch; }
 
     public static MemoryCompactionResult notExecuted() {
         return new MemoryCompactionResult(false, false, 0, 0, false, null);

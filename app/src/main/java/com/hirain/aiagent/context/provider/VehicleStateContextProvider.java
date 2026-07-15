@@ -19,17 +19,14 @@ public class VehicleStateContextProvider implements ContextProvider {
     @Override
     public String name() { return "VehicleStateContextProvider"; }
 
+    @Override public String sourceKey() { return com.hirain.aiagent.context.ContextPolicies.VEHICLE_STATE; }
+
     @Override
     public ContextLifecycle lifecycle() { return ContextLifecycle.ITERATION_DYNAMIC; }
 
     @Override
     public boolean required(RequestSession session, ContextBuildInput input) {
-        if (session == null || input == null || input.toolGroupRegistry() == null) return false;
-        com.hirain.aiagent.toolgroup.ToolGroupSelectionResult sel = session.toolGroupSelectionResult();
-        if (sel == null) return false;
-        java.util.List<String> contextKeys = input.toolGroupRegistry()
-                .requiredContextKeysFor(sel.selectedGroupIds());
-        return contextKeys.contains("vehicle_status");
+        return com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input).required();
     }
 
     @Override
@@ -51,14 +48,11 @@ public class VehicleStateContextProvider implements ContextProvider {
             errorDetail = "vehicle_status_provider_not_configured";
         }
 
-        boolean isRequired = required(session, input);
-        ContextVisibility visibility = isRequired
-                ? ContextVisibility.MODEL_VISIBLE : ContextVisibility.POLICY_ONLY;
+        com.hirain.aiagent.context.ResolvedContextPolicy policy =
+                com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input);
 
         TextContextContribution contribution = new TextContextContribution(
-                "vehicle_state", visibility, ContextTrustLevel.TRUSTED_DATA,
-                ContextPriority.NORMAL, ContextLifecycle.ITERATION_DYNAMIC, false,
-                name(), TextContextContribution.TARGET_CONTEXT_DATA,
+                policy, name(), TextContextContribution.TARGET_CONTEXT_DATA,
                 snapshot, Map.of());
 
         if (status == ContextProviderStatus.FALLBACK) {

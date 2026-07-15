@@ -32,6 +32,8 @@ public class ToolGroupContextProvider implements ContextProvider {
         return "ToolGroupContextProvider";
     }
 
+    @Override public String sourceKey() { return com.hirain.aiagent.context.ContextPolicies.TOOL_GROUP; }
+
     @Override
     public ContextLifecycle lifecycle() {
         return ContextLifecycle.REQUEST_STATIC;
@@ -39,13 +41,14 @@ public class ToolGroupContextProvider implements ContextProvider {
 
     @Override
     public boolean required(RequestSession session, ContextBuildInput input) {
-        ToolGroupSelectionResult sel = session != null ? session.toolGroupSelectionResult() : null;
-        return sel == null || sel.status() == ToolGroupSelectionStatus.SELECTED;
+        return com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input).required();
     }
 
     @Override
     public ContextProviderResult provide(RequestSession session, ContextBuildInput input) {
         ToolGroupSelectionResult selection = session.toolGroupSelectionResult();
+        com.hirain.aiagent.context.ResolvedContextPolicy policy =
+                com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input);
         List<ToolGroupId> groupIds = selection != null
                 ? selection.selectedGroupIds() : List.of();
         List<String> toolNames = selection != null
@@ -57,9 +60,7 @@ public class ToolGroupContextProvider implements ContextProvider {
             metadata.put("selection_status", selection != null ? selection.status().name() : "MISSING");
             metadata.put("selection_reason", selection != null ? selection.selectionReason() : "");
             return ContextProviderResult.success(name(), List.of(
-                    new ToolContextContribution("tool_group", ContextVisibility.MODEL_VISIBLE,
-                            ContextTrustLevel.TRUSTED_SYSTEM, ContextPriority.CRITICAL,
-                            ContextLifecycle.REQUEST_STATIC, false, name(),
+                    new ToolContextContribution(policy, name(),
                             ToolContextContribution.MODE_NONE, List.of(), metadata)));
         }
 
@@ -69,6 +70,8 @@ public class ToolGroupContextProvider implements ContextProvider {
         metadata.put("selected_tool_count", toolNames.size());
         metadata.put("selection_status", selection.status().name());
         metadata.put("selection_reason", selection != null ? selection.selectionReason() : "");
+        metadata.put("fallback_used", selection.fallbackUsed());
+        metadata.put("all_tools_fallback", selection.allToolsFallback());
 
         List<ToolSpecification> specs;
         try {
@@ -79,10 +82,10 @@ public class ToolGroupContextProvider implements ContextProvider {
         }
 
         return ContextProviderResult.success(name(), List.of(
-                new ToolContextContribution("tool_group", ContextVisibility.MODEL_VISIBLE,
-                        ContextTrustLevel.TRUSTED_SYSTEM, ContextPriority.CRITICAL,
-                        ContextLifecycle.REQUEST_STATIC, true, name(),
+                new ToolContextContribution(policy, name(),
                         specs.isEmpty() ? ToolContextContribution.MODE_NONE
+                                : selection.allToolsFallback()
+                                ? ToolContextContribution.MODE_ALL_FALLBACK
                                 : ToolContextContribution.MODE_SELECTED,
                         specs, metadata)));
     }

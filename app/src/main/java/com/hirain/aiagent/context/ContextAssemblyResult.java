@@ -36,6 +36,7 @@ public final class ContextAssemblyResult {
                                    ContextAssemblyDebugInfo debugInfo,
                                    boolean memoryCompacted,
                                    boolean chatMemoryReloadRequired,
+                                   boolean compressionAttempted,
                                    List<ContextProviderOutcome> providerOutcomes) {
         this.success = success;
         this.errorCode = errorCode;
@@ -50,7 +51,7 @@ public final class ContextAssemblyResult {
         this.debugInfo = debugInfo;
         this.memoryCompacted = memoryCompacted;
         this.chatMemoryReloadRequired = chatMemoryReloadRequired;
-        this.compressionAttempted = memoryCompacted || chatMemoryReloadRequired;
+        this.compressionAttempted = compressionAttempted;
         this.providerOutcomes = providerOutcomes != null
                 ? Collections.unmodifiableList(new ArrayList<>(providerOutcomes))
                 : List.of();
@@ -62,7 +63,7 @@ public final class ContextAssemblyResult {
                                                   ContextAssemblyDebugInfo debugInfo,
                                                   List<ContextProviderOutcome> providerOutcomes) {
         return new ContextAssemblyResult(true, null, null, messages, toolSpecifications,
-                budgetReport, debugInfo, false, false, providerOutcomes);
+                budgetReport, debugInfo, false, false, false, providerOutcomes);
     }
 
     public static ContextAssemblyResult successWithCompression(
@@ -74,14 +75,38 @@ public final class ContextAssemblyResult {
                                                   boolean memoryCompacted,
                                                   boolean chatMemoryReloadRequired) {
         return new ContextAssemblyResult(true, null, null, messages, toolSpecifications,
-                budgetReport, debugInfo, memoryCompacted, chatMemoryReloadRequired, providerOutcomes);
+                budgetReport, debugInfo, memoryCompacted, chatMemoryReloadRequired,
+                memoryCompacted, providerOutcomes);
     }
 
     public static ContextAssemblyResult failure(ContextErrorCode errorCode,
                                                   String errorDetail,
                                                   ContextAssemblyDebugInfo debugInfo) {
         return new ContextAssemblyResult(false, errorCode, errorDetail,
-                List.of(), List.of(), null, debugInfo, false, false, List.of());
+                List.of(), List.of(), null, debugInfo, false, false, false, List.of());
+    }
+
+    public static ContextAssemblyResult failure(ContextErrorCode errorCode,
+                                                  String errorDetail,
+                                                  ContextBudgetReport budgetReport,
+                                                  ContextAssemblyDebugInfo debugInfo,
+                                                  boolean compressionAttempted,
+                                                  List<ContextProviderOutcome> providerOutcomes) {
+        return new ContextAssemblyResult(false, errorCode, errorDetail,
+                List.of(), List.of(), budgetReport, debugInfo, false, false,
+                compressionAttempted, providerOutcomes);
+    }
+
+    public ContextAssemblyResult withCompressionState(boolean compacted, boolean attempted) {
+        return withCompressionState(compacted, false, attempted);
+    }
+
+    public ContextAssemblyResult withCompressionState(boolean compacted,
+                                                       boolean reloadRequired,
+                                                       boolean attempted) {
+        return new ContextAssemblyResult(success, errorCode, errorDetail, messages,
+                toolSpecifications, budgetReport, debugInfo, compacted, reloadRequired,
+                attempted, providerOutcomes);
     }
 
     public boolean success() { return success; }

@@ -4,10 +4,6 @@ import io.opentelemetry.api.trace.Span;
 
 public class TraceAttributeWriter {
 
-    private static final int TEXT_MAX_LENGTH = 500;
-    private static final int ARGUMENT_MAX_LENGTH = 200;
-    private static final int RESULT_MAX_LENGTH = 200;
-
     private final TraceConfig config;
     private final TraceRedactor redactor;
 
@@ -51,7 +47,8 @@ public class TraceAttributeWriter {
         if (config.contentCaptureMode() == TraceConfig.ContentCaptureMode.REDACTED) {
             output = redact(value, kind);
         } else {
-            output = truncate(value, maxLength(kind), suffix(kind));
+            // Demo 的 FULL_DEBUG 用于还原真实执行过程，业务层不得截断正文。
+            output = value;
         }
         span.setAttribute(key, output);
     }
@@ -62,23 +59,6 @@ public class TraceAttributeWriter {
             case ARGUMENT -> redactor.redactArguments(value);
             case RESULT -> redactor.redactResult(value);
         };
-    }
-
-    private static int maxLength(ContentKind kind) {
-        return switch (kind) {
-            case TEXT -> TEXT_MAX_LENGTH;
-            case ARGUMENT -> ARGUMENT_MAX_LENGTH;
-            case RESULT -> RESULT_MAX_LENGTH;
-        };
-    }
-
-    private static String suffix(ContentKind kind) {
-        return kind == ContentKind.ARGUMENT ? "... (truncated)" : "... (truncated)";
-    }
-
-    private static String truncate(String value, int maxLength, String suffix) {
-        if (value.length() <= maxLength) return value;
-        return value.substring(0, maxLength) + suffix;
     }
 
     private enum ContentKind {

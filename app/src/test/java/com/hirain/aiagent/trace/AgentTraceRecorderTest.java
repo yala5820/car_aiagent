@@ -76,6 +76,49 @@ public class AgentTraceRecorderTest {
     }
 
     @Test
+    public void fullDebugKeepsCompleteLargeLlmRequestWithoutTruncation() {
+        TestSession session = new TestSession(TraceConfig.ContentCaptureMode.FULL_DEBUG);
+        AgentTraceRecorder recorder = new AgentTraceRecorder(session.traceSession);
+        String payload = "长上下文".repeat(3000);
+
+        Span span = recorder.startLlmCall("qwen-turbo", 0, 1);
+        recorder.recordLlmRequest(span, "qwen-turbo", 0,
+                List.of(UserMessage.from(payload)), List.of(), 7000);
+        span.end();
+        session.close();
+
+        SpanData data = session.exporter.spans.get(0);
+        String recorded = data.getAttributes().get(
+                AttributeKey.stringKey("gen_ai.request.messages"));
+        assertTrue(recorded.contains(payload));
+        assertFalse(recorded.contains("[TRUNCATED]"));
+        assertEquals(7000L, data.getAttributes().get(AttributeKey.longKey(
+                TraceAttributeKeys.GEN_AI_ESTIMATED_INPUT_TOKENS)).longValue());
+    }
+
+    @Test
+    public void recordsTokenEstimateErrorAgainstActualUsage() {
+        TestSession session = new TestSession(TraceConfig.ContentCaptureMode.FULL_DEBUG);
+        AgentTraceRecorder recorder = new AgentTraceRecorder(session.traceSession);
+        Span span = recorder.startLlmCall("qwen-turbo", 0, 1);
+
+        recorder.enrichLlmResponse(span, ChatResponse.builder()
+                .aiMessage(AiMessage.from("ok"))
+                .tokenUsage(new dev.langchain4j.model.output.TokenUsage(120, 30))
+                .build(), 100);
+        span.end();
+        session.close();
+
+        SpanData data = session.exporter.spans.get(0);
+        assertEquals(20L, data.getAttributes().get(AttributeKey.longKey(
+                TraceAttributeKeys.GEN_AI_INPUT_TOKEN_ESTIMATE_DELTA)).longValue());
+        assertEquals(1.2d, data.getAttributes().get(AttributeKey.doubleKey(
+                TraceAttributeKeys.GEN_AI_INPUT_TOKEN_ESTIMATE_RATIO)), 0.0001d);
+        assertEquals(true, data.getAttributes().get(AttributeKey.booleanKey(
+                TraceAttributeKeys.GEN_AI_USAGE_AVAILABLE)));
+    }
+
+    @Test
     public void recordsToolResultAndSafetyDecision() {
         TestSession session = new TestSession();
         AgentTraceRecorder recorder = new AgentTraceRecorder(session.traceSession);
@@ -229,14 +272,20 @@ public class AgentTraceRecorderTest {
                 .addSpanProcessor(SimpleSpanProcessor.create(exporter))
                 .build();
         private final Tracer tracer = tracerProvider.get("test");
-        private final TraceSession traceSession = new TraceSession(
-                tracer.spanBuilder(TraceSpanNames.AGENT_REQUEST).startSpan(),
-                tracer,
-                new TraceAttributeWriter(
-                        TraceConfig.builder()
-                                .contentCaptureMode(TraceConfig.ContentCaptureMode.REDACTED)
-                                .build(),
-                        new TraceRedactor()));
+        private final TraceSession traceSession;
+
+        private TestSession() {
+            this(TraceConfig.ContentCaptureMode.REDACTED);
+        }
+
+        private TestSession(TraceConfig.ContentCaptureMode mode) {
+            traceSession = new TraceSession(
+                    tracer.spanBuilder(TraceSpanNames.AGENT_REQUEST).startSpan(),
+                    tracer,
+                    new TraceAttributeWriter(
+                            TraceConfig.builder().contentCaptureMode(mode).build(),
+                            new TraceRedactor()));
+        }
 
         private void close() {
             traceSession.close();

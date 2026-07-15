@@ -49,6 +49,13 @@ public final class TextContextContribution implements ContextContribution {
                 metadata != null ? metadata : Map.of()));
     }
 
+    public TextContextContribution(ResolvedContextPolicy policy,
+                                   String providerName, String targetArea,
+                                   String content, Map<String, Object> metadata) {
+        this(policy.sourceKey(), policy.visibility(), policy.trustLevel(), policy.priority(),
+                policy.lifecycle(), policy.required(), providerName, targetArea, content, metadata);
+    }
+
     @Override
     public String sourceKey() { return sourceKey; }
 

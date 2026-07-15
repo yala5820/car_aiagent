@@ -11,6 +11,7 @@ import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertEquals;
 
 public class HeuristicContextTokenEstimatorTest {
 
@@ -55,7 +56,23 @@ public class HeuristicContextTokenEstimatorTest {
 
     @Test
     public void emptyMessagesAndTools_returnsZero() {
-        assertTrue("Empty messages", estimator.estimateMessages(List.of()) >= 0);
-        assertTrue("Empty tools", estimator.estimateToolSpecs(List.of()) >= 0);
+        assertEquals("Empty messages", 0, estimator.estimateMessages(List.of()));
+        assertEquals("Empty tools", 0, estimator.estimateToolSpecs(List.of()));
+    }
+
+    @Test
+    public void longerToolArgumentsAndResultsIncreaseEstimateMonotonically() {
+        AiMessage shortCall = AiMessage.from(dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+                .id("r1").name("set_ac_status").arguments("{}").build());
+        AiMessage longCall = AiMessage.from(dev.langchain4j.agent.tool.ToolExecutionRequest.builder()
+                .id("r1").name("set_ac_status")
+                .arguments("{\"temperature\":24,\"mode\":\"AUTO\",\"zones\":[\"LEFT\",\"RIGHT\"]}")
+                .build());
+        int shortEstimate = estimator.estimateMessages(List.of(shortCall,
+                new ToolExecutionResultMessage("r1", "set_ac_status", "ok")));
+        int longEstimate = estimator.estimateMessages(List.of(longCall,
+                new ToolExecutionResultMessage("r1", "set_ac_status",
+                        "success with full vehicle state and temperature details")));
+        assertTrue(longEstimate > shortEstimate);
     }
 }

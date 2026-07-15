@@ -8,6 +8,14 @@ import com.hirain.aiagent.context.ContextBudgetPolicy;
 import com.hirain.aiagent.context.ContextCancelChecker;
 import com.hirain.aiagent.context.ContextOrchestrator;
 import com.hirain.aiagent.context.ContextPrepareResult;
+import com.hirain.aiagent.context.ContextTraceRecorder;
+import com.hirain.aiagent.context.ContextLifecycle;
+import com.hirain.aiagent.context.ContextPriority;
+import com.hirain.aiagent.context.ContextProviderResult;
+import com.hirain.aiagent.context.ContextTrustLevel;
+import com.hirain.aiagent.context.ContextVisibility;
+import com.hirain.aiagent.context.MessageContextContribution;
+import com.hirain.aiagent.context.ToolContextContribution;
 import com.hirain.aiagent.prompt.PromptManager;
 import com.hirain.aiagent.runtime.RequestSession;
 import com.hirain.aiagent.runtime.RequestSessionFactory;
@@ -69,6 +77,33 @@ public class ContextProviderTraceTest {
         @Override public List<ToolSpecification> enabledToolSpecifications() { return new ArrayList<>(specs.values()); }
         @Override public List<ToolSpecification> getToolSpecifications() { return new ArrayList<>(specs.values()); }
         @Override public int size() { return specs.size(); }
+    }
+
+    @Test
+    public void emptyMessageAndToolContributions_areNotReportedAsProducedModelContent() {
+        TestTraceSupport.TestSession testSession = TestTraceSupport.redactedSession();
+        ContextTraceRecorder recorder = new ContextTraceRecorder(
+                testSession.traceSession.toTraceContext());
+        io.opentelemetry.api.trace.Span span = recorder.startProviderSpan(
+                "EmptyProvider", io.opentelemetry.context.Context.current());
+        ContextProviderResult result = ContextProviderResult.success("EmptyProvider", List.of(
+                new MessageContextContribution("empty_messages", ContextVisibility.MODEL_VISIBLE,
+                        ContextTrustLevel.TRUSTED_DATA, ContextPriority.NORMAL,
+                        ContextLifecycle.ITERATION_DYNAMIC, false, "EmptyProvider",
+                        MessageContextContribution.SOURCE_SESSION_MEMORY, List.of(), Map.of()),
+                new ToolContextContribution("empty_tools", ContextVisibility.MODEL_VISIBLE,
+                        ContextTrustLevel.TRUSTED_SYSTEM, ContextPriority.NORMAL,
+                        ContextLifecycle.REQUEST_STATIC, false, "EmptyProvider",
+                        ToolContextContribution.MODE_NONE, List.of(), Map.of())));
+
+        recorder.finishProviderSpan(span, result, "REQUEST_STATIC", false, 0L);
+        testSession.close();
+
+        SpanData providerSpan = findSpan(testSession.exporter.spans,
+                "context.provider.EmptyProvider");
+        assertNotNull(providerSpan);
+        assertEquals(false, providerSpan.getAttributes().get(
+                AttributeKey.booleanKey("provider.produced_model_visible")));
     }
 
     @Test
@@ -176,12 +211,13 @@ public class ContextProviderTraceTest {
                             .anyMatch(k -> k.getKey().equals("fragment.content")));
         }
 
-        // ── 2. 验证 POLICY_ONLY providers 无 fragment span + included_in_model=false ──
+        // ── 2. Provider 只表达候选产出，不承诺最终入模 ──
         for (String provider : POLICY_ONLY_PROVIDERS) {
             SpanData provSpan = findSpan(spans, "context.provider." + provider);
             assertNotNull("POLICY_ONLY provider span should exist: " + provider, provSpan);
-            assertEquals("POLICY_ONLY provider included_in_model should be false",
-                    false, provSpan.getAttributes().get(AttributeKey.booleanKey("provider.included_in_model")));
+            assertEquals("POLICY_ONLY provider produced_model_visible should be false",
+                    false, provSpan.getAttributes().get(
+                            AttributeKey.booleanKey("provider.produced_model_visible")));
         }
 
         // ── 3. 验证 MODEL_VISIBLE contributions 有对应 fragment/message/toolset span ──

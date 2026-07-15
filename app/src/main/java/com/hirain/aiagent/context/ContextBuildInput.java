@@ -20,7 +20,6 @@ public final class ContextBuildInput {
     private final ContextMemoryGateway memoryGateway;
     private final VehicleStatusProvider vehicleStatusProvider;
     private final TimeProvider timeProvider;
-    private final ContextBudgetManager budgetManager;
     private final ToolRegistry toolRegistry;
     private final ContextTokenEstimator tokenEstimator;
 
@@ -30,7 +29,6 @@ public final class ContextBuildInput {
         this.memoryGateway = builder.memoryGateway;
         this.vehicleStatusProvider = builder.vehicleStatusProvider;
         this.timeProvider = builder.timeProvider;
-        this.budgetManager = builder.budgetManager;
         this.toolRegistry = builder.toolRegistry;
         this.tokenEstimator = builder.tokenEstimator;
     }
@@ -44,7 +42,6 @@ public final class ContextBuildInput {
     public ContextMemoryGateway memoryGateway() { return memoryGateway; }
     public VehicleStatusProvider vehicleStatusProvider() { return vehicleStatusProvider; }
     public TimeProvider timeProvider() { return timeProvider; }
-    public ContextBudgetManager budgetManager() { return budgetManager; }
     public ToolRegistry toolRegistry() { return toolRegistry; }
     public ContextTokenEstimator tokenEstimator() { return tokenEstimator; }
 
@@ -54,7 +51,6 @@ public final class ContextBuildInput {
         private ContextMemoryGateway memoryGateway;
         private VehicleStatusProvider vehicleStatusProvider;
         private TimeProvider timeProvider = new SystemTimeProvider();
-        private ContextBudgetManager budgetManager = ContextBudgetManager.defaultBudget();
         private ToolRegistry toolRegistry;
         private ContextTokenEstimator tokenEstimator = new HeuristicContextTokenEstimator();
 
@@ -82,11 +78,6 @@ public final class ContextBuildInput {
 
         public Builder timeProvider(TimeProvider value) {
             if (value != null) this.timeProvider = value;
-            return this;
-        }
-
-        public Builder budgetManager(ContextBudgetManager value) {
-            if (value != null) this.budgetManager = value;
             return this;
         }
 

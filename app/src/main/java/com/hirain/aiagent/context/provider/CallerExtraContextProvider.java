@@ -27,6 +27,8 @@ public class CallerExtraContextProvider implements ContextProvider {
         return "CallerExtraContextProvider";
     }
 
+    @Override public String sourceKey() { return com.hirain.aiagent.context.ContextPolicies.CALLER_EXTRA; }
+
     @Override
     public ContextLifecycle lifecycle() {
         return ContextLifecycle.REQUEST_STATIC;
@@ -34,7 +36,7 @@ public class CallerExtraContextProvider implements ContextProvider {
 
     @Override
     public boolean required(RequestSession session, ContextBuildInput input) {
-        return false;
+        return com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input).required();
     }
 
     public ContextProviderResult provide(RequestSession session, ContextBuildInput input) {
@@ -47,8 +49,7 @@ public class CallerExtraContextProvider implements ContextProvider {
         }
 
         TextContextContribution contribution = new TextContextContribution(
-                "caller_extra", ContextVisibility.MODEL_VISIBLE, ContextTrustLevel.UNTRUSTED_DATA,
-                ContextPriority.OPTIONAL, ContextLifecycle.REQUEST_STATIC, false,
+                com.hirain.aiagent.context.ContextPolicies.resolve(sourceKey(), session, input),
                 name(), TextContextContribution.TARGET_CONTEXT_DATA,
                 extraText, Map.of());
 
