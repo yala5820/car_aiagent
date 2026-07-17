@@ -6,6 +6,8 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 
 **核心业务：** 利用大语言模型（LLM）和多模态视觉模型（VLM），为驾驶员提供自然语言对话、车辆控制、场景感知、前向视野问答等智能座舱能力。
 
+**架构定位：** AIAgent 是“确定性控制面 + 模型驱动 Tool Loop”的领域约束型单 Agent。AIDL Service、Runtime、Context、ToolGroup、Safety 与请求终态由项目代码控制；模型只在本轮允许的上下文和工具空间内完成自然语言理解、参数生成和多轮工具决策。LangChain4j 提供模型、消息、ChatMemory 与 Tool Calling 原语，不负责项目的业务编排。
+
 **关键特征：**
 - 纯后台 Service，无 UI / 无悬浮窗
 - 对外暴露 AIDL 接口（`processAgentRequest(AgentRequest)`），通过 AIDL Binder 供 Launcher 调用
@@ -19,6 +21,8 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 - 全链路追踪（OpenTelemetry + Phoenix）
 - **虚拟车辆状态机（VehicleStateMachine）**：Demo 阶段车控 tool 的状态托管中心，参数校验 + 状态收敛
 - **Context 上下文模块**：以 8 个请求级 Provider + 3 个迭代级 Provider 统一采集 Prompt、Memory、Tool、车辆与时间信息；独占装配 TEXT 模型输入，并支持集中策略、预算裁剪、Memory 摘要恢复和完整 Trace
+
+> **当前范围：** TEXT 是已进入新 Runtime / Context / TextAgentLoop 的主路径；IMAGE、VOICE、CONTROL 和主动场景链仍保留兼容实现。Demo 车控由 `VehicleStateMachine` 托管，`SoaService` 尚未形成真实车辆执行与回执闭环，因此 README 中的“完成”均不代表量产车控验收完成。
 
 ### 改造历史
 
@@ -34,8 +38,8 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 | **Phase 8** | **统一入口改造**：`sendMessage/sendMessageWithImage/requestAI` → `processAgentRequest(AgentRequest)`，`AgentResponse` 统一回调 |
 | **Phase 9** | **虚拟车辆状态机**：VehicleStateMachine + 8 个子系统 State POJO，替换 SoaService 调用，参数校验 |
 | **Phase 10** | **Runtime 层**：AgentRuntime + RequestSession + RequestSessionFactory，解耦 Service 与 Orchestrator |
-| **Phase 11** | **IntentRouter**：KeywordIntentRouter 关键词+正则意图标签器，11 种 IntentTag，只观测不分流 |
-| **Phase 12** | **ToolGroup 初版**：13 个工具组元数据 + DefaultToolGroupSelector，基于 IntentResult 选择候选工具组；该阶段只记录不限制 |
+| **Phase 11** | **IntentRouter 初版**：KeywordIntentRouter 关键词+正则意图标签器，11 种 IntentTag；初版只观测，后续已接入 ToolGroup 选择 |
+| **Phase 12** | **ToolGroup 初版**：13 个工具组元数据 + DefaultToolGroupSelector；初版只记录，Phase 18 起已实际限制 TEXT 模型可见工具 |
 | **Phase 13** | **协议扩展**：AgentRequest/AgentResponse 新增 userId/personaId/clientMessageId/status/errorDetail；新增 5 个会话与取消 Parcelable；AIDL 新增 6 个管理接口 |
 | **Phase 14** | **会话管理**：ConversationManager 门面，ConversationSessionGateway 可测试抽象，create/list/switch/delete/getActive 全链路；SessionManager 多用户隔离修复；SessionMemoryStore 扩展（元数据、事务创建、级联删除） |
 | **Phase 15** | **用户与 Persona**：RequestSessionFactory userId/sessionId 分离；TEXT 三种内置人格（chat/friendly/concise）；AgentConfigFactory.createTextPersona() 统一入口；Trace 记录有效 persona |
@@ -74,6 +78,9 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 │  │  ├─ getActiveConversation                    │            │
 │  │  ├─ cancelAgentRequest                       │            │
 │  │  └─ registerListener / unregisterListener    │            │
+│  │  RequestAdmission → ActiveRequestRegistry    │            │
+│  │  RequestDeadline → RequestCallRegistry       │            │
+│  │  文本确认分支 / 唯一终态 / Listener 派发      │            │
 │  └──────────────────┬──────────────────────────┘            │
 │                     │                                       │
 │                     ▼                                       │
@@ -82,8 +89,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 │  │  运行时协调层（Service 与 AgentLoop 之间）   │            │
 │  │  IntentRouter → ToolGroupSelector            │            │
 │  │  ├─ RequestSession（请求事实快照）           │            │
-│  │  ├─ ActiveRequestRegistry（单槽位准入 + 终态抢占）│         │
-│  │  ├─ RequestDeadline / RequestCallRegistry    │            │
+│  │  ├─ 选择状态：SELECTED / CHAT_ONLY / 澄清 / 失败关闭│       │
 │  │  └─ ContextOrchestrator.prepare()            │            │
 │  │      8 个 REQUEST_STATIC Provider            │            │
 │  └──────────────────┬──────────────────────────┘            │
@@ -162,7 +168,7 @@ AIAgent/
 │   │   │   ├── AgentRequest.java           # 统一请求体 Parcelable（含 userId/personaId/clientMessageId）
 │   │   │   ├── AgentResponse.java          # 统一响应体 Parcelable（含 userId/personaId/status/errorDetail/clientMessageId）
 │   │   │   ├── ConversationRequest.java    # 创建会话请求 Parcelable
-│   │   │   ├── ConversationInfo.java       # 会话信息 Parcelable（12 字段）
+│   │   │   ├── ConversationInfo.java       # 会话信息 Parcelable（11 字段）
 │   │   │   ├── ConversationListResponse.java # 会话列表响应 Parcelable
 │   │   │   ├── ConversationOperationResult.java # 会话操作结果 Parcelable
 │   │   │   ├── CancelRequestResult.java    # 取消请求结果 Parcelable
@@ -395,7 +401,7 @@ execute(session, prepareResult)
   → max iterations → AgentResult.error()
 ```
 
-`AgentConfig` 负责 ModelCaller、ToolExecutor、PostProcessor、Terminator 和 ResultCollector 等执行策略；`ToolSafetyEngine` 由 Service 统一创建并注入各 AgentLoop，不随 Persona 改变。Prompt、短期记忆、车辆状态、时间和工具规格不再由 TEXT PreProcessor 各自拼装，而是统一通过 Context Provider 进入最终请求。
+`AgentConfig` 负责 ModelCaller、PostProcessor、Terminator 和 ResultCollector 等执行策略；TEXT 工具规格由 Context 提供，实际分发使用配置中的全局 `ToolRegistry`。`ToolSafetyEngine` 由 Service 统一创建并注入各 AgentLoop，不随 Persona 改变。Prompt、短期记忆、车辆状态、时间和工具规格不再由 TEXT PreProcessor 各自拼装，而是统一通过 Context Provider 进入最终请求。
 
 **会话隔离：** `ContextMemoryGateway` 按 `sessionId` 选择 live ChatMemory，`SessionMemoryContextProvider` 每轮重新读取当前会话快照；create/switch/delete 会话会真实改变下一轮模型可见的短期历史。
 
@@ -406,8 +412,11 @@ execute(session, prepareResult)
 替代了原 10 个 Manager 中 450 行重复的 `hasTool`/`handleToolRequest` 样板代码：
 
 - `ToolDispatcher`：构造时反射扫描目标对象的所有 `@Tool` 方法，建立 工具名→Method 映射
-- `ToolRegistry`：管理多个 Dispatcher，`registerAll()` 注册，`dispatch()` 路由
+- `ToolRegistry`：管理多个 Dispatcher，`registerAll()` 注册，`dispatch()` / `dispatchWithOutcome()` 路由
 - 工具名直接来自 `@Tool(name=...)` 注解，不在源码中手写字符串匹配
+- `ToolDispatchOutcome`：区分工具注册、参数解析、反射调用和技术分发状态，并向 Tool Trace 提供目标类、方法和失败信息
+
+`ToolDispatchOutcome` 描述的是“工具方法是否完成技术调用”，不等同于“车辆动作已经生效”。当前 Demo 工具仍主要返回字符串；真实车控需要进一步引入结构化动作回执和执行后状态确认。
 
 ### 4.4 PromptManager（外部化 Prompt 管理）
 
@@ -512,20 +521,22 @@ Demo 阶段引入的状态托管中心，替换原有的 `SoaService` 外部调�
 
 - **RequestSession 创建**：从 AgentRequest + TraceContext 创建规范化快照（含 userId/sessionId/personaId/clientMessageId/intent/toolgroup 选择结果）
 - **IntentRouter 调度**：在 `startSession()` 中调用 IntentRouter 生成 `IntentResult`（11 种粗粒度意图标签）
-- **ToolGroup 选择**：基于 IntentResult 调用 ToolGroupSelector，生成 `ToolGroupSelectionResult`（候选工具组 + 工具名列表）
+- **ToolGroup 选择**：基于 IntentResult 调用 ToolGroupSelector，生成带 `SELECTED / CHAT_ONLY / CLARIFICATION_REQUIRED / FAILED_CLOSED` 状态的选择结果
 - **Trace 写入**：将 intent / toolgroup / clientMessageId 信息写入 Trace root span 的 11 个 attribute
-- **异常降级**：Router / Selector 异常不影响执行路径，降级为 `UNKNOWN` / `CHAT_ONLY_GROUP`
+- **异常边界**：Router 异常降级为 `UNKNOWN`；Selector 返回 null、状态不一致或抛异常时统一 `FAILED_CLOSED`，在 Context / 模型前终止
 - **执行封装**：`execute()` / `timeoutResult()` / `errorResult()` / `cancelledResult()` 统一封装 RuntimeResult（全部含 userId/personaId/clientMessageId 元信息）
 - **服务端取消支持**：`cancelledResult(session, reason)` → RuntimeResult.cancelled → Mapper 按状态码 CANCELLED 映射
-- **Context 编排**：`execute(session)` 内先调 `ContextPreparer.prepare(session, cancelChecker)`，成功后把 `ContextPrepareResult` 交给 TEXT executor；Context 失败、取消和运行异常统一映射为 RuntimeResult
+- **Context 编排**：`execute(session)` 内先调 `ContextOrchestrator.prepare(session, cancelChecker)`，成功后把 `ContextPrepareResult` 交给 TEXT executor；Context 失败、取消和运行异常统一映射为 RuntimeResult
 
 TEXT 请求执行路径：
 
 ```
-handleTextRequest() → traceManager.startAgentRequest() → agentRuntime.startSession()
+handleTextRequest()
+  → ActiveRequestRegistry.tryAcquire(RequestAdmission)  ← 单槽位 / 重复 requestId 门禁
+  → traceManager.startAgentRequest() → agentRuntime.startSession(deadline)
   → routeIntentSafely() → selectToolGroupsSafely()
   → writeIntentToTrace() → writeToolGroupsToTrace() → sessionFactory.create() → writeRequestMetaToTrace()
-  → ActiveRequestRegistry.register() → agentRuntime.execute()
+  → agentRuntime.execute()
      → contextOrchestrator.prepare(session, contextCancelChecker)
      → prepare 失败/取消映射，成功则再次检查 cancelled_before_agent_loop
      → chatExecutor.execute(session, contextPrepareResult)
@@ -537,12 +548,13 @@ handleTextRequest() → traceManager.startAgentRequest() → agentRuntime.startS
 
 **文件：** `intentrouter/`
 
-非 LLM 的纯关键词 + 正则匹配意图系统，只为观测和后续策略做准备，不做分流：
+非 LLM 的纯关键词 + 正则匹配意图系统。它不直接执行工具，但结果会进入 `DefaultToolGroupSelector`，实际影响 TEXT 模型可见工具：
 
 - `KeywordIntentRouter`：使用 LinkedHashMap + 正则实现，当前约 56 个业务关键词 + 少量正则，空文本返回 UNKNOWN，无关键词返回 CHAT
 - 11 种 IntentTag：`CHAT` / 7 个车辆域 / `VISION_QA` / `WEATHER` / `UNKNOWN`
 - 输出 `IntentResult` 含 6 个字段：`intentTag` / `confidence` / `matchedKeywords` / `normalizedText` / `sourceInputType` / `debugReason`
 - 优先级稳定（LinkedHashMap 保证顺序），不调用 LLM、不引用 tool registry
+- 当前为单标签 winner 设计；复合领域指令和平分场景只保留一个结果，复杂任务拆分仍是后续能力
 
 ### 4.13 ToolGroup（工具分组与选择）
 
@@ -614,7 +626,7 @@ Service worker → Context.prepare → Runtime gate → iteration/assemble → m
 | PromptContextProvider | REQUEST_STATIC | 始终 required | SYSTEM Message |
 | UserInputContextProvider | REQUEST_STATIC | 始终 required | CURRENT_USER Message |
 | IntentContextProvider | REQUEST_STATIC | optional | POLICY_ONLY |
-| ToolGroupContextProvider | REQUEST_STATIC | 非 CHAT_ONLY | ToolContextContribution |
+| ToolGroupContextProvider | REQUEST_STATIC | 仅 `SELECTED` 状态 required | ToolContextContribution |
 | LongTermMemoryContextProvider | REQUEST_STATIC | optional | CONTEXT_DATA |
 | CallerExtraContextProvider | REQUEST_STATIC | optional | CONTEXT_DATA |
 | SessionMemoryContextProvider | ITERATION_DYNAMIC | TEXT 始终 required | SESSION_MEMORY Message |
@@ -700,50 +712,50 @@ Launcher/AIAgentTestApp → AIDL processAgentRequest(AgentRequest)
     │  inputType=TEXT
     ▼
 AIAgentService.handleTextRequest()
-    ├─ traceManager.startAgentRequest() → agent.request root span → makeCurrent()
-    └─ agentRuntime.startSession(request, traceContext)
-         ├─ routeIntentSafely(request)             ← KeywordIntentRouter
-         │      → IntentResult(intentTag, confidence, matchedKeywords, ...)
-         ├─ selectToolGroupsSafely(intentResult, request)  ← DefaultToolGroupSelector
-         │      → ToolGroupSelectionResult(selectedGroupIds, selectedToolNames, ...)
-         ├─ writeIntentToTrace(traceContext, intentResult)      ← 5 个 agent.intent.* 属性
-         ├─ writeToolGroupsToTrace(traceContext, toolGroups)    ← 5 个 agent.tool_group.* 属性
-         └─ sessionFactory.create(request, persona, traceContext,
-                  intentResult, toolGroupSelectionResult)
-              └─ RequestSession（不可变，含 intent + toolgroup 元信息）
+    ├─ 规范化 requestId / userId / personaId，创建绝对 30 秒 RequestDeadline
+    ├─ ActiveRequestRegistry.tryAcquire(RequestAdmission)
+    │    └─ BUSY / DUPLICATE → 直接返回，不进入 Runtime
+    ├─ traceManager.startAgentRequest() → agent.request root span
+    ├─ ConfirmationTextParser
+    │    ├─ “确认执行 / 取消执行” → 确认分支，不经过 IntentRouter 和 LLM
+    │    └─ 普通文本 → 取消旧 PendingAction，继续主链
+    ├─ agentRuntime.startSession(request, traceContext, deadline)
+    │    ├─ KeywordIntentRouter → IntentResult
+    │    ├─ DefaultToolGroupSelector → SELECTED / CHAT_ONLY / CLARIFICATION / FAILED_CLOSED
+    │    └─ RequestSession（不可变请求事实快照）
+    └─ timeout runnable + TEXT worker + RequestExecutionContext
     │
     ▼
 agentRuntime.execute(runtimeSession)
-    ├→ ① agent.loop span
-    ├→ ② contextOrchestrator.prepare(session, cancelChecker)
+    ├─ 选择状态 gate：澄清直接返回，失败关闭直接终止
+    ├─ agent.loop span
+    ├─ contextOrchestrator.prepare(session, cancelChecker)
     │     8 个 REQUEST_STATIC Provider
     │     → ContextFrame + CurrentUser + Provider outcomes
-    ├→ ③ prepare 失败/取消映射；成功后执行 Runtime 取消 gate
-    └→ ④ textOrchestrator.execute(session, prepareResult)
+    ├─ prepare 失败 / 取消 / deadline 映射
+    └─ textOrchestrator.execute(session, prepareResult)
          └─ for iteration = 0..maxIterations
-              ├→ agent.iteration span
-              ├→ contextOrchestrator.assemble(request)
+              ├─ agent.iteration span
+              ├─ contextOrchestrator.assemble(request)
               │    3 个 ITERATION_DYNAMIC Provider
-              │    → ContextMessageAssembler
-              │    → 消息序列校验 + Token 预算
+              │    → ContextMessageAssembler → 序列校验 + Token 预算
+              │    → 可选数据裁剪；必要时 Memory 摘要压缩并重新装配一次
               │    → ContextAssemblyResult(messages, toolSpecifications)
-              ├→ iteration 0 在预算/取消通过后提交 CurrentUser 到 SessionMemory
-              ├→ ChatRequest(messages, toolSpecifications)
-              ├→ gen_ai.chat
-              │    ├─ ToolCall → tool.execute
-               │    │    ├─ tool.safety_check → ALLOW / DENY
-               │    │    ├─ ALLOW → tool.dispatch
-               │    │    └─ 执行结果或拒绝结果写回 → 下一轮重新 assemble
+              ├─ iteration 0 在预算 / 取消通过后提交 CurrentUser 到 SessionMemory
+              ├─ ChatRequest(messages, toolSpecifications) → gen_ai.chat
+              │    ├─ ToolCall → 整批 tool.safety_check
+              │    │    ├─ ALLOW → tool.dispatch → ToolResult 写回
+              │    │    ├─ DENY → 拒绝 ToolResult 写回
+              │    │    └─ REQUIRE_CONFIRMATION → 零执行并创建 30 秒 PendingAction
               │    └─ 文本 → PostProcessor → Terminator → ResultCollector
-              └→ AgentResult
+              └─ ToolResult 后进入下一轮 assemble，普通文本形成 AgentResult
     │
     ▼
-runtimeResponseMapper.toAgentResponse(runtimeResult) → AgentResponse
-    │
-    ▼
-notifyAIAgentListeners(response)
-session.close() → scope.close() + rootSpan.end()
-    OTLP/HTTP → Phoenix (localhost:6006)
+ActiveRequestRegistry.tryComplete(terminalState)  ← success / failure / timeout / cancel 竞争唯一终态
+    ├─ runtimeResponseMapper.toAgentResponse() → notifyAIAgentListeners()
+    ├─ TraceResponseDispatcher → response.dispatch → root span end
+    ├─ RequestCallRegistry.clear(requestId)
+    └─ Worker 完全退出后 release 单槽位
 ```
 
 ---
@@ -754,21 +766,22 @@ session.close() → scope.close() + rootSpan.end()
 
 | 模块 | 阶段状态 | 当前结论与主要缺口 |
 |------|----------|--------------------|
-| 对外 AIDL 协议 | 已完成 | 主请求、会话 CRUD、取消与 Listener 接口已落地；仍需调用方与车机联调 |
+| 对外 AIDL 协议 | 基本完成 | 主请求、会话 CRUD、取消与 Listener 接口已落地；exported Service 的签名权限、Binder caller 身份与确认归属仍需收口 |
 | AgentRuntime | 基本完成 | TEXT 已具备单槽位准入、30 秒 deadline、HTTP Call 取消、唯一终态与 requestId 防重放；VOICE/SCENE 等仍使用兼容链路 |
 | TEXT Context | 代码完成、部分设备验收 | 8 静态 + 3 动态 Provider；独占消息和工具规格；集中策略、裁剪、压缩重试和 Legacy 清理已完成；Automotive 模拟器 AIDL、基础 TEXT、会话/用户隔离与 52 条消息长历史已通过，压缩、工具和 Phoenix 专项仍待验收 |
 | TEXT AgentLoop | 基本完成 | 多轮循环、整批 Safety 预检、确认与状态复核已接通；模型同步 HTTP Call 可取消，真实车控执行仍未接入 |
-| IntentRouter | Demo 完成 | 11 类关键词/正则意图，低成本且可解释；复杂自然语言仍依赖 fallback |
+| IntentRouter | Demo 完成 | 11 类关键词/正则意图，低成本且可解释；当前为单标签 winner，复合领域和查询/控制语义尚未强类型化 |
 | ToolGroup | P0 基线完成 | 13 个工具组；明确意图最小暴露，普通聊天空工具，不确定/异常/聚合结果失败关闭 |
-| ToolRegistry / Dispatcher | 基本完成 | 46 个 `@Tool` 统一反射注册和调度；TEXT 使用结构化 ToolDispatchOutcome，不再从错误文本猜测成功状态 |
+| ToolRegistry / Dispatcher | 基本完成 | 46 个 `@Tool` 统一反射注册和调度；TEXT 使用结构化 ToolDispatchOutcome 描述技术分发结果，但尚未形成统一车辆动作回执 |
 | Tool Safety Engine | P0 基线完成 | 统一入口、HIGH 规则漏配拒绝、文本确认、30 秒 PendingAction、确认前复核和最多一次执行已接通；仍不是量产功能安全方案 |
 | Prompt / Persona | 基本完成 | 11 个模板；支持 chat/friendly/concise TEXT System Prompt；更复杂动态策略未实现 |
 | Session 记忆 | 代码完成、基础设备验收通过 | SQLite 持久化、会话 CRUD、完整历史和 ToolExchange 校验已接通；Automotive 模拟器实测 52 条消息连续有序、首尾保留，含 ToolExchange 的超长会话和目标车机仍待验收 |
-| 长期记忆 | 可用 | 提取、存储、按 userId 注入和 FALLBACK 状态已接通；衰减策略仍可后续完善 |
+| 长期记忆 | 可用 | 提取、存储、按 userId 注入和 FALLBACK 状态已接通；提取仍位于主响应路径，相关性、衰减与用户修正策略可继续完善 |
 | Memory 压缩 | 代码完成 | Context 超预算时按完整 turn 摘要、CAS 写回、动态重读并最多重装配一次；真实摘要模型待设备验收 |
 | Trace | 代码完成 | 主 Trace 树、Context 来源、最终消息、工具 schema、裁剪/压缩和 Tool 阶段已接通；业务层全文输出，Phoenix 设备显示待验收 |
 | 虚拟车辆状态机 | Demo 完成 | 8 个状态子系统、参数校验和状态收敛已用于 Demo 车控 |
 | SoaService 真车通信 | 未完成 | 方法体仍为空；当前车控结果来自 VehicleStateMachine，不代表真实车辆执行 |
+| 动作语义闭环 | 待完善 | ToolGroup 已限制模型可见工具，Safety 已控制风险动作；Dispatch 前本轮授权复核、ActionReceipt、状态回读和最终答复真实性仍待建立 |
 | 场景 / VLM / VR | 部分完成 | 已有模型、Camera SDK 和闭源 VR/TTS 适配；依赖目标设备、外部服务与实车验收 |
 | UI | 不在本项目范围 | 仅保留无界面的调试启动 Activity；业务 UI 由 Launcher / 调用方提供 |
 
@@ -780,7 +793,24 @@ session.close() → scope.close() + rootSpan.end()
 - FULL_DEBUG 在业务层不截断；Phoenix/exporter 是否限制超长 attribute 仍需设备验证。
 - Context 当前只独占 TEXT 输入；VOICE、SCENE、VLM 等兼容链路仍保留旧 AgentLoop/PreProcessor。
 
-### 6.2 当前验证基线
+### 6.1.1 Debug Eval 适配边界
+
+- Debug APK 提供独立的 `IAIAgentEvalDebug` 环境控制入口，用于 TestApp 获取唯一虚拟车辆状态机的快照、reset、原子 Patch 与临时租约；它不属于主业务 AIDL，也不承担 Dataset、Judge 或 Report。
+- Eval case 的跨系统关联复用 `clientMessageId`，根 Trace 额外记录环境是否处于租约及请求开始时的 revision。AgentResponse、状态快照与 Trace 分别保持结果、环境与观测事实边界。
+- Release variant 不合并 Eval Debug Service，leaseToken 只在 Android 内部传递，不能进入 Prompt、Trace、Logcat 或电脑端结果。
+- 当前仅完成 AIAgent 侧编译与 JVM 验证；需待 TestApp Bridge 和电脑端 Eval 项目完成后关闭真实 Binder、Phoenix 与安全确认的三方设备验收。
+
+### 6.2 Agent 当前设计边界
+
+- **工具可见性不等于执行授权**：Context 会按 ToolGroup 生成本轮 ToolSpecification，但 Dispatch 点尚未再次核验模型请求的工具是否属于本轮授权集合。
+- **技术调用成功不等于车辆目标完成**：`ToolDispatchOutcome` 能证明注册、解析与反射调用状态；真实车控仍需要 `ActionReceipt`、SOA 回执和状态回读。
+- **最终文本尚未由动作证据强约束**：当前主要依靠 Prompt 要求模型如实回复，后续应按 APPLIED / REJECTED / FAILED / PARTIAL / UNKNOWN 约束最终语义。
+- **Intent 仍是单领域标签**：适合单目标 Demo 指令，复合动作、查询与控制区分、条件动作需要独立任务语义层。
+- **TEXT 是新主链，其他输入仍为兼容链**：后续应先收敛共享的“授权 → Safety → Dispatch → 回执 → Trace”管线，再按需要迁移 IMAGE / VOICE / SCENE。
+
+完整设计评估见 [Agent 设计与架构评估报告](docs/overview/agent-design-and-architecture-evaluation.md)。
+
+### 6.3 当前验证基线
 
 - 自动门禁已通过 62 个测试类、354 个 JVM 测试，以及 Debug APK 构建和 Android Lint。
 - 已验证完整历史、裁剪、压缩重装配、stale CAS、allToolsFallback、结构化 Tool outcome、PostProcessor 写回和 FULL_DEBUG 长正文。
@@ -819,6 +849,9 @@ weather.api_key=your_weather_key
 # 构建 Debug APK
 .\gradlew.bat assembleDebug
 
+# Android Lint
+.\gradlew.bat lintDebug
+
 # 安装并通过无界面调试 Activity 启动前台 Service
 adb install -r app\build\outputs\apk\debug\app-debug.apk
 adb shell am start -n com.hirain.aiagent/.MainActivity
@@ -841,9 +874,10 @@ adb reverse tcp:6006 tcp:6006
 - [ToolGroup 模块概览](docs/overview/toolgroup-module-overview.md)
 - [Memory 模块概览](docs/overview/memory-module-overview.md)
 - [Trace 模块概览](docs/overview/trace-module-overview.md)
-- [Agent 架构与运行流程评估](docs/overview/agent-architecture-and-runtime-flow-evaluation.md)
+- [Agent 设计与架构评估（当前）](docs/overview/agent-design-and-architecture-evaluation.md)
+- [Agent 架构与运行流程历史评估](docs/overview/agent-architecture-and-runtime-flow-evaluation.md)
 - [Tool Safety 当前实现与边界](docs/overview/tool-safety-policy-engine-current-state.md)
 - [三个 P0 改进计划与实施状态](docs/plan/2026-07-13-agent-p0-runtime-tool-safety-improvement-plan.md)
 - [Context Full Control 设计](docs/design/2026-07-11-context-full-control-design.md)
 
-**当前结论：** AIAgent 的 AIDL 协议、TEXT Runtime、Context 输入控制、工具调度、Prompt、会话记忆和 Trace 已形成可运行闭环；Context 长会话预算恢复和 Legacy 收口已经完成代码与自动化门禁，Automotive 模拟器也已通过基础 AIDL、TEXT、隔离和 52 条 SQLite 历史验收。下一步重点是目标车机上的压缩、工具、切换与取消专项，Phoenix/真实 Qwen token 校准、设备侧故障评测、调用方鉴权，以及真实 SOA 的回执、幂等、执行后状态确认与补偿。
+**当前结论：** AIAgent 已形成“确定性控制面 + 模型驱动 Tool Loop”的车载领域单 Agent 主链；AIDL、TEXT Runtime、Context 输入控制、工具调度、Prompt、会话记忆、安全确认和 Trace 已可协同运行。Context 长会话预算恢复已完成代码与自动化门禁，Automotive 模拟器也已通过基础 AIDL、TEXT、隔离和 52 条 SQLite 历史验收。下一阶段应优先完成本轮工具执行授权、结构化动作回执、执行后状态确认、最终答复真实性和 AIDL 调用方身份，再推进真实 SOA、目标车机故障评测、Phoenix 展示与真实 Qwen Token 校准。

@@ -74,6 +74,8 @@ public final class TraceAttributeKeys {
     public static final String MEMORY_OUTPUT = "memory.output";
 
     public static final String CLIENT_MESSAGE_ID = "client_message.id";
+    public static final String EVAL_ENVIRONMENT_ACTIVE = "eval.environment.active";
+    public static final String EVAL_ENVIRONMENT_REVISION = "eval.environment.revision";
 
     public static final String RESPONSE_SUCCESS = "response.success";
     public static final String RESPONSE_ERROR_TYPE = "response.error_type";

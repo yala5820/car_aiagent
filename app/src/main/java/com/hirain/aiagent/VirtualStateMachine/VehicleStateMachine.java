@@ -5,7 +5,17 @@ import com.hirain.aiagent.VirtualStateMachine.state.*;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
+import java.lang.reflect.Field;
+import java.time.Instant;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -40,14 +50,23 @@ public class VehicleStateMachine {
     private static final int SPD_MIN = 0;
     private static final int SPD_MAX = 240;
 
-    private final AcState ac = new AcState();
-    private final DoorState door = new DoorState();
-    private final WindowState window = new WindowState();
-    private final SeatState seat = new SeatState();
-    private final SpeedState speed = new SpeedState();
-    private final ChassisState chassis = new ChassisState();
-    private final FragState frag = new FragState();
-    private final DmsState dms = new DmsState();
+    private static final String EVAL_SCHEMA_VERSION = "1.0";
+    private static final Gson GSON = new Gson();
+    private AcState ac = new AcState();
+    private DoorState door = new DoorState();
+    private WindowState window = new WindowState();
+    private SeatState seat = new SeatState();
+    private SpeedState speed = new SpeedState();
+    private ChassisState chassis = new ChassisState();
+    private FragState frag = new FragState();
+    private DmsState dms = new DmsState();
+    private long stateRevision;
+    private String lastObservedSignature;
+
+    public VehicleStateMachine() {
+        // 初始默认状态不是一次业务写入，revision 从 0 开始；后续 Tool 写入由 snapshot 统一观察。
+        lastObservedSignature = stateSignatureLocked();
+    }
 
     // ── 工具方法 ──
 
@@ -495,6 +514,134 @@ public class VehicleStateMachine {
             return "获取DMS系统状态失败。";
         }
         return json.toString();
+    }
+
+    // ── Eval 结构化状态接口 ──
+
+    /**
+     * 复制当前八个子系统；快照字段严格使用共享 Schema 的英文 camelCase，避免复用 Prompt 中文字段。
+     */
+    public synchronized VehicleStateSnapshot snapshot(long nowMillis) {
+        String signature = stateSignatureLocked();
+        // 既有 Tool setter 的业务返回值保持不变；此处补获它们造成的真实状态变化并形成可观测 revision。
+        if (lastObservedSignature == null) {
+            lastObservedSignature = signature;
+        } else if (!lastObservedSignature.equals(signature)) {
+            stateRevision++;
+            lastObservedSignature = signature;
+        }
+        return snapshotLocked(nowMillis);
+    }
+
+    /** Eval reset 一次替换全部内部状态，防止逐字段重置产生中间状态或多次 revision。 */
+    public synchronized VehicleStateMutationResult reset(long nowMillis) {
+        ac = new AcState(); door = new DoorState(); window = new WindowState(); seat = new SeatState();
+        speed = new SpeedState(); chassis = new ChassisState(); frag = new FragState(); dms = new DmsState();
+        stateRevision++;
+        lastObservedSignature = stateSignatureLocked();
+        return VehicleStateMutationResult.success(snapshotLocked(nowMillis));
+    }
+
+    /**
+     * 对 Patch 做完全部路径、类型和合法范围校验后才进入写入阶段；任一字段失败都不会污染状态。
+     */
+    public synchronized VehicleStateMutationResult applyPatch(VehicleStatePatch patch, long nowMillis) {
+        if (patch == null || patch.isEmpty()) {
+            return VehicleStateMutationResult.failure("NO_CHANGES", null, "状态 Patch 为空", snapshotLocked(nowMillis));
+        }
+        for (Map.Entry<String, Map<String, Object>> system : patch.getSystems().entrySet()) {
+            Object target = stateForSystem(system.getKey());
+            if (target == null) return failure("UNKNOWN_STATE_PATH", system.getKey(), nowMillis);
+            if (system.getValue() == null) return failure("TYPE_MISMATCH", system.getKey(), nowMillis);
+            for (Map.Entry<String, Object> field : system.getValue().entrySet()) {
+                Field declared = declaredField(target, field.getKey());
+                if (declared == null) return failure("UNKNOWN_STATE_PATH", system.getKey() + "." + field.getKey(), nowMillis);
+                String validation = validateValue(system.getKey(), field.getKey(), declared.getType(), field.getValue());
+                if (validation != null) return failure(validation, system.getKey() + "." + field.getKey(), nowMillis);
+            }
+        }
+        try {
+            for (Map.Entry<String, Map<String, Object>> system : patch.getSystems().entrySet()) {
+                Object target = stateForSystem(system.getKey());
+                for (Map.Entry<String, Object> field : system.getValue().entrySet()) {
+                    Field declared = declaredField(target, field.getKey());
+                    declared.setAccessible(true);
+                    if (declared.getType() == int.class) declared.setInt(target, ((Number) field.getValue()).intValue());
+                    else if (declared.getType() == boolean.class) declared.setBoolean(target, (Boolean) field.getValue());
+                    else declared.set(target, field.getValue());
+                }
+            }
+        } catch (IllegalAccessException e) {
+            return failure("STATE_OPERATION_FAILED", null, nowMillis);
+        }
+        stateRevision++;
+        lastObservedSignature = stateSignatureLocked();
+        return VehicleStateMutationResult.success(snapshotLocked(nowMillis));
+    }
+
+    private VehicleStateMutationResult failure(String code, String path, long nowMillis) {
+        return VehicleStateMutationResult.failure(code, path, "状态字段校验失败：" + path, snapshotLocked(nowMillis));
+    }
+
+    private VehicleStateSnapshot snapshotLocked(long nowMillis) {
+        Map<String, Map<String, Object>> systems = new LinkedHashMap<>();
+        systems.put("ac", objectMap(ac)); systems.put("door", objectMap(door));
+        systems.put("window", objectMap(window)); systems.put("seat", objectMap(seat));
+        systems.put("speed", objectMap(speed)); systems.put("chassis", objectMap(chassis));
+        systems.put("fragrance", objectMap(frag)); systems.put("dms", objectMap(dms));
+        return new VehicleStateSnapshot(EVAL_SCHEMA_VERSION, stateRevision,
+                DateTimeFormatter.ISO_INSTANT.format(Instant.ofEpochMilli(nowMillis)), systems);
+    }
+
+    private String stateSignatureLocked() { return GSON.toJson(new Object[] { ac, door, window, seat, speed, chassis, frag, dms }); }
+    private Object stateForSystem(String name) {
+        if ("ac".equals(name)) return ac; if ("door".equals(name)) return door;
+        if ("window".equals(name)) return window; if ("seat".equals(name)) return seat;
+        if ("speed".equals(name)) return speed; if ("chassis".equals(name)) return chassis;
+        if ("fragrance".equals(name)) return frag; if ("dms".equals(name)) return dms;
+        return null;
+    }
+    private static Field declaredField(Object target, String name) {
+        try { return target.getClass().getDeclaredField(name); } catch (NoSuchFieldException ignored) { return null; }
+    }
+    private String validateValue(String system, String field, Class<?> type, Object value) {
+        if (value == null) return "TYPE_MISMATCH";
+        if (type == boolean.class && !(value instanceof Boolean)) return "TYPE_MISMATCH";
+        if (type == int.class && (!(value instanceof Number) || ((Number) value).doubleValue() % 1 != 0)) return "TYPE_MISMATCH";
+        if (type == String.class && !(value instanceof String)) return "TYPE_MISMATCH";
+        if (type == int.class) {
+            int number = ((Number) value).intValue();
+            if ((field.contains("Temp") && (number < TEMP_MIN || number > TEMP_MAX))
+                    || (field.equals("acFanIntensity") && (number < FAN_MIN || number > FAN_MAX))
+                    || ((field.contains("Open") || field.contains("Air")) && (number < PERCENT_MIN || number > PERCENT_MAX))
+                    || (field.equals("vehicleSpd") && (number < SPD_MIN || number > SPD_MAX))) return "VALUE_OUT_OF_RANGE";
+        }
+        if (type == String.class) {
+            String text = (String) value;
+            Set<String> valid = enumFor(field);
+            if (valid != null && !valid.contains(text)) return "INVALID_ENUM";
+        }
+        return null;
+    }
+    private Set<String> enumFor(String field) {
+        if (field.equals("acCleanMode")) return VALID_CLEAN_MODES; if (field.equals("acCycMode")) return VALID_CYC_MODES;
+        if (field.equals("acAssistAirOutletMode")) return VALID_ASSIST_OUTLET_MODES; if (field.equals("chassisMode")) return VALID_CHASSIS_MODES;
+        if (field.equals("fragType")) return VALID_FRAG_TYPES; if (field.equals("fragIntensity")) return VALID_FRAG_INTENSITIES;
+        if (field.equals("seatMassageMode")) return VALID_MASSAGE_MODES; if (field.equals("seatMassageIntensity")) return VALID_MASSAGE_INTENSITIES;
+        if (field.equals("dmsDriveFatigue")) return VALID_FATIGUE; if (field.equals("dmsDriveDistractionLevel")) return VALID_DISTRACTION;
+        if (field.equals("dmsDriveEmotion")) return VALID_EMOTION; return null;
+    }
+    private static Map<String, Object> objectMap(Object state) {
+        JsonObject object = JsonParser.parseString(GSON.toJson(state)).getAsJsonObject();
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
+            JsonElement value = entry.getValue();
+            if (!value.isJsonPrimitive()) continue;
+            if (value.getAsJsonPrimitive().isBoolean()) result.put(entry.getKey(), value.getAsBoolean());
+            else if (value.getAsJsonPrimitive().isNumber()) result.put(entry.getKey(), value.getAsInt());
+            else if (value.getAsJsonPrimitive().isString()) result.put(entry.getKey(), value.getAsString());
+        }
+        return result;
     }
 
     // ── 辅助 ──

@@ -8,13 +8,15 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 - 纯后台 Service，无 UI / 无悬浮窗
 - 对外暴露 AIDL 接口（`processAgentRequest(AgentRequest)`），通过 AIDL Binder 供 Launcher 调用
 - 使用阿里云 DashScope 的 OpenAI 兼容 API（`qwen-turbo` / `qwen-flash` / `qwen-vl-max`）
-- 基于 LangChain4j 1.16.3 的 Tool Calling 机制实现"LLM + 车控"联动
+- 使用 LangChain4j 1.16.3 的消息、模型与 Tool Calling 原语，自研 Runtime / Context / AgentLoop 负责业务编排
 - 集中式反射工具调度（ToolRegistry + ToolDispatcher），消除样板代码
-- 组件化 Agent 循环（AgentLoopOrchestrator），7 个可插拔接口
-- 外部化 Prompt 管理（assets/prompts/ + PromptTemplate），动态切换
+- 组件化 Agent 循环（AgentLoopOrchestrator / TextAgentLoopOrchestrator）
+- 独立确定性的车控安全审核（ToolSafetyEngine），支持 ALLOW / DENY / REQUIRE_CONFIRMATION，并通过下一条普通 TEXT 请求完成高风险动作二次确认
+- 外部化 Prompt 管理（`assets/prompts/` + PromptTemplate），支持 TEXT Persona 模板选择
 - 四层记忆系统（Session / 长期记忆 / 压缩 / 提取）
 - 全链路追踪（OpenTelemetry + Phoenix）
 - **虚拟车辆状态机（VehicleStateMachine）**：Demo 阶段车控 tool 的状态托管中心，参数校验 + 状态收敛
+- **Context 上下文模块**：以 8 个请求级 Provider + 3 个迭代级 Provider 统一采集 Prompt、Memory、Tool、车辆与时间信息；独占装配 TEXT 模型输入，并支持集中策略、预算裁剪、Memory 摘要恢复和完整 Trace
 
 ---
 
@@ -49,20 +51,26 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 │                     ▼                                       │
 │  ┌─────────────────────────────────────────────┐            │
 │  │              AgentRuntime                    │            │
-│  │  运行时协调层（Service 与 Orchestrator 之间） │            │
-│  │  IntentRouter → ToolGroupSelector → 观测元信息│          │
-│  │  ├─ TEXT → textOrchestrators[personaId]     │            │
-│  │  ├─ ActiveRequestRegistry（终态抢占）       │            │
-│  │  └─ RequestSession（userId/sessionId/personaId/clientMsgId/intent/toolgroup）│
+│  │  运行时协调层（Service 与 AgentLoop 之间）   │            │
+│  │  IntentRouter → ToolGroupSelector            │            │
+│  │  ├─ RequestSession（请求事实快照）           │            │
+│  │  ├─ ActiveRequestRegistry（单槽位准入 + 终态抢占）│         │
+│  │  ├─ RequestDeadline / RequestCallRegistry    │            │
+│  │  └─ ContextOrchestrator.prepare()            │            │
+│  │      8 个 REQUEST_STATIC Provider            │            │
 │  └──────────────────┬──────────────────────────┘            │
-│                     │                                       │
+│                     │ execute(session, prepareResult)        │
 │                     ▼                                       │
 │  ┌─────────────────────────────────────────────┐            │
-│  │           AgentLoopOrchestrator               │            │
-│  │  统一 Agent 循环引擎，7 组件管线装配            │            │
-│  │  PreProcessor → ModelCaller → SafetyGuard    │            │
-│  │  → ToolExecutor → PostProcessor → Terminator │            │
-│  │  → ResultCollector                           │            │
+│  │        TextAgentLoopOrchestrator            │            │
+│  │  每轮 ContextOrchestrator.assemble()        │            │
+│  │  ├─ 3 个 ITERATION_DYNAMIC Provider        │            │
+│  │  ├─ ContextMessageAssembler                │            │
+│  │  ├─ 预算与消息序列校验                      │            │
+│  │  └─ ChatRequest(messages, toolSpecifications)│           │
+│  │     → ModelCaller → ToolSafetyEngine → Tool│            │
+│  │       高风险动作 → 普通 TEXT 二次确认       │            │
+│  │     → PostProcessor → Terminator → Collector│            │
 │  ├─────────────────────────────────────────────┤            │
 │  │           Tool 调用层（集中式反射调度）         │            │
 │  │  ToolRegistry (Map<String, ToolDispatcher>)   │            │
@@ -70,16 +78,16 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 │  │  Vehicle*Manager | WeatherUtils | VlManager  │            │
 │  ├─────────────────────────────────────────────┤            │
 │  │           Prompt 管理                         │            │
-│  │  assets/prompts/ (.txt 模板)                  │            │
+│  │  assets/prompts/（11 个 .txt 模板）           │            │
 │  │  PromptManager (加载+缓存+渲染)               │            │
 │  │  PromptSelector (动态切换策略)                │            │
 │  ├─────────────────────────────────────────────┤            │
 │  │           记忆系统（四层架构）                  │            │
 │  │  SessionManager → 会话生命周期（多用户隔离）    │            │
 │  │  SessionMemoryStore → SQLite 持久化（含元数据） │            │
-│  │  SessionChatMemoryProvider → 按 userId+sessionId+personaId 选择 ChatMemory  │
+│  │  SessionChatMemoryProvider → 按 sessionId 选择 ChatMemory  │
 │  │  LongTermMemory → 用户偏好持久化              │            │
-│  │  MemoryCompressor → Token 超限自动摘要        │            │
+│  │  MemoryCompressor → 提供摘要压缩能力           │            │
 │  │  MemoryExtractor → 对话中提取可记忆信息        │            │
 │  ├─────────────────────────────────────────────┤            │
 │  │           硬件通信层                           │            │
@@ -94,7 +102,8 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 | 类别 | 技术 |
 |------|------|
 | 语言 | Kotlin + Java 混编 |
-| AI 框架 | LangChain4j 1.16.3 |
+| Android | compileSdk / targetSdk 35，minSdk 33，Java 17 |
+| AI 基础库 | LangChain4j 1.16.3（模型、消息、Tool Calling）；Agent 编排由项目自研 Runtime / Context / AgentLoop 完成 |
 | LLM 模型 | qwen-turbo（对话）、qwen-flash（场景）、qwen-vl-max（视觉问答） |
 | LLM API | 阿里云 DashScope（OpenAI 兼容接口） |
 | 通信 | AIDL（Launcher ↔ AIAgent：主对话 + 会话 CRUD + 取消 + Listener、SOA 总线、Camera） |
@@ -103,7 +112,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 | 网络 | OkHttp 4.12 |
 | Trace | OpenTelemetry 1.48.0 + Phoenix（开发调试用） |
 | VR/TTS | adapter_vr.jar（闭源） |
-| 构建 | Gradle 8.11+ / AGP 8.9.1 / Version Catalog |
+| 构建 | Gradle 8.11.1 / AGP 8.9.1 / Kotlin 2.0.21 / Version Catalog |
 
 ---
 
@@ -114,7 +123,7 @@ AIAgent/
 ├── app/                                    # 唯一模块
 │   ├── src/main/
 │   │   ├── AndroidManifest.xml             # Service + Receiver + Launcher Activity
-│   │   ├── assets/prompts/                 # Prompt 模板文件（9 个 .txt）
+│   │   ├── assets/prompts/                 # Prompt 模板文件（11 个 .txt）
 │   │   │   ├── system/                     # 系统提示词
 │   │   │   ├── task/                       # 任务提示词（场景识别、视觉问答）
 │   │   │   ├── user/                       # 用户消息模板
@@ -154,6 +163,9 @@ AIAgent/
 │   │   │   │   ├── RuntimeResponseMapper.java # RuntimeResult → AgentResponse 映射（含 status/errorDetail 等元信息）
 │   │   │   │   ├── ActiveRequest.java            # 运行中请求 + CAS 终态抢占
 │   │   │   │   ├── ActiveRequestRegistry.java    # 请求注册 + 取消 + finished 60s 缓存
+│   │   │   │   ├── RequestAdmission.java         # Runtime 前准入快照
+│   │   │   │   ├── RequestDeadline.java          # TEXT 端到端 30 秒绝对期限
+│   │   │   │   ├── RequestCallRegistry.java      # requestId → 同步模型 HTTP Call
 │   │   │   │   ├── IdGenerator.java / UuidIdGenerator.java
 │   │   │   │   └── TimeProvider.java / SystemTimeProvider.java
 │   │   │   │
@@ -167,9 +179,10 @@ AIAgent/
 │   │   │   ├── toolgroup/                    # 工具分组与选择
 │   │   │   │   ├── ToolGroupId.java             # 13 个工具组枚举
 │   │   │   │   ├── ToolGroup.java               # 不可变工具组元数据
-│   │   │   │   ├── ToolGroupRegistry.java       # 注册表（defaultRegistry 全量 47 个 toolName 注册）
+│   │   │   │   ├── ToolGroupRegistry.java       # 注册表（defaultRegistry 全量 46 个 toolName 注册）
 │   │   │   │   ├── ToolGroupSelector.java       # 选择器接口
 │   │   │   │   ├── DefaultToolGroupSelector.java # 基于 IntentResult + 弱车载关键词的选择
+│   │   │   │   ├── ToolGroupSelectionStatus.java # 四种稳定选择状态
 │   │   │   │   └── ToolGroupSelectionResult.java # 选择结果
 │   │   │   │
 │   │   │   ├── conversation/                  # 会话管理门面
@@ -178,38 +191,82 @@ AIAgent/
 │   │   │   │   ├── ConversationSessionGateway.java # 可测试抽象接口
 │   │   │   │   └── MemoryConversationSessionGateway.java # 生产实现（委托 MemoryOrchestrator）
 │   │   │   │
-│   │   │   ├── runtime/                       # 运行时协调层（续）
+│   │   │   ├── context/                      # TEXT Context 统一输入控制层
+│   │   │   │   ├── ContextOrchestrator.java     # prepare / assemble 编排入口
+│   │   │   │   ├── ContextFrame.java            # 请求级静态上下文快照
+│   │   │   │   ├── ContextPrepareResult.java    # prepare 结果
+│   │   │   │   ├── ContextAssemblyRequest.java  # 单轮装配请求
+│   │   │   │   ├── ContextAssemblyResult.java   # 最终消息、工具与预算结果
+│   │   │   │   ├── ContextAssemblyAttempt.java  # 单次预算/压缩决策
+│   │   │   │   ├── ContextContributionDecision.java # produced/included/trimmed 诊断
+│   │   │   │   ├── ContextPolicies.java         # 生产 source 集中策略
+│   │   │   │   ├── ContextContribution.java     # Provider 统一输出契约
+│   │   │   │   ├── TextContextContribution.java
+│   │   │   │   ├── MessageContextContribution.java
+│   │   │   │   ├── ToolContextContribution.java
+│   │   │   │   ├── ContextMessageAssembler.java # 最终 ChatMessage / ToolSpec 装配
+│   │   │   │   ├── ContextMessageSequenceValidator.java
+│   │   │   │   ├── ContextBudgetPolicy.java      # 模型窗口预算策略
+│   │   │   │   ├── ContextBudgetReport.java      # 单轮预算报告
+│   │   │   │   ├── ContextTraceRecorder.java     # Provider / 输入来源 Trace
+│   │   │   │   └── provider/                    # 8 静态 + 3 动态 Provider
+│   │   │   │       ├── RuntimeContextProvider.java
+│   │   │   │       ├── PersonaContextProvider.java
+│   │   │   │       ├── PromptContextProvider.java
+│   │   │   │       ├── UserInputContextProvider.java
+│   │   │   │       ├── IntentContextProvider.java
+│   │   │   │       ├── ToolGroupContextProvider.java
+│   │   │   │       ├── LongTermMemoryContextProvider.java
+│   │   │   │       ├── CallerExtraContextProvider.java
+│   │   │   │       ├── SessionMemoryContextProvider.java
+│   │   │   │       ├── VehicleStateContextProvider.java
+│   │   │   │       └── TimeContextProvider.java
+│   │   │   │
 │   │   │   ├── ai/langchain4j/tool/        # 工具调度系统
 │   │   │   │   ├── ToolDispatcher.java     # 反射工具执行器
-│   │   │   │   └── ToolRegistry.java       # 注册中心
+│   │   │   │   ├── ToolRegistry.java       # 注册中心
+│   │   │   │   └── ToolDispatchOutcome.java # 结构化执行结果
 │   │   │   │
 │   │   │   ├── core/                       # Agent 循环引擎
-│   │   │   │   ├── AgentLoopOrchestrator.java  # 主循环引擎
+│   │   │   │   ├── AgentLoopOrchestrator.java  # 非 TEXT / 兼容循环引擎
+│   │   │   │   ├── TextAgentLoopOrchestrator.java # TEXT 专用循环，输入由 Context 提供
 │   │   │   │   ├── AgentConfig.java            # 人格配置 + Builder
 │   │   │   │   ├── AgentLoopState.java         # 状态跟踪
 │   │   │   │   ├── AgentLoopContext.java       # 执行上下文
 │   │   │   │   ├── AgentResult.java            # 结构化结果
-│   │   │   │   ├── SafetyVerdict.java          # 安全审查结果
 │   │   │   │   ├── ToolExecutionRecord.java    # 工具执行快照
-│   │   │   │   ├── component/                  # 7 个可插拔接口
+│   │   │   │   ├── component/                  # Agent 循环组件接口
 │   │   │   │   ├── preprocessor/               # PreProcessor 实现
 │   │   │   │   ├── model/                      # 模型调用器
-│   │   │   │   ├── safety/                     # 安全审查实现
 │   │   │   │   ├── postprocessor/              # 后处理器实现
 │   │   │   │   ├── terminator/                 # 循环终止器
 │   │   │   │   ├── collector/                  # 结果收集器
 │   │   │   │   └── factory/                    # 人格工厂
+│   │   │   │
+│   │   │   ├── safety/                     # 独立 Tool 执行前安全审核
+│   │   │   │   ├── ToolSafetyEngine.java       # 统一审核入口与规则调度
+│   │   │   │   ├── SafetyCheckContext.java     # 工具名 + 标准化参数
+│   │   │   │   ├── SafetyDecision.java         # ALLOW / DENY / REQUIRE_CONFIRMATION
+│   │   │   │   ├── SafetyCheckMode.java        # INITIAL / CONFIRMED_RECHECK
+│   │   │   │   ├── SafetyRule.java             # 单条规则接口
+│   │   │   │   ├── DefaultSafetyRules.java     # 工具名到规则列表的固定映射
+│   │   │   │   ├── confirmation/               # 单 Session 文本确认状态机
+│   │   │   │   └── rules/                      # 车控业务安全规则
+│   │   │   │       ├── DoorUnlockSafetyRule.java
+│   │   │   │       └── ChassisModeSafetyRule.java
 │   │   │   │
 │   │   │   ├── memory/                     # 记忆系统
 │   │   │   │   ├── MemoryOrchestrator.java  # 协调器（含会话管理门面）
 │   │   │   │   ├── SessionManager.java      # Session 生命周期（多用户隔离）
 │   │   │   │   ├── SessionMemoryStore.java  # Session 持久化（含元数据字段）
 │   │   │   │   ├── SessionMemoryIds.java    # memoryId 统一生成工具
-│   │   │   │   ├── SessionChatMemoryProvider.java # 按 userId+sessionId+personaId 选择 ChatMemory
+│   │   │   │   ├── SessionChatMemoryProvider.java # 按 sessionId 选择 ChatMemory
+│   │   │   │   ├── PersistentSessionChatMemory.java # 不按消息数静默淘汰历史
+│   │   │   │   ├── SessionHistorySequenceValidator.java # turn/tool exchange 校验与尾部修复
 │   │   │   │   ├── UserMemoryContext.java   # 用户记忆聚合
 │   │   │   │   ├── LongTermMemoryStore.java # 长期记忆
 │   │   │   │   ├── MemoryEntry.java         # 记忆条目
-│   │   │   │   ├── MemoryCompressor.java    # 自动压缩
+│   │   │   │   ├── MemoryCompressor.java    # 摘要压缩与写回能力
 │   │   │   │   ├── MemoryExtractor.java     # 记忆提取
 │   │   │   │   └── MemoryCandidate.java     # 提取候选项
 │   │   │   │
@@ -251,10 +308,12 @@ AIAgent/
 ├── local.properties                         # 本地配置（API Key 等）
 ├── local.properties.example                 # 配置模板
 ├── .gitignore / .gitattributes
-└── docs/                                    # 文档
-    ├── act_summary/                         # 阶段总结文档
-    ├── plan/                                # 计划方案
-    ├── errors/                              # 编译错误记录
+└── docs/                                    # 设计、计划、审查与测试文档
+    ├── overview/                            # 当前架构与模块现状
+    ├── design/                              # 设计说明
+    ├── plan/ / plan_overall/                # 阶段计划与总体计划
+    ├── review/ / evaluation/                # 源码审查与模块评估
+    ├── act_summary/                         # 阶段总结
     └── testresult/                          # 测试结果
 ```
 

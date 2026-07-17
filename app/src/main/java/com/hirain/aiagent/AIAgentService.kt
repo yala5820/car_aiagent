@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
 import android.os.Build
+import android.os.Binder
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
@@ -58,6 +59,10 @@ import com.hirain.aiagent.tools.vehicle.seat.VehicleSeatManager
 import com.hirain.aiagent.tools.vehicle.speed.VehicleSpeedManager
 import com.hirain.aiagent.tools.vehicle.window.VehicleWindowManager
 import com.hirain.aiagent.VirtualStateMachine.VehicleStateMachine
+import com.hirain.aiagent.eval.EvalEnvironmentCoordinator
+import com.hirain.aiagent.eval.EvalEnvironmentRegistry
+import com.hirain.aiagent.eval.EvalRequestPermit
+import com.hirain.aiagent.eval.EvalRuntimeFingerprint
 import com.hirain.aiagent.context.ContextBuildInput
 
 import com.hirain.aiagent.context.ContextOrchestrator
@@ -93,6 +98,7 @@ class AIAgentService : Service() {
     private lateinit var memoryOrchestrator: MemoryOrchestrator
     private lateinit var contextOrchestrator: ContextOrchestrator
     private lateinit var vehicleStateMachine: VehicleStateMachine
+    private var evalEnvironmentCoordinator: EvalEnvironmentCoordinator? = null
     private lateinit var toolSafetyEngine: ToolSafetyEngine
     private lateinit var toolConfirmationCoordinator: ToolConfirmationCoordinator
     private lateinit var traceManager: TraceManager
@@ -450,6 +456,23 @@ class AIAgentService : Service() {
         )
         runtimeResponseMapper = RuntimeResponseMapper()
 
+        // Eval 只在 Debug 进程安装；Debug Service 与本 Service 同进程，因此复用唯一状态机和请求槽位。
+        if (BuildConfig.DEBUG) {
+            evalEnvironmentCoordinator = EvalEnvironmentCoordinator(
+                vehicleStateMachine,
+                SystemTimeProvider()
+            ) {
+                activeRequestRegistry.current() == null
+                    && !mPositiveReqExecuting.get()
+                    && !mNagativeReqExecuting.get()
+            }.also { coordinator ->
+                if (!EvalEnvironmentRegistry.install(coordinator, EvalRuntimeFingerprint(
+                        "qwen-turbo", traceManager.config().contentCaptureMode().name))) {
+                    Log.e("TAG", "Eval coordinator install failed")
+                }
+            }
+        }
+
         // ── 场景识别 ──
         sceneMatcher = SceneMatch(promptManager!!)
 
@@ -471,6 +494,11 @@ class AIAgentService : Service() {
     }
 
     override fun onDestroy() {
+        evalEnvironmentCoordinator?.let { coordinator ->
+            EvalEnvironmentRegistry.uninstall(coordinator)
+            coordinator.shutdown()
+        }
+        evalEnvironmentCoordinator = null
         super.onDestroy()
         mTextWorkHandlerThread?.quitSafely()
         mWorkHandlerThread?.quitSafely()
@@ -525,8 +553,17 @@ class AIAgentService : Service() {
             if (request == null) return
             Log.d("TAG", "processAgentRequest: type=${request.inputType} id=${request.requestId}")
 
+            val callingUid = Binder.getCallingUid()
+            val coordinator = evalEnvironmentCoordinator
+            if (coordinator != null && coordinator.isLeaseActive()) {
+                if (!coordinator.checkAdmission(callingUid).isAllowed || request.inputType != "TEXT") {
+                    dispatchEvalBusyResponse(request)
+                    return
+                }
+            }
+
             when (request.inputType) {
-                "TEXT" -> handleTextRequest(request)
+                "TEXT" -> handleTextRequest(request, callingUid)
                 "IMAGE" -> handleImageRequest(request)
                 "VOICE" -> handleVoiceRequest(request)
                 "CONTROL" -> handleControlRequest(request)
@@ -635,7 +672,39 @@ class AIAgentService : Service() {
 
     // ── 统一请求路由 ──
 
-    private fun handleTextRequest(request: AgentRequest) {
+    /**
+     * 统一写入跨系统关联字段。电脑端 correlationId 经 TestApp 映射到 clientMessageId，
+     * 因此不再创建并行 Eval ID，也绝不写入 leaseToken。
+     */
+    private fun recordRequestIdentity(
+        traceSession: com.hirain.aiagent.trace.TraceSession,
+        request: AgentRequest
+    ) {
+        request.clientMessageId?.takeIf { it.isNotBlank() }?.let {
+            traceSession.setAttribute(TraceAttributeKeys.CLIENT_MESSAGE_ID, it)
+        }
+        val coordinator = evalEnvironmentCoordinator
+        traceSession.setAttribute(TraceAttributeKeys.EVAL_ENVIRONMENT_ACTIVE,
+            coordinator?.isLeaseActive ?: false)
+        traceSession.setAttribute(TraceAttributeKeys.EVAL_ENVIRONMENT_REVISION,
+            coordinator?.environmentRevision() ?: vehicleStateMachine.snapshot(System.currentTimeMillis()).environmentRevision)
+    }
+
+    /** Eval 租约冲突不占用主 ActiveRequest 槽位，但仍返回可关联的结构化 AgentResponse。 */
+    private fun dispatchEvalBusyResponse(request: AgentRequest) {
+        val requestId = ensureRequestId(request)
+        val userId = normalizeUserId(request)
+        val personaId = normalizeTextPersona(normalizePersonaId(request))
+        val trace = traceManager.startAgentRequest(personaId, userId, requestId, request.sessionId,
+            request.sourceApp, request.inputType, request.text ?: "")
+        recordRequestIdentity(trace, request)
+        val result = RuntimeResult.busy(requestId, request.sessionId, userId, personaId,
+            request.clientMessageId, System.currentTimeMillis())
+        TraceResponseDispatcher(trace).dispatchAndClose(runtimeResponseMapper.toAgentResponse(result),
+            "EVAL_ENVIRONMENT_BUSY") { notifyAIAgentListeners(it) }
+    }
+
+    private fun handleTextRequest(request: AgentRequest, callingUid: Int) {
         val message = request.text ?: ""
         val requestId = ensureRequestId(request)
         val userId = normalizeUserId(request)
@@ -661,6 +730,7 @@ class AIAgentService : Service() {
             val rejectedTrace = traceManager.startAgentRequest(
                 effectivePersonaId, userId, requestId, request.sessionId,
                 request.sourceApp, request.inputType, message)
+            recordRequestIdentity(rejectedTrace, request)
             rejectedTrace.setAttribute(
                 TraceAttributeKeys.REQUEST_ADMISSION_STATUS,
                 admissionResult.status().name)
@@ -671,6 +741,12 @@ class AIAgentService : Service() {
         }
 
         val activeRequest = admissionResult.activeRequest()
+        val evalPermit = evalEnvironmentCoordinator?.beginRequest(callingUid)
+        if (evalEnvironmentCoordinator?.isLeaseActive() == true && evalPermit == null) {
+            activeRequestRegistry.release(requestId, nowMs)
+            dispatchEvalBusyResponse(request)
+            return
+        }
         var traceSession: com.hirain.aiagent.trace.TraceSession? = null
         try {
             traceSession = traceManager.startAgentRequest(
@@ -683,6 +759,7 @@ class AIAgentService : Service() {
                 message
             )
             val session = traceSession!!
+            recordRequestIdentity(session, request)
             session.setAttribute(TraceAttributeKeys.REQUEST_ADMISSION_STATUS, "ACCEPTED")
             session.setAttribute(TraceAttributeKeys.REQUEST_DEADLINE_AT_MS, deadline.deadlineAtMs())
             session.setAttribute(TraceAttributeKeys.REQUEST_TIMEOUT_MS,
@@ -691,7 +768,7 @@ class AIAgentService : Service() {
             if (confirmationCommand != ConfirmationTextParser.Command.NONE) {
                 handleConfirmationTextRequest(
                     request, requestId, userId, effectivePersonaId,
-                    activeRequest, session, deadline
+                    activeRequest, session, deadline, evalPermit
                 )
                 return
             }
@@ -775,6 +852,7 @@ class AIAgentService : Service() {
                     session.close()
                     requestCallRegistry.clear(requestId)
                     activeRequestRegistry.release(requestId, System.currentTimeMillis())
+                    evalPermit?.close()
                 }
             } ?: false
 
@@ -794,6 +872,7 @@ class AIAgentService : Service() {
                 session.close()
                 requestCallRegistry.clear(requestId)
                 activeRequestRegistry.release(requestId, System.currentTimeMillis())
+                evalPermit?.close()
             }
         } catch (e: Exception) {
             Log.e("TAG", "TEXT request setup failed", e)
@@ -807,6 +886,7 @@ class AIAgentService : Service() {
             traceSession?.close()
             requestCallRegistry.clear(requestId)
             activeRequestRegistry.release(requestId, System.currentTimeMillis())
+            evalPermit?.close()
         }
     }
 
@@ -821,7 +901,8 @@ class AIAgentService : Service() {
         personaId: String,
         activeRequest: ActiveRequest,
         traceSession: com.hirain.aiagent.trace.TraceSession,
-        deadline: RequestDeadline
+        deadline: RequestDeadline,
+        evalPermit: EvalRequestPermit?
     ) {
         val responseDispatcher = TraceResponseDispatcher(traceSession)
         requestDispatchers[requestId] = responseDispatcher
@@ -914,6 +995,7 @@ class AIAgentService : Service() {
                 traceSession.close()
                 requestCallRegistry.clear(requestId)
                 activeRequestRegistry.release(requestId, System.currentTimeMillis())
+                evalPermit?.close()
             }
         } ?: false
 
@@ -931,6 +1013,7 @@ class AIAgentService : Service() {
             requestDispatchers.remove(requestId)
             traceSession.close()
             activeRequestRegistry.release(requestId, System.currentTimeMillis())
+            evalPermit?.close()
         }
     }
 
