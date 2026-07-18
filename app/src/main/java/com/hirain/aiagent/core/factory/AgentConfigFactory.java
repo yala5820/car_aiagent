@@ -10,13 +10,12 @@ import com.hirain.aiagent.core.collector.SummarizeMergeCollector;
 import com.hirain.aiagent.core.model.Lc4jModelCaller;
 import com.hirain.aiagent.core.postprocessor.NoOpPostProcessor;
 import com.hirain.aiagent.core.postprocessor.SceneActionMergePostProcessor;
-import com.hirain.aiagent.core.postprocessor.VlWarningPostProcessor;
 import com.hirain.aiagent.core.preprocessor.ActiveControlPreProcessor;
 import com.hirain.aiagent.core.preprocessor.SceneContextPreProcessor;
 import com.hirain.aiagent.core.preprocessor.TimeContextPreProcessor;
 import com.hirain.aiagent.core.preprocessor.VehicleStatusPreProcessor;
-import com.hirain.aiagent.core.preprocessor.VlWarningPreProcessor;
 import com.hirain.aiagent.core.postprocessor.MemoryPostProcessor;
+import com.hirain.aiagent.core.postprocessor.VisionGroundingPostProcessor;
 import com.hirain.aiagent.core.terminator.NoToolCallTerminator;
 import com.hirain.aiagent.engines.scenematch.SceneMatch;
 import com.hirain.aiagent.memory.MemoryOrchestrator;
@@ -72,7 +71,8 @@ public class AgentConfigFactory {
                 .toolSubset(null)
                 .postProcessors(List.of(
                         new NoOpPostProcessor(),
-                        new MemoryPostProcessor()))
+                        new MemoryPostProcessor(),
+                        new VisionGroundingPostProcessor()))
                 .terminator(new NoToolCallTerminator())
                 .resultCollector(new DirectTextCollector())
                 .timeout(Duration.ofSeconds(30))
@@ -156,31 +156,6 @@ public class AgentConfigFactory {
         if (personaId == null) return "chat";
         if ("friendly".equals(personaId) || "concise".equals(personaId)) return personaId;
         return "chat";
-    }
-
-    /**
-     * 视觉问答人格：VL 模型、无记忆、单轮输出、追加 VL 警告。
-     * 对应 VlManager.frontCameraInteractionPositive 的功能。
-     */
-    public static AgentConfig createVisionQAPersona(Context context,
-                                                     PromptManager promptManager,
-                                                     ToolRegistry toolRegistry) {
-        return AgentConfig.builder("vision_qa")
-                .modelName("qwen-vl-max")
-                .systemPromptTemplateName(PromptConstants.TASK_FRONT_VIEW_QA)
-                .maxIterations(1)
-                .maxMemoryMessages(2)
-                .memoryPolicy(AgentConfig.MemoryPolicy.NONE)
-                .chatMemoryStoreId(null)
-                .preProcessors(List.of())
-                .modelCaller(new Lc4jModelCaller(buildQwenVlMax()))
-                .toolExecutor(toolRegistry::dispatch)
-                .toolSubset(List.of())
-                .postProcessors(List.of(new VlWarningPostProcessor(promptManager)))
-                .terminator(new NoToolCallTerminator())
-                .resultCollector(new DirectTextCollector())
-                .timeout(Duration.ofSeconds(20))
-                .build();
     }
 
     // ── 模型工厂 ──

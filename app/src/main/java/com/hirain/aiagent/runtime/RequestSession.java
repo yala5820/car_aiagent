@@ -4,6 +4,7 @@ import com.hirain.aiagent.AgentRequest;
 import com.hirain.aiagent.intentrouter.IntentResult;
 import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
 import com.hirain.aiagent.trace.TraceContext;
+import com.hirain.aiagent.vision.routing.VisionIntentDecision;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -32,6 +33,7 @@ public final class RequestSession {
     private final TraceContext traceContext;
     private final IntentResult intentResult;
     private final ToolGroupSelectionResult toolGroupSelectionResult;
+    private final VisionIntentDecision visionIntentDecision;
     private final Map<String, Object> orchestratorContext;
 
     RequestSession(AgentRequest request, String requestId, String sessionId,
@@ -44,7 +46,7 @@ public final class RequestSession {
         this(request, requestId, sessionId, userId, sourceApp, inputType,
                 personaId, clientMessageId, userInput,
                 RequestDeadline.standard(startedAtMs), traceContext, intentResult,
-                toolGroupSelectionResult, orchestratorContext);
+                toolGroupSelectionResult, VisionIntentDecision.none("legacy_default"), orchestratorContext);
     }
 
     RequestSession(AgentRequest request, String requestId, String sessionId,
@@ -53,6 +55,7 @@ public final class RequestSession {
                    RequestDeadline deadline, TraceContext traceContext,
                    IntentResult intentResult,
                    ToolGroupSelectionResult toolGroupSelectionResult,
+                   VisionIntentDecision visionIntentDecision,
                    Map<String, Object> orchestratorContext) {
         this.request = request;
         this.requestId = requestId;
@@ -69,6 +72,8 @@ public final class RequestSession {
         this.traceContext = traceContext;
         this.intentResult = intentResult;
         this.toolGroupSelectionResult = toolGroupSelectionResult;
+        this.visionIntentDecision = visionIntentDecision != null
+                ? visionIntentDecision : VisionIntentDecision.none("missing_vision_decision");
         this.orchestratorContext = Collections.unmodifiableMap(
                 new HashMap<>(orchestratorContext));
     }
@@ -87,5 +92,6 @@ public final class RequestSession {
     public TraceContext traceContext() { return traceContext; }
     public IntentResult intentResult() { return intentResult; }
     public ToolGroupSelectionResult toolGroupSelectionResult() { return toolGroupSelectionResult; }
+    public VisionIntentDecision visionIntentDecision() { return visionIntentDecision; }
     public Map<String, Object> orchestratorContext() { return orchestratorContext; }
 }

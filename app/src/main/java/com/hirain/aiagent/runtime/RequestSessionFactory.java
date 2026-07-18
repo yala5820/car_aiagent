@@ -4,6 +4,7 @@ import com.hirain.aiagent.AgentRequest;
 import com.hirain.aiagent.intentrouter.IntentResult;
 import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
 import com.hirain.aiagent.trace.TraceContext;
+import com.hirain.aiagent.vision.routing.VisionIntentDecision;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -51,6 +52,17 @@ public class RequestSessionFactory {
                                  ToolGroupSelectionResult toolGroupSelectionResult,
                                  String resolvedSessionId,
                                  RequestDeadline requestDeadline) {
+        return create(request, traceContext, intentResult, toolGroupSelectionResult,
+                resolvedSessionId, requestDeadline, VisionIntentDecision.none("legacy_default"));
+    }
+
+    /** 使用 Runtime 已完成的视觉决策创建不可变请求快照。 */
+    public RequestSession create(AgentRequest request,
+                                 TraceContext traceContext, IntentResult intentResult,
+                                 ToolGroupSelectionResult toolGroupSelectionResult,
+                                 String resolvedSessionId,
+                                 RequestDeadline requestDeadline,
+                                 VisionIntentDecision visionIntentDecision) {
         // ── intentResult 空值降级（request 可能为 null） ──
         if (intentResult == null) {
             String safeText = request != null ? nonEmpty(request.getText(), "") : "";
@@ -71,7 +83,8 @@ public class RequestSessionFactory {
                     ? requestDeadline : RequestDeadline.standard(now);
             return new RequestSession(null, idGenerator.newRequestId(), null, "default_user",
                     "unknown", "TEXT", "chat", null, "",
-                    deadline, traceContext, intentResult, toolGroupSelectionResult, new HashMap<>());
+                    deadline, traceContext, intentResult, toolGroupSelectionResult,
+                    visionIntentDecision, new HashMap<>());
         }
 
         // ── 规范化 requestId ──
@@ -100,6 +113,8 @@ public class RequestSessionFactory {
         Map<String, Object> context = new HashMap<>();
         if (request.getExtraContext() != null) {
             context.putAll(request.getExtraContext());
+            // 图片选择是受控执行选项，不能作为调用方上下文进入模型可见 Context。
+            context.remove("vision_demo_image_id");
         }
         if (traceContext != null) {
             context.putAll(traceContext.toContextData());
@@ -119,7 +134,8 @@ public class RequestSessionFactory {
 
         return new RequestSession(request, requestId, sessionId, userId,
                 sourceApp, inputType, normalizedPersonaId, clientMessageId, userInput,
-                deadline, traceContext, intentResult, toolGroupSelectionResult, context);
+                deadline, traceContext, intentResult, toolGroupSelectionResult,
+                visionIntentDecision, context);
     }
 
     private static String nonEmpty(String value, String fallback) {

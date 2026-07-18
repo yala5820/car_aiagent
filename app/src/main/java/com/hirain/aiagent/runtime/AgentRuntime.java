@@ -22,6 +22,10 @@ import com.hirain.aiagent.trace.TraceAttributeKeys;
 import com.hirain.aiagent.trace.TraceContext;
 import com.hirain.aiagent.trace.TraceSession;
 import com.hirain.aiagent.trace.TraceSpanNames;
+import com.hirain.aiagent.vision.routing.RuleBasedVisionIntentPolicy;
+import com.hirain.aiagent.vision.routing.VisionIntentDecision;
+import com.hirain.aiagent.vision.routing.VisionIntentPolicy;
+import com.hirain.aiagent.vision.routing.VisionRequirement;
 
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.Tracer;
@@ -50,6 +54,8 @@ public class AgentRuntime {
     private final TimeProvider timeProvider;
     private final RequestSessionFactory sessionFactory;
     private final SessionIdResolver sessionIdResolver;
+    private final VisionIntentPolicy visionIntentPolicy;
+    private final RequestDeadlinePolicy requestDeadlinePolicy;
 
     // ── 默认 ContextOrchestrator ──
 
@@ -177,6 +183,23 @@ public class AgentRuntime {
                         IdGenerator idGenerator,
                         TimeProvider timeProvider,
                         RuntimeCancelChecker cancelChecker) {
+        this(chatExecutor, contextOrchestrator, sessionIdResolver, toolGroupRegistry,
+                intentRouter, toolGroupSelector, idGenerator, timeProvider, cancelChecker,
+                new RuleBasedVisionIntentPolicy(), new RequestDeadlinePolicy());
+    }
+
+    /** 全可注入构造函数，视觉策略仅在 Runtime 负责请求规划时使用。 */
+    public AgentRuntime(AgentExecutor chatExecutor,
+                        ContextOrchestrator contextOrchestrator,
+                        SessionIdResolver sessionIdResolver,
+                        ToolGroupRegistry toolGroupRegistry,
+                        IntentRouter intentRouter,
+                        ToolGroupSelector toolGroupSelector,
+                        IdGenerator idGenerator,
+                        TimeProvider timeProvider,
+                        RuntimeCancelChecker cancelChecker,
+                        VisionIntentPolicy visionIntentPolicy,
+                        RequestDeadlinePolicy requestDeadlinePolicy) {
         this.chatExecutor = chatExecutor;
         this.contextOrchestrator = contextOrchestrator;
         this.sessionIdResolver = sessionIdResolver;
@@ -187,6 +210,10 @@ public class AgentRuntime {
         this.idGenerator = idGenerator;
         this.timeProvider = timeProvider;
         this.sessionFactory = new RequestSessionFactory(idGenerator, timeProvider);
+        this.visionIntentPolicy = visionIntentPolicy != null
+                ? visionIntentPolicy : new RuleBasedVisionIntentPolicy();
+        this.requestDeadlinePolicy = requestDeadlinePolicy != null
+                ? requestDeadlinePolicy : new RequestDeadlinePolicy();
     }
 
     // ── Session 创建 ──
@@ -205,15 +232,24 @@ public class AgentRuntime {
     public RequestSession startSession(AgentRequest request, TraceContext traceContext,
                                        RequestDeadline requestDeadline) {
         IntentResult intentResult = routeIntentSafely(request);
+        VisionIntentDecision visionDecision = decideVisionSafely(request, intentResult);
         ToolGroupSelectionResult toolGroupSelectionResult = selectToolGroupsSafely(intentResult, request);
+        toolGroupSelectionResult = applyVisionDecision(visionDecision, intentResult, toolGroupSelectionResult);
+        long startedAtMs = requestDeadline != null ? requestDeadline.startedAtMs() : timeProvider.nowMillis();
+        // 过期准入 deadline 是既有失败关闭信号，绝不能因为视觉规划重新获得 30/60 秒。
+        RequestDeadline effectiveDeadline = requestDeadline != null
+                && requestDeadline.isExpired(timeProvider.nowMillis())
+                ? requestDeadline
+                : requestDeadlinePolicy.resolve(startedAtMs, visionDecision, toolGroupSelectionResult);
         writeIntentToTrace(traceContext, intentResult);
         writeToolGroupsToTrace(traceContext, toolGroupSelectionResult);
+        writeVisionDecisionToTrace(traceContext, visionDecision, effectiveDeadline);
 
         // 在构建 Context 前解析 resolvedSessionId
         String resolvedSessionId = resolveSessionIdSafely(request);
 
         RequestSession session = sessionFactory.create(request, traceContext,
-                intentResult, toolGroupSelectionResult, resolvedSessionId, requestDeadline);
+                intentResult, toolGroupSelectionResult, resolvedSessionId, effectiveDeadline, visionDecision);
         writeRequestMetaToTrace(traceContext, session);
         return session;
     }
@@ -410,6 +446,43 @@ public class AgentRuntime {
         }
     }
 
+    private VisionIntentDecision decideVisionSafely(AgentRequest request, IntentResult intentResult) {
+        String text = request != null ? request.getText() : "";
+        try {
+            VisionIntentDecision decision = visionIntentPolicy.decide(text, intentResult);
+            return decision != null ? decision : VisionIntentDecision.none("vision_policy_null");
+        } catch (Exception e) {
+            return VisionIntentDecision.none("vision_policy_exception");
+        }
+    }
+
+    /** 将视觉策略收敛为最小权限工具集合，不改变 ToolGroupSelector 的二参 SAM。 */
+    private ToolGroupSelectionResult applyVisionDecision(VisionIntentDecision visionDecision,
+                                                          IntentResult intentResult,
+                                                          ToolGroupSelectionResult base) {
+        if (visionDecision.compoundIntentDetected()) {
+            return ToolGroupSelectionResult.clarificationRequired(
+                    "clarification:compound_vision_vehicle", intentResult.confidence());
+        }
+        if (visionDecision.requirement() == VisionRequirement.REQUIRED) {
+            return ToolGroupSelectionResult.selected(toolGroupRegistry,
+                    java.util.List.of(com.hirain.aiagent.toolgroup.ToolGroupId.VISION_GROUP),
+                    "vision:required:" + visionDecision.reason(), intentResult.confidence());
+        }
+        if (visionDecision.requirement() == VisionRequirement.OPTIONAL
+                && (base.status() == ToolGroupSelectionStatus.CHAT_ONLY
+                || (intentResult.intentTag() == com.hirain.aiagent.intentrouter.IntentTag.UNKNOWN))) {
+            return ToolGroupSelectionResult.selected(toolGroupRegistry,
+                    java.util.List.of(com.hirain.aiagent.toolgroup.ToolGroupId.VISION_GROUP),
+                    "vision:optional:" + visionDecision.reason(), intentResult.confidence());
+        }
+        if (visionDecision.requirement() == VisionRequirement.NONE
+                && intentResult.intentTag() == com.hirain.aiagent.intentrouter.IntentTag.VISION_QA) {
+            return ToolGroupSelectionResult.chatOnly("vision:none_override", intentResult.confidence());
+        }
+        return base;
+    }
+
     /**
      * 校验工具选择结果是否满足最小安全不变量。
      * SELECTED 必须是具体、非聚合、非全量的工具集合；其余状态必须保持空工具。
@@ -490,5 +563,20 @@ public class AgentRuntime {
                 String.join(",", intentResult.matchedKeywords()));
         traceContext.session().setAttribute("agent.intent.source_input_type", intentResult.sourceInputType());
         traceContext.session().setAttribute("agent.intent.debug_reason", intentResult.debugReason());
+    }
+
+    private void writeVisionDecisionToTrace(TraceContext traceContext,
+                                            VisionIntentDecision decision,
+                                            RequestDeadline deadline) {
+        if (traceContext == null || traceContext.session() == null) return;
+        traceContext.session().setAttribute("agent.vision.requirement", decision.requirement().name());
+        traceContext.session().setAttribute("agent.vision.reason", decision.reason());
+        traceContext.session().setAttribute("agent.vision.matched_signals",
+                String.join(",", decision.matchedSignals()));
+        traceContext.session().setAttribute("agent.vision.compound_detected", decision.compoundIntentDetected());
+        traceContext.session().setAttribute(TraceAttributeKeys.REQUEST_DEADLINE_AT_MS,
+                deadline.deadlineAtMs());
+        traceContext.session().setAttribute(TraceAttributeKeys.REQUEST_TIMEOUT_MS,
+                deadline.deadlineAtMs() - deadline.startedAtMs());
     }
 }

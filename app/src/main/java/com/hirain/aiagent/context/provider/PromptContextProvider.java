@@ -11,6 +11,7 @@ import com.hirain.aiagent.context.ContextVisibility;
 import com.hirain.aiagent.context.TextContextContribution;
 import com.hirain.aiagent.prompt.PromptConstants;
 import com.hirain.aiagent.runtime.RequestSession;
+import com.hirain.aiagent.vision.routing.VisionRequirement;
 
 import java.util.List;
 import java.util.Map;
@@ -50,6 +51,15 @@ public class PromptContextProvider implements ContextProvider {
             if (promptText == null || promptText.trim().isEmpty()) {
                 return ContextProviderResult.failure(name(),
                         "rendered prompt is empty", ContextErrorCode.REQUIRED_PROVIDER_FAILED);
+            }
+            if (session.visionIntentDecision().requirement() != VisionRequirement.NONE) {
+                String grounding = input.promptManager().render(
+                        PromptConstants.MSG_FRONT_VIEW_GROUNDING_POLICY);
+                if (grounding == null || grounding.trim().isEmpty()) {
+                    return ContextProviderResult.failure(name(), "vision grounding prompt is empty",
+                            ContextErrorCode.REQUIRED_PROVIDER_FAILED);
+                }
+                promptText = promptText + "\n\n" + grounding;
             }
         } catch (Exception e) {
             return ContextProviderResult.failure(name(),

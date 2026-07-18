@@ -5,6 +5,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
@@ -69,10 +70,15 @@ import com.hirain.aiagent.context.ContextOrchestrator
 import com.hirain.aiagent.runtime.RuntimeCancelChecker
 import com.hirain.aiagent.runtime.SystemTimeProvider
 import com.hirain.aiagent.core.TextAgentLoopOrchestrator
-import com.hirain.aiagent.tools.vision.vl.VlManager
+import com.hirain.aiagent.tools.vision.FrontViewVisionTool
+import com.hirain.aiagent.tools.vision.demo.AndroidVisionAssetReader
+import com.hirain.aiagent.tools.vision.demo.DemoFrontViewImageProvider
+import com.hirain.aiagent.tools.vision.model.QwenVisionAnalyzer
+import com.hirain.aiagent.tools.vision.model.VisionModelFactory
 import com.hirain.aiagent.AgentRequest
 import com.hirain.aiagent.AgentResponse
 import com.hirain.aiagent.prompt.PromptManager
+import com.hirain.aiagent.prompt.PromptConstants
 import com.hirain.camera.Camera
 import com.hirain.camera.CameraData
 import com.hirain.camera.ICameraServiceListener
@@ -93,7 +99,6 @@ class AIAgentService : Service() {
     private val mBinder: AIAgentService.AIAgentBinder = AIAgentBinder()
     private var m_connected = false
     private var promptManager: PromptManager? = null
-    private var vl: VlManager? = null
     private lateinit var toolRegistry: ToolRegistry
     private lateinit var memoryOrchestrator: MemoryOrchestrator
     private lateinit var contextOrchestrator: ContextOrchestrator
@@ -102,7 +107,6 @@ class AIAgentService : Service() {
     private lateinit var toolSafetyEngine: ToolSafetyEngine
     private lateinit var toolConfirmationCoordinator: ToolConfirmationCoordinator
     private lateinit var traceManager: TraceManager
-    private lateinit var chatOrchestrator: AgentLoopOrchestrator
     private lateinit var agentRuntime: AgentRuntime
     private lateinit var runtimeResponseMapper: RuntimeResponseMapper
     private lateinit var conversationManager: ConversationManager
@@ -154,10 +158,6 @@ class AIAgentService : Service() {
     private fun ProcessCaptureGot(seqid: Int, mode: Int, p: CameraData, fullTask:Boolean) {
 
         Log.d("TAG", " ProcessCaptureGot start !!!!!!!!!!!!!! mChating = " + mChating + " mNagativeTTSplaying = " + mNagativeTTSplaying + " mNagativeReqExecuting = " + mNagativeReqExecuting +  " fullTask = " + fullTask)
-        if (vl!= null ) {
-            vl!!.frontCameraSave("", p.getValue())
-        }
-
         if (!mChating && !mNagativeTTSplaying && !mNagativeReqExecuting.get() && fullTask) {
             var start =  System.currentTimeMillis()
             Log.d("TAG", "SceneService ProcessCaptureGot after save capture !!!!!!!!!!!!!! mChating = " + mChating + " mNagativeTTSplaying = " + mNagativeTTSplaying + " fullTask = " + fullTask)
@@ -315,6 +315,7 @@ class AIAgentService : Service() {
     private val m_vrlistener: AIVRListener = AIVRListener()
 
     private val m_listener: ICameraServiceListener = CameraListener()
+    @SuppressLint("ForegroundServiceType") // Manifest 已声明 dataSync；当前 lint 规则未识别合并结果。
     override fun onCreate() {
         super.onCreate()
         TimeZone.setDefault(TimeZone.getTimeZone("GMT+8"))
@@ -348,6 +349,9 @@ class AIAgentService : Service() {
 
         promptManager = PromptManager(this)
 
+        // Trace 必须早于 Tool 构造，确保视觉 Tool 使用当前请求同一套 tracer。
+        traceManager = TraceManager(TraceConfig.development(BuildConfig.VERSION_NAME))
+
         // ── 虚拟车辆状态机 ──
         vehicleStateMachine = VehicleStateMachine()
 
@@ -366,14 +370,21 @@ class AIAgentService : Service() {
         val fragManager = VehicleFragManager(vehicleStateMachine)
         val speedManager = VehicleSpeedManager(vehicleStateMachine)
         val dmsManager = VehicleDMSManager(vehicleStateMachine)
-        vl = VlManager(this, promptManager!!)
+        val visionAssetReader = AndroidVisionAssetReader(this)
+        val frontViewVisionTool = FrontViewVisionTool(
+            DemoFrontViewImageProvider(visionAssetReader),
+            QwenVisionAnalyzer(
+                VisionModelFactory.create(requestCallRegistry), requestCallRegistry,
+                promptManager!!.render(PromptConstants.TASK_FRONT_VIEW_QA)
+            ), traceManager.visionTraceRecorder()
+        )
         val weatherUtils = WeatherUtils(BuildConfig.WEATHER_API_KEY)
 
         toolRegistry = ToolRegistry().apply {
             registerAll(
                 weatherUtils, doorManager, windowManager, seatManager,
                 acManager, chassisManager, fragManager,
-                dmsManager, vl!!
+                dmsManager, frontViewVisionTool
             )
         }
         toolConfirmationCoordinator = ToolConfirmationCoordinator(
@@ -402,19 +413,8 @@ class AIAgentService : Service() {
         val extractModel = buildQwenTurbo()
         memoryOrchestrator = MemoryOrchestrator(this, summaryModel, extractModel)
 
-        // ── Trace 初始化 ──
-        traceManager = TraceManager(TraceConfig.development(BuildConfig.VERSION_NAME))
-
         // ── 会话管理 ──
         conversationManager = ConversationManager(MemoryConversationSessionGateway(memoryOrchestrator))
-
-        // ── 对话 Agent（持久化 Persona） ──
-        chatOrchestrator = AgentLoopOrchestrator(
-            AgentConfigFactory.createChatPersona(
-                this, promptManager!!, memoryOrchestrator, toolRegistry,
-                statusProvider),
-            this, promptManager!!, memoryOrchestrator, toolRegistry.toolSpecifications,
-            toolSafetyEngine)
 
         // ── ContextOrchestrator 初始化（必须在 textOrchestrator 前创建，因为需要注入作为 ContextAssemblyGateway） ──
         contextOrchestrator = ContextOrchestrator.defaultForText(
@@ -564,10 +564,9 @@ class AIAgentService : Service() {
 
             when (request.inputType) {
                 "TEXT" -> handleTextRequest(request, callingUid)
-                "IMAGE" -> handleImageRequest(request)
-                "VOICE" -> handleVoiceRequest(request)
+                "IMAGE", "VOICE" -> dispatchUnsupportedInputResponse(request)
                 "CONTROL" -> handleControlRequest(request)
-                else -> Log.w("TAG", "Unknown inputType: ${request.inputType}")
+                else -> dispatchUnsupportedInputResponse(request)
             }
         }
 
@@ -661,6 +660,23 @@ class AIAgentService : Service() {
 
         }
 
+    }
+
+    /** IMAGE/VOICE 仅保留 Parcelable/AIDL 兼容字段，不再进入 Agent 业务链。 */
+    private fun dispatchUnsupportedInputResponse(request: AgentRequest) {
+        notifyAIAgentListeners(AgentResponse().apply {
+            requestId = ensureRequestId(request)
+            sessionId = request.sessionId
+            userId = normalizeUserId(request)
+            personaId = normalizePersonaId(request)
+            clientMessageId = request.clientMessageId
+            setSuccess(false)
+            status = "UNSUPPORTED_INPUT_TYPE"
+            errorType = "UNSUPPORTED_INPUT_TYPE"
+            errorDetail = request.inputType ?: "null"
+            text = "当前 Agent 仅支持 TEXT，CONTROL 为内部兼容控制通道"
+            timestamp = System.currentTimeMillis()
+        })
     }
     override fun onBind(intent: Intent?): IBinder? {
         Log.d("TAG", "onBind")
@@ -761,9 +777,6 @@ class AIAgentService : Service() {
             val session = traceSession!!
             recordRequestIdentity(session, request)
             session.setAttribute(TraceAttributeKeys.REQUEST_ADMISSION_STATUS, "ACCEPTED")
-            session.setAttribute(TraceAttributeKeys.REQUEST_DEADLINE_AT_MS, deadline.deadlineAtMs())
-            session.setAttribute(TraceAttributeKeys.REQUEST_TIMEOUT_MS,
-                RequestDeadline.DEFAULT_TIMEOUT_MS)
             val confirmationCommand = toolConfirmationCoordinator.parse(message)
             if (confirmationCommand != ConfirmationTextParser.Command.NONE) {
                 handleConfirmationTextRequest(
@@ -777,6 +790,10 @@ class AIAgentService : Service() {
             val runtimeSession = agentRuntime.startSession(
                 request, session.toTraceContext(), deadline)
             activeRequest.bindSession(runtimeSession)
+            val effectiveDeadline = runtimeSession.deadline()
+            session.setAttribute(TraceAttributeKeys.REQUEST_DEADLINE_AT_MS, effectiveDeadline.deadlineAtMs())
+            session.setAttribute(TraceAttributeKeys.REQUEST_TIMEOUT_MS,
+                effectiveDeadline.deadlineAtMs() - effectiveDeadline.startedAtMs())
             val responseDispatcher = TraceResponseDispatcher(session)
             requestDispatchers[requestId] = responseDispatcher
 
@@ -797,7 +814,7 @@ class AIAgentService : Service() {
             }
             activeTimeouts[requestId] = timeoutRunnable
             mainHandler.postDelayed(
-                timeoutRunnable, deadline.remainingMs(System.currentTimeMillis()))
+                timeoutRunnable, effectiveDeadline.remainingMs(System.currentTimeMillis()))
 
             Log.d("TAG", "TextRequest requestId=$requestId sessionId=${request.sessionId} " +
                     "userId=$userId personaId=$effectivePersonaId " +
@@ -805,7 +822,11 @@ class AIAgentService : Service() {
 
             val posted = mTextWorkHandler?.post {
                 val traceScope = session.makeCurrent()
-                val executionScope = RequestExecutionContext.bind(requestId, deadline)
+                val visionDemoImageId = if (BuildConfig.DEBUG && evalPermit != null) {
+                    request.extraContext?.get("vision_demo_image_id")
+                } else null
+                val executionScope = RequestExecutionContext.bind(
+                    requestId, effectiveDeadline, runtimeSession.userInput(), visionDemoImageId)
                 try {
                     if (activeRequest.state() != ActiveRequest.TerminalState.RUNNING) {
                         return@post
@@ -1023,122 +1044,6 @@ class AIAgentService : Service() {
             "TIMEOUT" -> ActiveRequest.TerminalState.TIMEOUT
             "CANCELLED" -> ActiveRequest.TerminalState.CANCELLED
             else -> ActiveRequest.TerminalState.FAILED
-        }
-    }
-
-    private fun handleImageRequest(request: AgentRequest) {
-        val timeoutRunnable = Runnable {
-            Log.e("TAG", "processAgentRequest IMAGE timeout")
-            notifyAIAgentListeners(AgentResponse().apply {
-                requestId = request.requestId
-                sessionId = request.sessionId
-                setSuccess(false)
-                text = "系统: 请求超时"
-                errorType = "TIMEOUT"
-                timestamp = System.currentTimeMillis()
-            })
-        }
-        mainHandler.postDelayed(timeoutRunnable, SENDMESSAGE_TIMEOUT_MS)
-
-        mWorkHandler?.post {
-            try {
-                Log.d("TAG", "handleImageRequest begin")
-                if (vl == null) {
-                    mainHandler.removeCallbacks(timeoutRunnable)
-                    notifyAIAgentListeners(AgentResponse().apply {
-                        requestId = request.requestId
-                        sessionId = request.sessionId
-                        setSuccess(false)
-                        text = "系统: 多模态模型未初始化"
-                        errorType = "VL_NOT_INITIALIZED"
-                        timestamp = System.currentTimeMillis()
-                    })
-                    return@post
-                }
-                val imageBytes = if (request.imagePath != null) {
-                    val file = java.io.File(request.imagePath)
-                    if (file.exists()) file.readBytes() else throw Exception("图片文件不存在: ${request.imagePath}")
-                } else {
-                    throw Exception("IMAGE 请求缺少 imagePath")
-                }
-                val res = vl!!.frontCameraInteractionPositive(request.text ?: "", imageBytes)
-                mainHandler.removeCallbacks(timeoutRunnable)
-                notifyAIAgentListeners(AgentResponse().apply {
-                    requestId = request.requestId
-                    sessionId = request.sessionId
-                    setSuccess(true)
-                    text = res
-                    timestamp = System.currentTimeMillis()
-                })
-            } catch (e: Exception) {
-                mainHandler.removeCallbacks(timeoutRunnable)
-                Log.e("TAG", "handleImageRequest failed", e)
-                notifyAIAgentListeners(AgentResponse().apply {
-                    requestId = request.requestId
-                    sessionId = request.sessionId
-                    setSuccess(false)
-                    text = "系统: 请求失败 - ${e.message}"
-                    errorType = "EXCEPTION"
-                    timestamp = System.currentTimeMillis()
-                })
-            }
-        }
-    }
-
-    private fun handleVoiceRequest(request: AgentRequest) {
-        mNagativeReqExecuting.set(true)
-        stopTTS()
-
-        val userId = normalizeUserId(request)
-        val personaId = normalizePersonaId(request)
-        val session = traceManager.startSession(personaId, userId, request.text ?: "")
-        mWorkHandler?.post {
-            try {
-                Log.d("TAG", "handleVoiceRequest begin text=${request.text}")
-                val ctx = mutableMapOf<String, Any>(
-                    "user_id" to userId,
-                    "persona_id" to personaId
-                )
-                ctx.putAll(session.toTraceContext().toContextData())
-                val result = chatOrchestrator.execute(request.text ?: "", ctx)
-                session.setStatus(result.isSuccess, result.errorDetail())
-                val res = if (result.isSuccess) result.output()
-                          else "系统: 请求失败 - ${result.errorDetail() ?: "未知错误"}"
-                notifyAIAgentListeners(AgentResponse().apply {
-                    requestId = request.requestId
-                    sessionId = request.sessionId
-                    setSuccess(result.isSuccess)
-                    text = res
-                    errorType = if (!result.isSuccess) result.errorType()?.name else null
-                    timestamp = System.currentTimeMillis()
-                })
-                mNagativeTTSplaying = true
-                mainHandler.post {
-                    stopTTS()
-                    mManager?.speak(res)
-                    mChating = false
-                    mNagativeReqExecuting.set(false)
-                }
-            } catch (e: Exception) {
-                session.setStatus(false, e.message)
-                notifyAIAgentListeners(AgentResponse().apply {
-                    requestId = request.requestId
-                    sessionId = request.sessionId
-                    setSuccess(false)
-                    text = "系统: 请求失败 - ${e.message}"
-                    errorType = "EXCEPTION"
-                    timestamp = System.currentTimeMillis()
-                })
-                mNagativeTTSplaying = true
-                mainHandler.post {
-                    stopTTS()
-                    mManager?.speak("系统: 请求失败")
-                    mChating = false
-                    mNagativeReqExecuting.set(false)
-                }
-            } finally {
-                session.close()
-            }
         }
     }
 

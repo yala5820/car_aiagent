@@ -9,6 +9,7 @@ package com.hirain.aiagent.runtime;
 public final class RequestDeadline {
 
     public static final long DEFAULT_TIMEOUT_MS = 30_000L;
+    public static final long VISION_TIMEOUT_MS = 60_000L;
 
     private final long startedAtMs;
     private final long deadlineAtMs;
@@ -23,6 +24,10 @@ public final class RequestDeadline {
 
     public static RequestDeadline standard(long startedAtMs) {
         return new RequestDeadline(startedAtMs, DEFAULT_TIMEOUT_MS);
+    }
+
+    public static RequestDeadline vision(long startedAtMs) {
+        return new RequestDeadline(startedAtMs, VISION_TIMEOUT_MS);
     }
 
     public long remainingMs(long nowMs) {

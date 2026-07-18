@@ -22,7 +22,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 - **虚拟车辆状态机（VehicleStateMachine）**：Demo 阶段车控 tool 的状态托管中心，参数校验 + 状态收敛
 - **Context 上下文模块**：以 8 个请求级 Provider + 3 个迭代级 Provider 统一采集 Prompt、Memory、Tool、车辆与时间信息；独占装配 TEXT 模型输入，并支持集中策略、预算裁剪、Memory 摘要恢复和完整 Trace
 
-> **当前范围：** TEXT 是已进入新 Runtime / Context / TextAgentLoop 的主路径；IMAGE、VOICE、CONTROL 和主动场景链仍保留兼容实现。Demo 车控由 `VehicleStateMachine` 托管，`SoaService` 尚未形成真实车辆执行与回执闭环，因此 README 中的“完成”均不代表量产车控验收完成。
+> **当前范围：** TEXT 是唯一进入 Runtime / Context / TextAgentLoop 的业务主路径；IMAGE、VOICE 返回结构化不支持响应，CONTROL 与主动场景链保留兼容实现。前向视觉问答使用受控 Demo assets 图片与 `qwen-vl-max`，不代表实时摄像头能力。Demo 车控由 `VehicleStateMachine` 托管，`SoaService` 尚未形成真实车辆执行与回执闭环，因此 README 中的“完成”均不代表量产车控验收完成。
 
 ### 改造历史
 
@@ -362,7 +362,7 @@ AIAgent/
 前台 Service，职责包括：
 
 - **AIDL Binder 实现**：完整的对话与会话管理接口集
-  - `processAgentRequest(AgentRequest)` — 主对话入口（TEXT → AgentRuntime + TextAgentLoop / IMAGE → VlManager / VOICE → 兼容 AI + TTS 链路 / CONTROL → StartListen/StopListen）
+- `processAgentRequest(AgentRequest)` — 主入口（TEXT → AgentRuntime + TextAgentLoop；IMAGE/VOICE → UNSUPPORTED_INPUT_TYPE；CONTROL → StartListen/StopListen/ClearChatMemory）
   - `createConversation(ConversationRequest)` — 创建新对话（不结束旧会话，响应含 sessionId）
   - `listConversations(String userId)` — 列出用户最近 50 条会话
   - `deleteConversation(String userId, String sessionId)` — 删除会话（消息 + 记录）

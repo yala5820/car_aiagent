@@ -20,7 +20,8 @@ public final class ActiveRequest {
     private volatile String personaId;
     private volatile String clientMessageId;
     private final long startedAtMs;
-    private final RequestDeadline deadline;
+    /** 准入阶段先持有 30 秒 provisional deadline，Runtime 规划完成后原子替换为有效 deadline。 */
+    private volatile RequestDeadline deadline;
     private final AtomicReference<TerminalState> state = new AtomicReference<>(TerminalState.RUNNING);
     private volatile String cancelReason;
 
@@ -47,13 +48,14 @@ public final class ActiveRequest {
         this.startedAtMs = deadline.startedAtMs();
     }
 
-    /** Runtime 解析出最终 sessionId 后补齐响应元数据，不改变准入身份和 deadline。 */
+    /** Runtime 解析出最终 Session 后同步身份与有效 deadline。 */
     public void bindSession(RequestSession session) {
         if (session == null || !requestId.equals(session.requestId())) return;
         this.sessionId = session.sessionId();
         this.userId = session.userId();
         this.personaId = session.personaId();
         this.clientMessageId = session.clientMessageId();
+        this.deadline = session.deadline();
     }
 
     /** 抢占终态：只有 RUNNING→终态返回 true，后续调用返回 false */

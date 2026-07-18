@@ -14,6 +14,12 @@ public final class RequestExecutionContext {
     }
 
     public static Scope bind(String requestId, RequestDeadline deadline) {
+        return bind(requestId, deadline, null, null);
+    }
+
+    /** 绑定本请求专用、不可变的执行选项；不透传整个 AgentRequest.extraContext。 */
+    public static Scope bind(String requestId, RequestDeadline deadline,
+                             String originalUserQuestion, String visionDemoImageId) {
         if (requestId == null || requestId.trim().isEmpty()) {
             throw new IllegalArgumentException("requestId must not be blank");
         }
@@ -21,7 +27,7 @@ public final class RequestExecutionContext {
             throw new IllegalArgumentException("deadline must not be null");
         }
         State previous = CURRENT.get();
-        CURRENT.set(new State(requestId, deadline));
+        CURRENT.set(new State(requestId, deadline, originalUserQuestion, visionDemoImageId));
         return new Scope(previous);
     }
 
@@ -32,14 +38,21 @@ public final class RequestExecutionContext {
     public static final class State {
         private final String requestId;
         private final RequestDeadline deadline;
+        private final String originalUserQuestion;
+        private final String visionDemoImageId;
 
-        private State(String requestId, RequestDeadline deadline) {
+        private State(String requestId, RequestDeadline deadline,
+                      String originalUserQuestion, String visionDemoImageId) {
             this.requestId = requestId;
             this.deadline = deadline;
+            this.originalUserQuestion = originalUserQuestion;
+            this.visionDemoImageId = visionDemoImageId;
         }
 
         public String requestId() { return requestId; }
         public RequestDeadline deadline() { return deadline; }
+        public String originalUserQuestion() { return originalUserQuestion; }
+        public String visionDemoImageId() { return visionDemoImageId; }
     }
 
     public static final class Scope implements AutoCloseable {

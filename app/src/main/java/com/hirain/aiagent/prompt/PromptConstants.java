@@ -49,6 +49,9 @@ public final class PromptConstants {
     /** VL 响应后缀警告 */
     public static final String MSG_VL_WARNING = "messages/vl_warning";
 
+    /** 前向视觉 Tool 证据约束（仅 TEXT 视觉候选请求追加） */
+    public static final String MSG_FRONT_VIEW_GROUNDING_POLICY = "messages/front_view_grounding_policy";
+
     /**
      * 根据 TEXT persona 选择系统提示词模板。
      * <p>

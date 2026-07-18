@@ -17,7 +17,7 @@ import com.hirain.aiagent.tools.vehicle.frag.VehicleFragManager;
 import com.hirain.aiagent.tools.vehicle.seat.VehicleSeatManager;
 import com.hirain.aiagent.tools.vehicle.speed.VehicleSpeedManager;
 import com.hirain.aiagent.tools.vehicle.window.VehicleWindowManager;
-import com.hirain.aiagent.tools.vision.vl.VlManager;
+import com.hirain.aiagent.tools.vision.FrontViewVisionTool;
 
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.agent.tool.ToolSpecifications;
@@ -466,7 +466,7 @@ public class ToolGroupRegistryTest {
                 VehicleFragManager.class,
                 VehicleSpeedManager.class,
                 VehicleDMSManager.class,
-                VlManager.class
+                FrontViewVisionTool.class
         );
         java.util.Set<String> allRealNames = new java.util.LinkedHashSet<>();
         List<ToolSpecification> realSpecs = new java.util.ArrayList<>();

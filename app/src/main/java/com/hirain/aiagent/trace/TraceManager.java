@@ -159,4 +159,6 @@ public class TraceManager {
 
     public TraceConfig config() { return config; }
     public boolean isEnabled() { return enabled; }
+    /** 为 Tool 提供受本 TraceManager 管理的低敏视觉子 Span 记录器。 */
+    public VisionTraceRecorder visionTraceRecorder() { return new VisionTraceRecorder(tracer); }
 }

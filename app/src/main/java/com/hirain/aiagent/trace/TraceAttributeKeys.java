@@ -60,6 +60,13 @@ public final class TraceAttributeKeys {
     public static final String TOOL_ERROR_DETAIL = "tool.error_detail";
     public static final String TOOL_WRITEBACK_RESULT = "tool.writeback_result";
     public static final String TOOL_WRITEBACK_TO_MEMORY = "tool.writeback_to_memory";
+    public static final String VISION_IMAGE_SOURCE = "vision.image.source";
+    public static final String VISION_IMAGE_ID = "vision.image.id";
+    public static final String VISION_IMAGE_MIME_TYPE = "vision.image.mime_type";
+    public static final String VISION_IMAGE_SIZE_BYTES = "vision.image.size_bytes";
+    public static final String VISION_IMAGE_LOADED_AT_MS = "vision.image.loaded_at_ms";
+    public static final String VISION_STATUS = "vision.status";
+    public static final String VISION_DURATION_MS = "vision.duration_ms";
 
     public static final String CONFIRMATION_ID = "safety.confirmation.id";
     public static final String CONFIRMATION_STATUS = "safety.confirmation.status";

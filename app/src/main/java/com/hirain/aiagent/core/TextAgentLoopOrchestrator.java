@@ -13,6 +13,8 @@ import com.hirain.aiagent.memory.ContextMemoryGateway;
 import com.hirain.aiagent.memory.MemoryPersistenceException;
 import com.hirain.aiagent.ai.langchain4j.tool.ToolDispatchOutcome;
 import com.hirain.aiagent.runtime.RequestSession;
+import com.hirain.aiagent.tools.vision.VisionResultParser;
+import com.hirain.aiagent.vision.routing.VisionRequirement;
 import com.hirain.aiagent.safety.SafetyDecision;
 import com.hirain.aiagent.safety.ToolSafetyEngine;
 import com.hirain.aiagent.safety.confirmation.ToolConfirmationCoordinator;
@@ -36,6 +38,7 @@ import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.request.ToolChoice;
 import dev.langchain4j.model.chat.response.ChatResponse;
 
 import io.opentelemetry.api.trace.Span;
@@ -128,6 +131,8 @@ public class TextAgentLoopOrchestrator {
             UserMessage currentMsg = prepareResult.currentUserMessage();
             boolean currentUserCommitted = false;
             boolean compressionAttemptedForRequest = false;
+            boolean visionEvidenceSucceeded = false;
+            int requiredNoToolRetryCount = 0;
 
             for (int i = 0; i < config.maxIterations(); i++) {
                 loopCtx.setIteration(i);
@@ -198,10 +203,16 @@ public class TextAgentLoopOrchestrator {
                     }
     
                     // ModelCaller → LLM 调用
-                    ChatRequest request = ChatRequest.builder()
+                    ToolChoice toolChoice = null;
+                    VisionRequirement visionRequirement = session.visionIntentDecision().requirement();
+                    if (visionEvidenceSucceeded) toolChoice = ToolChoice.NONE;
+                    else if (visionRequirement == VisionRequirement.REQUIRED) toolChoice = ToolChoice.REQUIRED;
+                    else if (visionRequirement == VisionRequirement.OPTIONAL) toolChoice = ToolChoice.AUTO;
+                    ChatRequest.Builder requestBuilder = ChatRequest.builder()
                             .messages(requestMessages)
-                            .toolSpecifications(requestTools)
-                            .build();
+                            .toolSpecifications(requestTools);
+                    if (toolChoice != null) requestBuilder.toolChoice(toolChoice);
+                    ChatRequest request = requestBuilder.build();
     
                     Span llmSpan = trace != null
                             ? trace.startLlmCall(config.modelName(), i, requestMessages.size(),
@@ -245,6 +256,17 @@ public class TextAgentLoopOrchestrator {
                         // ToolResult 必须紧跟其声明者，因此 ToolCall AiMessage 在执行工具前持久化。
                         chatMemory.add(aiMessage);
                         List<ToolExecutionRequest> toolReqs = aiMessage.toolExecutionRequests();
+                        if (session.visionIntentDecision().requirement() == VisionRequirement.REQUIRED
+                                && (toolReqs.size() != 1
+                                || !"front_camera_interaction".equals(toolReqs.get(0).name()))) {
+                            for (ToolExecutionRequest req : toolReqs) {
+                                chatMemory.add(new ToolExecutionResultMessage(req.id(), req.name(),
+                                        "[NOT_EXECUTED] required front vision tool only"));
+                            }
+                            state.markError();
+                            return AgentResult.error(AgentResult.ErrorType.TOOL_EXECUTION_FAILED,
+                                    "VISION_EVIDENCE_UNAVAILABLE:wrong_or_multiple_tool");
+                        }
                         if (session.deadline().isExpired(System.currentTimeMillis())) {
                             state.markTimeout();
                             return AgentResult.error(AgentResult.ErrorType.TIMEOUT,
@@ -411,6 +433,18 @@ public class TextAgentLoopOrchestrator {
                                     loopCtx.addToolResult(req.name(), req.arguments(),
                                             toolResult, decision);
                                     loopCtxWriteSuccess = true;
+                                    if ("front_camera_interaction".equals(req.name())) {
+                                        com.hirain.aiagent.tools.vision.FrontViewVisionResult visionResult =
+                                                VisionResultParser.parse(toolResult);
+                                        if (visionResult == null || !visionResult.success
+                                                || !"SUCCESS".equals(visionResult.status)) {
+                                            state.markError();
+                                            return AgentResult.error(AgentResult.ErrorType.TOOL_EXECUTION_FAILED,
+                                                    "VISION_EVIDENCE_UNAVAILABLE:" +
+                                                            (visionResult != null ? visionResult.status : "invalid_result"));
+                                        }
+                                        visionEvidenceSucceeded = true;
+                                    }
                                 } finally {
                                     if (trace != null) {
                                         trace.finishToolWriteback(writebackSpan,
@@ -452,6 +486,14 @@ public class TextAgentLoopOrchestrator {
                         continue;
                     }
     
+                    if (session.visionIntentDecision().requirement() == VisionRequirement.REQUIRED
+                            && !visionEvidenceSucceeded) {
+                        if (requiredNoToolRetryCount++ == 0) continue;
+                        state.markError();
+                        return AgentResult.error(AgentResult.ErrorType.TOOL_EXECUTION_FAILED,
+                                "VISION_EVIDENCE_UNAVAILABLE:VISION_TOOL_NOT_CALLED");
+                    }
+
                     // LLM 返回文本 → PostProcessor → Terminator → ResultCollector
                     String output = aiMessage.text();
     
@@ -477,7 +519,9 @@ public class TextAgentLoopOrchestrator {
                     chatMemory.add(processedMsg);
                     if (config.terminator().shouldStop(loopCtx,
                             ChatResponse.builder().aiMessage(processedMsg).build())) {
-                        if (memoryGateway != null) {
+                        if (memoryGateway != null
+                                && session.visionIntentDecision().requirement()
+                                == VisionRequirement.NONE) {
                             memoryGateway.extractTurnMemory(userId, sessionId,
                                     session.userInput(), output, trace);
                         }

@@ -19,6 +19,9 @@ public final class TraceSpanNames {
     public static final String TOOL_SAFETY_CHECK = "tool.safety_check";
     public static final String TOOL_DISPATCH = "tool.dispatch";
     public static final String TOOL_RESULT_WRITEBACK = "tool.result_writeback";
+    public static final String VISION_IMAGE_LOAD = "vision.image.load";
+    public static final String VISION_MODEL = "vision.model";
+    public static final String VISION_RESULT = "vision.result";
 
     private TraceSpanNames() {
     }
