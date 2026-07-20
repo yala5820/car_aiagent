@@ -21,6 +21,8 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 - 全链路追踪（OpenTelemetry + Phoenix）
 - **虚拟车辆状态机（VehicleStateMachine）**：Demo 阶段车控 tool 的状态托管中心，参数校验 + 状态收敛
 - **Context 上下文模块**：以 8 个请求级 Provider + 3 个迭代级 Provider 统一采集 Prompt、Memory、Tool、车辆与时间信息；独占装配 TEXT 模型输入，并支持集中策略、预算裁剪、Memory 摘要恢复和完整 Trace
+- **前向视觉问答 Tool**：以 TEXT 提问触发 `front_camera_interaction`；Demo 模式从受白名单保护的 assets 图片读取内容，经 `qwen-vl-max` 生成视觉证据，再由主对话模型组织最终答复
+- **Debug Eval 适配**：仅 Debug APK 提供独立 AIDL 环境控制入口；复用唯一 VehicleStateMachine 的快照、原子 Patch、临时租约和 Trace 关联，为 TestApp/电脑端评测提供可重复环境，不改变主业务 AIDL
 
 > **当前范围：** TEXT 是唯一进入 Runtime / Context / TextAgentLoop 的业务主路径；IMAGE、VOICE 返回结构化不支持响应，CONTROL 与主动场景链保留兼容实现。前向视觉问答使用受控 Demo assets 图片与 `qwen-vl-max`，不代表实时摄像头能力。Demo 车控由 `VehicleStateMachine` 托管，`SoaService` 尚未形成真实车辆执行与回执闭环，因此 README 中的“完成”均不代表量产车控验收完成。
 
@@ -49,6 +51,8 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 | **Phase 19** | **Context / Agent Trace 收口**：建立 `agent.request → agent.loop → iteration → context / gen_ai / tool → response.dispatch` Trace 树，补充 Provider、消息、工具 schema 与 Tool 执行阶段诊断；仍保留少量准确性和设备侧验收项 |
 | **Phase 20** | **P0 运行时与车控安全收口**：单 TEXT 准入、统一 30 秒 deadline、模型 HTTP Call 取消、ToolGroup fail-closed、高风险动作文本二次确认 |
 | **Phase 21** | **Context 长会话与语义收口**：完整 Session 历史、集中 ContextPolicy、可选数据裁剪、真实摘要压缩与一次重装配、结构化 Tool outcome、FULL_DEBUG 全文 Trace、Token 误差字段和 Legacy 清理 |
+| **Phase 22** | **TEXT 前向视觉问答**：收敛 IMAGE / VOICE 主入口；新增视觉意图策略、60 秒视觉 Tool deadline、Demo 图片白名单配置与 `front_camera_interaction`；视觉模型只产出结构化证据，最终自然语言答复仍由 TEXT AgentLoop 生成 |
+| **Phase 23** | **Debug Eval 适配**：新增仅 Debug 合并的 `IAIAgentEvalDebug` / `EvalDebugService`；唯一车辆状态机支持结构化快照、原子 Patch、revision 与 reset；以 UID + token 租约隔离 Eval 环境，并在根 Trace 记录跨端关联与环境版本 |
 
 ---
 
@@ -70,14 +74,16 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 │  │         AIAgentService（前台 Service）        │            │
 │  │  IAIAgentAidlInterface.Stub (AIDL Binder)   │            │
 │  │  ├─ processAgentRequest(AgentRequest)        │            │
-│  │  │   输入类型: TEXT / IMAGE / VOICE / CONTROL│            │
+│  │  │   主输入: TEXT（IMAGE / VOICE 明确拒绝）  │            │
 │  │  ├─ createConversation                       │            │
 │  │  ├─ listConversations                        │            │
 │  │  ├─ deleteConversation                       │            │
 │  │  ├─ switchConversation                       │            │
 │  │  ├─ getActiveConversation                    │            │
 │  │  ├─ cancelAgentRequest                       │            │
-│  │  └─ registerListener / unregisterListener    │            │
+│  │  ├─ registerListener / unregisterListener    │            │
+│  │  └─ Debug-only：IAIAgentEvalDebug             │            │
+│  │     （独立 Service；环境控制不进入主 ABI）    │            │
 │  │  RequestAdmission → ActiveRequestRegistry    │            │
 │  │  RequestDeadline → RequestCallRegistry       │            │
 │  │  文本确认分支 / 唯一终态 / Listener 派发      │            │
@@ -109,7 +115,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 │  │           Tool 调用层（集中式反射调度）         │            │
 │  │  ToolRegistry (Map<String, ToolDispatcher>)   │            │
 │  │  ToolDispatcher (反射扫描 @Tool 方法)         │            │
-│  │  Vehicle*Manager | WeatherUtils | VlManager  │            │
+│  │  Vehicle*Manager | WeatherUtils | FrontViewVisionTool │   │
 │  ├─────────────────────────────────────────────┤            │
 │  │           Prompt 管理                         │            │
 │  │  assets/prompts/（11 个 .txt 模板）           │            │
@@ -140,7 +146,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 | AI 基础库 | LangChain4j 1.16.3（模型、消息、Tool Calling）；Agent 编排由项目自研 Runtime / Context / AgentLoop 完成 |
 | LLM 模型 | qwen-turbo（对话）、qwen-flash（场景）、qwen-vl-max（视觉问答） |
 | LLM API | 阿里云 DashScope（OpenAI 兼容接口） |
-| 通信 | AIDL（Launcher ↔ AIAgent：主对话 + 会话 CRUD + 取消 + Listener、SOA 总线、Camera） |
+| 通信 | AIDL（Launcher ↔ AIAgent：主对话 + 会话 CRUD + 取消 + Listener；Debug TestApp ↔ AIAgent：独立 Eval 环境入口）、SOA 总线、Camera |
 | UI | **无**（纯后台 Service） |
 | 持久化 | SQLite（ChatMemory 持久化 + 长期记忆 + Session 管理） |
 | 网络 | OkHttp 4.12 |
@@ -162,6 +168,9 @@ AIAgent/
 │   │   │   ├── task/                       # 任务提示词（场景识别、视觉问答）
 │   │   │   ├── user/                       # 用户消息模板
 │   │   │   └── messages/                   # 消息片段
+│   │   ├── assets/vision/demo/              # 前向视觉问答 Demo 图片与白名单配置
+│   │   │   ├── vision-demo-config.json      # 默认图片、大小上限、图片元数据
+│   │   │   └── images/                      # 仅允许配置文件声明的本地图片
 │   │   ├── java/com/hirain/aiagent/
 │   │   │   ├── AIAgentService.kt           # 前台 Service，AIDL Binder 实现
 │   │   │   ├── AIAgent.java                # Facade 单例（客户端使用，JAR 中）
@@ -177,7 +186,10 @@ AIAgent/
 │   │   │   ├── BootCompleteReceiver.kt     # 开机广播 → 启动 Service
 │   │   │   │
 │   │   │   ├── VirtualStateMachine/         # 虚拟车辆状态机
-│   │   │   │   ├── VehicleStateMachine.java # 统一状态入口 + 参数校验
+│   │   │   │   ├── VehicleStateMachine.java # 统一状态入口 + 参数校验 + Eval 快照/Patch/reset
+│   │   │   │   ├── VehicleStateSnapshot.java # 不可变结构化状态快照
+│   │   │   │   ├── VehicleStatePatch.java    # 局部状态 Patch（保留字段存在性）
+│   │   │   │   ├── VehicleStateMutationResult.java
 │   │   │   │   └── state/                  # 8 个子系统状态 POJO
 │   │   │   │       ├── AcState.java
 │   │   │   │       ├── DoorState.java
@@ -198,10 +210,16 @@ AIAgent/
 │   │   │   │   ├── ActiveRequest.java            # 运行中请求 + CAS 终态抢占
 │   │   │   │   ├── ActiveRequestRegistry.java    # 请求注册 + 取消 + finished 60s 缓存
 │   │   │   │   ├── RequestAdmission.java         # Runtime 前准入快照
-│   │   │   │   ├── RequestDeadline.java          # TEXT 端到端 30 秒绝对期限
+│   │   │   │   ├── RequestDeadline.java / RequestDeadlinePolicy.java # TEXT 与视觉 Tool 期限策略
 │   │   │   │   ├── RequestCallRegistry.java      # requestId → 同步模型 HTTP Call
 │   │   │   │   ├── IdGenerator.java / UuidIdGenerator.java
 │   │   │   │   └── TimeProvider.java / SystemTimeProvider.java
+│   │   │   │
+│   │   │   ├── eval/                         # Debug Eval 环境控制核心（主代码，Release 不安装入口）
+│   │   │   │   ├── EvalEnvironmentCoordinator.java # 租约、TTL、in-flight 与状态操作
+│   │   │   │   ├── EvalEnvironmentRegistry.java    # Service / Debug Binder 同进程桥接
+│   │   │   │   ├── EvalRequestPermit.java           # Eval TEXT 完整退出凭据
+│   │   │   │   └── EvalRuntimeFingerprint.java
 │   │   │   │
 │   │   │   ├── intentrouter/                # 轻量意图标签器
 │   │   │   │   ├── IntentRouter.java           # 意图路由接口
@@ -315,12 +333,18 @@ AIAgent/
 │   │   │   │   ├── TraceContext.java        # 上下文传递
 │   │   │   │   ├── TraceConfig.java         # 配置
 │   │   │   │   ├── TraceRedactor.java       # 脱敏
-│   │   │   │   └── TracingOkHttpInterceptor.java
+│   │   │   │   ├── TracingOkHttpInterceptor.java
+│   │   │   │   └── VisionTraceRecorder.java  # 视觉图片读取、VLM 调用、结果追踪
 │   │   │   │
 │   │   │   ├── tools/                       # 工具层（@Tool 声明）
 │   │   │   │   ├── external/weather/WeatherUtils.java
 │   │   │   │   ├── vehicle/                 # 车控 6 个 Manager
-│   │   │   │   └── vision/vl/VlManager.java # 视觉问答
+│   │   │   │   └── vision/                  # 前向视觉问答 Tool
+│   │   │   │       ├── FrontViewVisionTool.java
+│   │   │   │       ├── demo/                # Demo 配置、白名单与图片加载
+│   │   │   │       └── model/               # qwen-vl-max 调用与视觉结果解析
+│   │   │   │
+│   │   │   ├── vision/routing/              # 视觉意图策略与 Tool 选择约束
 │   │   │   │
 │   │   │   └── infra/                       # 基础设施
 │   │   │       ├── soa/SoaService.kt
@@ -330,6 +354,11 @@ AIAgent/
 │   │       ├── CameraSdk.jar                # CameraService AIDL
 │   │       ├── AIAgentSdk.jar               # 对外 SDK
 │   │       └── adapter_vr.jar               # VR/TTS
+│   │
+│   ├── src/debug/                            # 仅 Debug variant 合并
+│   │   ├── AndroidManifest.xml               # EvalDebugService 注册；Release 不合并
+│   │   ├── aidl/com/hirain/aiagent/eval/IAIAgentEvalDebug.aidl
+│   │   └── java/com/hirain/aiagent/eval/     # Debug Binder、内部协议、调用方校验与版本指纹
 │   │
 │   ├── langchain4j/                         # LangChain4j 适配层
 │   │   ├── chat_memory_sqlite/              # SQLite 记忆持久化
@@ -374,10 +403,9 @@ AIAgent/
 - **TEXT Persona**：请求只接受 `chat` / `friendly` / `concise`，其他值回退到 `chat`；`PromptContextProvider` 按当前 `personaId` 选择唯一 System Prompt
 - **ActiveRequestRegistry**：运行中请求终态管理，timeout/success/failure/cancel 四路通过 CAS 抢占终态，只允许一方发送 listener 响应
 - **Trace 元信息**：Trace 创建前补齐 requestId，userId 使用 `request.userId ?: default_user`，记录有效 personaId（normalize 后）
-- **Camera 接入**：每 1 秒请求一次前向摄像头抓拍
-- **场景识别循环**：抓拍 → SceneMatch 识别 → 场景变化 → AgentLoopOrchestrator 主动响应
+- **Camera / 场景兼容链**：保留每秒前向摄像头抓拍与 SceneMatch 主动响应；TEXT 前向视觉问答不读取该实时抓拍，固定从 Demo assets 取图
 - **Listener 回调推送**：`onAIResponse(AgentResponse)` 统一回调
-- **TEXT 统一 30 秒端到端 deadline**（经 ActiveRequestRegistry 终态抢占，并可取消同步模型 HTTP Call）
+- **期限策略**：TEXT 主链使用 30 秒端到端 deadline；其内的前向视觉 Tool 使用独立 60 秒期限，并通过请求取消链路终止同步模型 HTTP Call
 
 ### 4.2 TextAgentLoopOrchestrator（TEXT 专用循环引擎）
 
@@ -418,7 +446,29 @@ execute(session, prepareResult)
 
 `ToolDispatchOutcome` 描述的是“工具方法是否完成技术调用”，不等同于“车辆动作已经生效”。当前 Demo 工具仍主要返回字符串；真实车控需要进一步引入结构化动作回执和执行后状态确认。
 
-### 4.4 PromptManager（外部化 Prompt 管理）
+### 4.4 前向视觉问答（FrontViewVisionTool）
+
+**文件：** `tools/vision/`、`vision/routing/`、`assets/vision/demo/`
+
+前向视觉问答是 TEXT AgentLoop 内的一个受控 Tool，而不是新的输入入口或独立 SubAgent。用户以文本询问前方视野时，`VisionIntentPolicy` 对视觉意图分级：明确的前向视觉请求必须调用 `front_camera_interaction`，可选视觉请求由模型决策；视觉与车控意图混合且语义不清时优先澄清，避免错误执行。
+
+```text
+用户 TEXT 提问
+  → Runtime / VisionIntentPolicy 选择视觉工具
+  → TextAgentLoop 以 REQUIRED 或 AUTO 发起 front_camera_interaction
+  → DemoFrontViewImageProvider 读取白名单 assets 图片
+  → 完整性、MIME、大小与文件签名校验
+  → qwen-vl-max 生成结构化视觉证据（视觉 Tool 独立 60 秒期限）
+  → ToolResult 写回当前循环
+  → qwen-turbo 基于证据生成最终中文答复
+```
+
+- Demo 图片配置位于 `app/src/main/assets/vision/demo/vision-demo-config.json`；当前已登记 `cd_szt`、`m7`、`sd` 三张 PNG，默认图片为 `m7`。新增或切换测试图片时，必须同时更新此配置中的 `imageId`、`assetPath`、`mimeType`，图片只能放在 `vision/demo/images/` 下。
+- Tool 只接受配置文件中声明的图片；配置缺失、图片不存在、超限或校验不通过时返回稳定错误，不会把任意 assets 路径交给模型。
+- VLM 返回的是结构化视觉证据而非最终用户答复；图片二进制 / Base64 不进入 SessionMemory、Prompt、业务 Trace 或日志。Trace 仅记录 `vision.image.load`、`vision.model`、`vision.result` 的诊断元数据。
+- 该能力仅覆盖预存图片 Demo，不接入真实摄像头；`CameraSdk.jar` 和主动场景识别链仍是独立兼容能力。
+
+### 4.5 PromptManager（外部化 Prompt 管理）
 
 **文件：** `prompt/PromptManager.java` + `assets/prompts/`
 
@@ -427,7 +477,7 @@ execute(session, prepareResult)
 - `PromptManager` 懒加载 + 缓存 + 渲染
 - `PromptSelector` 预留动态切换接口
 
-### 4.5 MemoryOrchestrator（四层记忆系统）
+### 4.6 MemoryOrchestrator（四层记忆系统）
 
 **文件：** `memory/`
 
@@ -438,21 +488,21 @@ execute(session, prepareResult)
 | 压缩能力 | MemoryCompressor + MemoryOrchestrator | Context 超预算时按完整 turn 摘要，CAS 原子写回并重读后最多二次装配一次 |
 | 用户隔离 | UserMemoryContext | userId 维度隔离，多用户支持 |
 
-### 4.6 TraceManager（全链路追踪）
+### 4.7 TraceManager（全链路追踪）
 
 **文件：** `trace/`
 
 基于 OpenTelemetry + Phoenix 的追踪系统：
 - 目标树为 `agent.request → agent.loop → agent.iteration → context / gen_ai / tool → response.dispatch`
 - Context 记录 prepare/assemble、Provider、fragment、message、toolset、裁剪、压缩和 Token 估算误差信息
-- Tool 记录 safety_check、dispatch、result_writeback 等阶段诊断
+- Tool 记录 safety_check、dispatch、result_writeback 等阶段诊断；视觉 Tool 额外记录图片加载、VLM 调用和结构化结果事件，不记录图片正文
 - Span 携带模型、消息、工具 schema、Token、HTTP、工具参数与结果等调试信息
 - 开发环境通过 `adb reverse tcp:6006 tcp:6006` 连接 PC 端 Phoenix
 - `TraceConfig.production()` 一键关闭（全局 no-op）
 
 Demo `FULL_DEBUG` 在业务层直接记录完整文本、参数、结果和工具 schema，不主动截断。Phoenix/exporter 对超长 attribute 的设备侧展示仍需验收。
 
-### 4.7 ConversationManager（会话管理门面）
+### 4.8 ConversationManager（会话管理门面）
 
 **文件：** `conversation/`
 
@@ -472,7 +522,7 @@ Demo `FULL_DEBUG` 在业务层直接记录完整文本、参数、结果和工�
 - `SessionManager` active session 从单个字段改为 `ConcurrentHashMap<userId, ActiveSessionState>`，`createConversationSession` 不结束旧会话（区别于 `startNewSession`）
 - `SessionChatMemoryProvider` 以 `sessionId` 作为短期记忆 key；用户与 Persona 归属由会话元数据维护，对话切换会真实改变 LLM 可见历史
 
-### 4.8 Vehicle*Manager 系列（车控工具）
+### 4.9 Vehicle*Manager 系列（车控工具）
 
 8 个车辆模块，其中 7 个模块共提供 **44 个 @Tool 方法**，全部使用 `ToolRegistry` 统一调度；`VehicleSpeedManager` 仅保留状态查询能力，不再向模型暴露修改车速的工具。
 每个 Manager 的 `@Tool` 方法**委托给 `VehicleStateMachine`** 执行状态变更和参数校验。
@@ -488,7 +538,7 @@ Demo `FULL_DEBUG` 在业务层直接记录完整文本、参数、结果和工�
 | VehicleSpeedManager | 0 | 车辆速度状态查询（非模型 Tool） |
 | VehicleDMSManager | 3 | 驾驶员疲劳、分心、情绪 |
 
-### 4.9 ActiveRequestRegistry（请求取消与终态管理）
+### 4.10 ActiveRequestRegistry（请求取消与终态管理）
 
 **文件：** `runtime/ActiveRequest.java` / `runtime/ActiveRequestRegistry.java`
 
@@ -502,7 +552,7 @@ Demo `FULL_DEBUG` 在业务层直接记录完整文本、参数、结果和工�
 - **四路终态抢占**：cancel AIDL、timeout runnable、worker success、worker exception 通过 `tryComplete` 竞争终态；只有首次抢占成功方允许发送 listener 响应
 - **槽位释放**：终态响应可以先发出，但执行体真正退出前不释放单槽位，避免旧调用与新调用重叠
 
-### 4.10 VehicleStateMachine（虚拟车辆状态机）
+### 4.11 VehicleStateMachine（虚拟车辆状态机）
 
 **文件：** `VirtualStateMachine/`
 
@@ -513,7 +563,7 @@ Demo 阶段引入的状态托管中心，替换原有的 `SoaService` 外部调�
 - Vehicle*Manager 删除本地状态字段和 `formalfunc` 标志，@Tool 方法直接委托给 VehicleStateMachine
 - 状态查询（`getXxxStatus()`）统一从状态机读取，形成整车状态快照
 
-### 4.11 AgentRuntime（运行时协调层）
+### 4.12 AgentRuntime（运行时协调层）
 
 **文件：** `runtime/`
 
@@ -544,7 +594,7 @@ handleTextRequest()
   → notifyAIAgentListeners() → session.close()
 ```
 
-### 4.12 IntentRouter（轻量意图标签器）
+### 4.13 IntentRouter（轻量意图标签器）
 
 **文件：** `intentrouter/`
 
@@ -556,7 +606,7 @@ handleTextRequest()
 - 优先级稳定（LinkedHashMap 保证顺序），不调用 LLM、不引用 tool registry
 - 当前为单标签 winner 设计；复合领域指令和平分场景只保留一个结果，复杂任务拆分仍是后续能力
 
-### 4.13 ToolGroup（工具分组与选择）
+### 4.14 ToolGroup（工具分组与选择）
 
 **文件：** `toolgroup/`
 
@@ -571,7 +621,7 @@ handleTextRequest()
 - 聚合组 `riskLevel` 遵循最高风险上浮规则（`COMMON_VEHICLE_GROUP` 和 `ALL_SAFE_DEMO_GROUP` 均为 HIGH）
 - ToolGroup 不负责执行工具；实际调用由 ToolSafetyEngine 先审核，再由 ToolRegistry / ToolDispatcher 完成
 
-### 4.14 ContextOrchestrator（上下文模块）
+### 4.15 ContextOrchestrator（上下文模块）
 
 **文件：** `context/`
 
@@ -642,7 +692,7 @@ Service worker → Context.prepare → Runtime gate → iteration/assemble → m
 - Prompt、CURRENT_USER、SessionMemory、摘要、required 数据和工具规格不会被普通裁剪；恢复后仍超限才返回 `CONTEXT_BUDGET_EXCEEDED`
 - 失败结果不会调用模型，也不会在预算通过前写入当前用户消息
 
-### 4.15 ToolSafetyEngine（Tool 执行前安全审核）
+### 4.16 ToolSafetyEngine（Tool 执行前安全审核）
 
 **文件：** `safety/`
 
@@ -660,7 +710,7 @@ ToolSafetyEngine 是独立、轻量、确定性的车控安全审核入口。Age
 - `VehicleStateMachine` 继续负责执行阶段的参数校验与状态收敛，安全模块只承担执行前业务判断
 - 虚拟车辆默认以静止状态（0 km/h）启动；行驶状态由 Demo 测试或后续车辆状态接入更新，不向模型暴露修改车速的 Tool
 
-### 4.16 SoaService（SOA 总线封装）
+### 4.17 SoaService（SOA 总线封装）
 
 **文件：** `infra/soa/SoaService.kt`
 
@@ -689,8 +739,8 @@ AIAgentService.onCreate()
     ├─ PromptManager(this)                 ← Prompt 模板管理器
     ├─ vehicleStateMachine = VehicleStateMachine() ← 虚拟车辆状态机
     ├─ toolSafetyEngine = ToolSafetyEngine(vehicleStateMachine, defaultRules) ← 全 Persona 共享
-    ├─ vl = VlManager(this, promptManager)
-    ├─ toolRegistry.registerAll(9 tool providers) ← 注册 46 个模型工具（SpeedManager 不注册）
+    ├─ frontViewVisionTool = FrontViewVisionTool(DemoFrontViewImageProvider, QwenVisionAnalyzer)
+    ├─ toolRegistry.registerAll(9 tool providers) ← 注册车控、天气与前向视觉模型工具（SpeedManager 不注册）
     ├─ memoryOrchestrator(...)             ← 记忆系统初始化
     ├─ traceManager = TraceManager(...)    ← Trace 系统初始化
     ├─ chatOrchestrator = AgentLoopOrchestrator(..., toolSafetyEngine) ← 兼容链路共用安全引擎
@@ -712,7 +762,7 @@ Launcher/AIAgentTestApp → AIDL processAgentRequest(AgentRequest)
     │  inputType=TEXT
     ▼
 AIAgentService.handleTextRequest()
-    ├─ 规范化 requestId / userId / personaId，创建绝对 30 秒 RequestDeadline
+    ├─ 规范化 requestId / userId / personaId，创建 TEXT 绝对 30 秒 RequestDeadline
     ├─ ActiveRequestRegistry.tryAcquire(RequestAdmission)
     │    └─ BUSY / DUPLICATE → 直接返回，不进入 Runtime
     ├─ traceManager.startAgentRequest() → agent.request root span
@@ -767,22 +817,24 @@ ActiveRequestRegistry.tryComplete(terminalState)  ← success / failure / timeou
 | 模块 | 阶段状态 | 当前结论与主要缺口 |
 |------|----------|--------------------|
 | 对外 AIDL 协议 | 基本完成 | 主请求、会话 CRUD、取消与 Listener 接口已落地；exported Service 的签名权限、Binder caller 身份与确认归属仍需收口 |
-| AgentRuntime | 基本完成 | TEXT 已具备单槽位准入、30 秒 deadline、HTTP Call 取消、唯一终态与 requestId 防重放；VOICE/SCENE 等仍使用兼容链路 |
+| AgentRuntime | 基本完成 | TEXT 已具备单槽位准入、30 秒主链 deadline、HTTP Call 取消、唯一终态与 requestId 防重放；IMAGE / VOICE 已明确返回不支持，CONTROL 与场景链保留兼容实现 |
 | TEXT Context | 代码完成、部分设备验收 | 8 静态 + 3 动态 Provider；独占消息和工具规格；集中策略、裁剪、压缩重试和 Legacy 清理已完成；Automotive 模拟器 AIDL、基础 TEXT、会话/用户隔离与 52 条消息长历史已通过，压缩、工具和 Phoenix 专项仍待验收 |
 | TEXT AgentLoop | 基本完成 | 多轮循环、整批 Safety 预检、确认与状态复核已接通；模型同步 HTTP Call 可取消，真实车控执行仍未接入 |
 | IntentRouter | Demo 完成 | 11 类关键词/正则意图，低成本且可解释；当前为单标签 winner，复合领域和查询/控制语义尚未强类型化 |
 | ToolGroup | P0 基线完成 | 13 个工具组；明确意图最小暴露，普通聊天空工具，不确定/异常/聚合结果失败关闭 |
 | ToolRegistry / Dispatcher | 基本完成 | 46 个 `@Tool` 统一反射注册和调度；TEXT 使用结构化 ToolDispatchOutcome 描述技术分发结果，但尚未形成统一车辆动作回执 |
+| 前向视觉问答 | Demo 完成、待设备验收 | TEXT → 视觉意图策略 → `front_camera_interaction` → 白名单 Demo 图片 → qwen-vl-max 结构化证据 → 主模型答复已接通；支持默认图片配置、文件校验、60 秒独立期限与视觉 Trace，不支持真实摄像头 |
 | Tool Safety Engine | P0 基线完成 | 统一入口、HIGH 规则漏配拒绝、文本确认、30 秒 PendingAction、确认前复核和最多一次执行已接通；仍不是量产功能安全方案 |
 | Prompt / Persona | 基本完成 | 11 个模板；支持 chat/friendly/concise TEXT System Prompt；更复杂动态策略未实现 |
 | Session 记忆 | 代码完成、基础设备验收通过 | SQLite 持久化、会话 CRUD、完整历史和 ToolExchange 校验已接通；Automotive 模拟器实测 52 条消息连续有序、首尾保留，含 ToolExchange 的超长会话和目标车机仍待验收 |
 | 长期记忆 | 可用 | 提取、存储、按 userId 注入和 FALLBACK 状态已接通；提取仍位于主响应路径，相关性、衰减与用户修正策略可继续完善 |
 | Memory 压缩 | 代码完成 | Context 超预算时按完整 turn 摘要、CAS 写回、动态重读并最多重装配一次；真实摘要模型待设备验收 |
 | Trace | 代码完成 | 主 Trace 树、Context 来源、最终消息、工具 schema、裁剪/压缩和 Tool 阶段已接通；业务层全文输出，Phoenix 设备显示待验收 |
-| 虚拟车辆状态机 | Demo 完成 | 8 个状态子系统、参数校验和状态收敛已用于 Demo 车控 |
+| 虚拟车辆状态机 | Demo 完成、Eval 已接入 | 8 个状态子系统、参数校验和状态收敛已用于 Demo 车控；Eval 复用同一实例提供不可变快照、原子 Patch、reset 与 environmentRevision |
+| Debug Eval 适配 | AIAgent 侧代码完成 | Debug-only `EvalDebugService` 支持 Acquire/Reset/Apply/Read/Release/GetVersion；UID + token 租约隔离，TEXT 根 Trace 记录关联与环境版本；TestApp Bridge、电脑端结果通道及三方设备验收待完成 |
 | SoaService 真车通信 | 未完成 | 方法体仍为空；当前车控结果来自 VehicleStateMachine，不代表真实车辆执行 |
 | 动作语义闭环 | 待完善 | ToolGroup 已限制模型可见工具，Safety 已控制风险动作；Dispatch 前本轮授权复核、ActionReceipt、状态回读和最终答复真实性仍待建立 |
-| 场景 / VLM / VR | 部分完成 | 已有模型、Camera SDK 和闭源 VR/TTS 适配；依赖目标设备、外部服务与实车验收 |
+| 场景 / VLM / VR | 部分完成 | 主动场景识别、前向视觉问答与 VR/TTS 均保留；前向视觉仅完成预存图片 Demo，Camera SDK 与真实视觉输入仍依赖目标设备和后续接入 |
 | UI | 不在本项目范围 | 仅保留无界面的调试启动 Activity；业务 UI 由 Launcher / 调用方提供 |
 
 ### 6.1 Context 当前剩余边界
@@ -791,14 +843,15 @@ ActiveRequestRegistry.tryComplete(terminalState)  ← success / failure / timeou
 - 压缩摘要当前以头部 `【对话摘要】` UserMessage 持久化，Provider 会把它分离为 UNTRUSTED Context Data；未来可单独迁移为 SQLite 结构化字段。
 - Runtime/Context 已支持 allToolsFallback，但默认 Selector 当前对普通 UNKNOWN 返回 CHAT_ONLY，不主动触发全量兜底；是否改变匹配规则属于独立 ToolGroup 策略任务。
 - FULL_DEBUG 在业务层不截断；Phoenix/exporter 是否限制超长 attribute 仍需设备验证。
-- Context 当前只独占 TEXT 输入；VOICE、SCENE、VLM 等兼容链路仍保留旧 AgentLoop/PreProcessor。
+- Context 只独占 TEXT 模型输入；前向视觉问答通过 TEXT Tool 回写证据，不向 Context 注入图片；CONTROL 与主动场景链仍保留旧兼容实现。
 
 ### 6.1.1 Debug Eval 适配边界
 
-- Debug APK 提供独立的 `IAIAgentEvalDebug` 环境控制入口，用于 TestApp 获取唯一虚拟车辆状态机的快照、reset、原子 Patch 与临时租约；它不属于主业务 AIDL，也不承担 Dataset、Judge 或 Report。
-- Eval case 的跨系统关联复用 `clientMessageId`，根 Trace 额外记录环境是否处于租约及请求开始时的 revision。AgentResponse、状态快照与 Trace 分别保持结果、环境与观测事实边界。
-- Release variant 不合并 Eval Debug Service，leaseToken 只在 Android 内部传递，不能进入 Prompt、Trace、Logcat 或电脑端结果。
-- 当前仅完成 AIAgent 侧编译与 JVM 验证；需待 TestApp Bridge 和电脑端 Eval 项目完成后关闭真实 Binder、Phoenix 与安全确认的三方设备验收。
+- Debug APK 提供独立 `IAIAgentEvalDebug.execute(String)`，由同进程 `EvalDebugService` 调用唯一 `VehicleStateMachine`；支持 `GET_VERSION`、`ACQUIRE_ENVIRONMENT`、`RESET_STATE`、`APPLY_STATE`、`READ_STATE`、`RELEASE_ENVIRONMENT`。它不属于主业务 AIDL，也不承担 Dataset、Judge 或 Report。
+- 环境由 AIAgent 生成的 UID + leaseToken 租约保护：默认 120 秒、范围 60–600 秒；租约期只允许 owner UID 的 TEXT 进入 Runtime，READ 在 worker 尚未完全退出时返回 `AGENT_BUSY`，TestApp 应短轮询而非读取中间状态。
+- Eval case 的跨系统关联复用 `clientMessageId`：TestApp 将电脑端 `correlationId` 写入该字段，根 Trace 记录 `client_message.id`、`eval.environment.active`、`eval.environment.revision`。AgentResponse、状态快照与 Trace 分别保持结果、环境与观测事实边界。
+- Release variant 不合并 Eval Debug Service；leaseToken 只在 Android 内部传递，不能进入 Prompt、Trace、Logcat 或电脑端结果。完整接入细节见 [AIAgent Eval 接入契约](docs/overview/eval/aiagent-eval-integration-contract.md)。
+- 已通过 AIAgent 侧 JVM、Debug/Release 构建与 merged manifest 边界验证；TestApp Bridge、电脑端结果通道、Phoenix 及安全确认的三方设备验收尚未关闭。
 
 ### 6.2 Agent 当前设计边界
 
@@ -806,7 +859,7 @@ ActiveRequestRegistry.tryComplete(terminalState)  ← success / failure / timeou
 - **技术调用成功不等于车辆目标完成**：`ToolDispatchOutcome` 能证明注册、解析与反射调用状态；真实车控仍需要 `ActionReceipt`、SOA 回执和状态回读。
 - **最终文本尚未由动作证据强约束**：当前主要依靠 Prompt 要求模型如实回复，后续应按 APPLIED / REJECTED / FAILED / PARTIAL / UNKNOWN 约束最终语义。
 - **Intent 仍是单领域标签**：适合单目标 Demo 指令，复合动作、查询与控制区分、条件动作需要独立任务语义层。
-- **TEXT 是新主链，其他输入仍为兼容链**：后续应先收敛共享的“授权 → Safety → Dispatch → 回执 → Trace”管线，再按需要迁移 IMAGE / VOICE / SCENE。
+- **TEXT 是唯一业务输入主链**：IMAGE / VOICE 已停止进入 Runtime；CONTROL 与主动场景链仅为兼容能力。前向视觉能力通过 TEXT Tool 接入，后续若接入真实摄像头仍应复用“授权 → Safety → Dispatch → 回执 → Trace”管线。
 
 完整设计评估见 [Agent 设计与架构评估报告](docs/overview/agent-design-and-architecture-evaluation.md)。
 
@@ -874,10 +927,13 @@ adb reverse tcp:6006 tcp:6006
 - [ToolGroup 模块概览](docs/overview/toolgroup-module-overview.md)
 - [Memory 模块概览](docs/overview/memory-module-overview.md)
 - [Trace 模块概览](docs/overview/trace-module-overview.md)
+- [AIAgent Eval 接入契约](docs/overview/eval/aiagent-eval-integration-contract.md)
+- [前向视觉问答 Tool 概览](docs/overview/front-view-vision-tool-overview.md)
+- [前向视觉问答人工验收清单](docs/testresult/2026-07-17-front-view-vision-manual-acceptance-checklist.md)
 - [Agent 设计与架构评估（当前）](docs/overview/agent-design-and-architecture-evaluation.md)
 - [Agent 架构与运行流程历史评估](docs/overview/agent-architecture-and-runtime-flow-evaluation.md)
 - [Tool Safety 当前实现与边界](docs/overview/tool-safety-policy-engine-current-state.md)
 - [三个 P0 改进计划与实施状态](docs/plan/2026-07-13-agent-p0-runtime-tool-safety-improvement-plan.md)
 - [Context Full Control 设计](docs/design/2026-07-11-context-full-control-design.md)
 
-**当前结论：** AIAgent 已形成“确定性控制面 + 模型驱动 Tool Loop”的车载领域单 Agent 主链；AIDL、TEXT Runtime、Context 输入控制、工具调度、Prompt、会话记忆、安全确认和 Trace 已可协同运行。Context 长会话预算恢复已完成代码与自动化门禁，Automotive 模拟器也已通过基础 AIDL、TEXT、隔离和 52 条 SQLite 历史验收。下一阶段应优先完成本轮工具执行授权、结构化动作回执、执行后状态确认、最终答复真实性和 AIDL 调用方身份，再推进真实 SOA、目标车机故障评测、Phoenix 展示与真实 Qwen Token 校准。
+**当前结论：** AIAgent 已形成“确定性控制面 + 模型驱动 Tool Loop”的车载领域单 Agent 主链；AIDL、TEXT Runtime、Context 输入控制、工具调度、Prompt、会话记忆、安全确认、Trace 与 Demo 前向视觉问答已可协同运行。视觉能力通过受控 Tool 保持在 TEXT 主链内，预存图片配置和 VLM 结果均有明确边界，不代表实时摄像头能力。下一阶段应优先完成本轮工具执行授权、结构化动作回执、执行后状态确认、最终答复真实性和 AIDL 调用方身份，再推进真实 SOA、目标车机故障评测、Phoenix 展示、真实 Qwen Token 校准与真实摄像头接入评估。
