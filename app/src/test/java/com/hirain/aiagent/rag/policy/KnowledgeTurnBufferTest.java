@@ -1,0 +1,2 @@
+package com.hirain.aiagent.rag.policy;import org.junit.Test;import static org.junit.Assert.*;
+public class KnowledgeTurnBufferTest {@Test public void completeResultIsRequestLocalAndKeyedByToolCall(){KnowledgeTurnBuffer buffer=new KnowledgeTurnBuffer();buffer.put("call-1","full evidence");assertTrue(buffer.contains("call-1"));assertEquals("full evidence",buffer.complete("call-1"));assertNull(new KnowledgeTurnBuffer().complete("call-1"));}}

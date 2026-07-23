@@ -22,6 +22,7 @@ public final class TraceSpanNames {
     public static final String VISION_IMAGE_LOAD = "vision.image.load";
     public static final String VISION_MODEL = "vision.model";
     public static final String VISION_RESULT = "vision.result";
+    public static final String RAG_RETRIEVE = "rag.retrieve";
 
     private TraceSpanNames() {
     }

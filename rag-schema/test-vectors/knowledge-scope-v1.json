@@ -1,0 +1,4 @@
+{
+  "version": 1,
+  "cases": [{"id": "exact-demo-scope", "vehicleModel": "DEMO_MODEL", "modelYear": "2026", "region": "CN", "softwareVersion": "DEMO_VERSION", "configurationCode": "DEFAULT", "expectedKnowledgeScopeId": "demo-model-2026-cn-demo-version-default"}]
+}

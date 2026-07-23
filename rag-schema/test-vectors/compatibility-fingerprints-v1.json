@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "fingerprints": {
+    "schema": "sha256 of normalized objectbox-models/default.json",
+    "hnsw": "sha256 of canonical ObjectBox version, dimension=1024 and distanceType=COSINE configuration",
+    "parser": "sha256 of canonical PDF/STATIC_HTML/MARKDOWN parser configuration",
+    "chunking": "sha256 of canonical chunking configuration"
+  },
+  "invariants": {"objectBoxVersion": "5.4.0", "embeddingDimension": 1024, "distanceType": "COSINE", "sourceLocatorSchemaVersion": 1}
+}

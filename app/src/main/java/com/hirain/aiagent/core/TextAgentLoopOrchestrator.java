@@ -26,6 +26,10 @@ import com.hirain.aiagent.trace.TraceSession;
 import com.hirain.aiagent.core.component.ModelCaller;
 import com.hirain.aiagent.core.component.PostProcessor;
 import com.hirain.aiagent.core.component.ToolExecutor;
+import com.hirain.aiagent.core.policy.ToolExecutionAuthorizer;
+import com.hirain.aiagent.rag.policy.KnowledgeLoopPolicy;
+import com.hirain.aiagent.rag.policy.KnowledgeMemoryPolicy;
+import com.hirain.aiagent.rag.policy.CitationGuard;
 
 import java.util.List;
 import java.util.ArrayList;
@@ -60,6 +64,10 @@ public class TextAgentLoopOrchestrator {
     private final ToolSafetyEngine toolSafetyEngine;
     private final ToolConfirmationCoordinator confirmationCoordinator;
     private final AgentLoopState state = new AgentLoopState();
+    private final ToolExecutionAuthorizer toolExecutionAuthorizer = new ToolExecutionAuthorizer();
+    private final KnowledgeLoopPolicy knowledgeLoopPolicy = new KnowledgeLoopPolicy();
+    private final KnowledgeMemoryPolicy knowledgeMemoryPolicy = new KnowledgeMemoryPolicy();
+    private final CitationGuard citationGuard = new CitationGuard();
 
     public TextAgentLoopOrchestrator(AgentConfig config,
                                      ContextMemoryGateway memoryGateway,
@@ -137,6 +145,7 @@ public class TextAgentLoopOrchestrator {
             for (int i = 0; i < config.maxIterations(); i++) {
                 loopCtx.setIteration(i);
                 state.setIteration(i);
+                session.knowledgeRequestState().beginIteration(i);
 
                 // 创建 agent.iteration 容器 span
                 Span iterSpan = trace != null
@@ -196,6 +205,11 @@ public class TextAgentLoopOrchestrator {
                         state.markError();
                         return AgentResult.error(AgentResult.ErrorType.CANCELLED, "cancelled_before_model_call");
                     }
+                    if (knowledgeLoopPolicy.evidenceExhausted(session.knowledgeIntentDecision(),session.knowledgeRequestState())) {
+                        state.markError();
+                        return AgentResult.error(AgentResult.ErrorType.TOOL_EXECUTION_FAILED,
+                                "KNOWLEDGE_EVIDENCE_UNAVAILABLE");
+                    }
     
                     if (!currentUserCommitted && currentMsg != null) {
                         chatMemory.add(currentMsg);
@@ -205,7 +219,9 @@ public class TextAgentLoopOrchestrator {
                     // ModelCaller → LLM 调用
                     ToolChoice toolChoice = null;
                     VisionRequirement visionRequirement = session.visionIntentDecision().requirement();
-                    if (visionEvidenceSucceeded) toolChoice = ToolChoice.NONE;
+                    boolean knowledgeToolRequired=knowledgeLoopPolicy.beforeModel(session.knowledgeIntentDecision(),session.knowledgeRequestState()).toolRequired();
+                    if (knowledgeToolRequired) toolChoice = ToolChoice.REQUIRED;
+                    else if (visionEvidenceSucceeded) toolChoice = ToolChoice.NONE;
                     else if (visionRequirement == VisionRequirement.REQUIRED) toolChoice = ToolChoice.REQUIRED;
                     else if (visionRequirement == VisionRequirement.OPTIONAL) toolChoice = ToolChoice.AUTO;
                     ChatRequest.Builder requestBuilder = ChatRequest.builder()
@@ -256,6 +272,18 @@ public class TextAgentLoopOrchestrator {
                         // ToolResult 必须紧跟其声明者，因此 ToolCall AiMessage 在执行工具前持久化。
                         chatMemory.add(aiMessage);
                         List<ToolExecutionRequest> toolReqs = aiMessage.toolExecutionRequests();
+                        // 必须先依据本轮模型可见规格授权，拒绝批次不会进入 Safety 或 Dispatcher。
+                        var authorization = toolExecutionAuthorizer.authorize(toolReqs, requestTools,
+                                session.knowledgeIntentDecision());
+                        if (!authorization.authorized()) {
+                            for (ToolExecutionRequest req : toolReqs) {
+                                chatMemory.add(new ToolExecutionResultMessage(req.id(), req.name(),
+                                        "[NOT_EXECUTED] " + authorization.reasonCode()));
+                            }
+                            state.markError();
+                            return AgentResult.error(AgentResult.ErrorType.TOOL_EXECUTION_FAILED,
+                                    authorization.reasonCode());
+                        }
                         if (session.visionIntentDecision().requirement() == VisionRequirement.REQUIRED
                                 && (toolReqs.size() != 1
                                 || !"front_camera_interaction".equals(toolReqs.get(0).name()))) {
@@ -423,9 +451,13 @@ public class TextAgentLoopOrchestrator {
                                 boolean memoryWriteSuccess = false;
                                 boolean loopCtxWriteSuccess = false;
                                 try {
-                                    chatMemory.add(new ToolExecutionResultMessage(
-                                            req.id(), req.name(),
-                                            toolResult != null ? toolResult : "{}"));
+                                    String persistedToolResult = toolResult != null ? toolResult : "{}";
+                                    if ("searchVehicleKnowledge".equals(req.name())) {
+                                        // 完整结果仅供当前 Request 后续迭代使用；历史会话只保存受控短投影。
+                                        session.knowledgeRequestState().turnBuffer().put(req.id(), persistedToolResult);
+                                        persistedToolResult = knowledgeMemoryPolicy.compact(persistedToolResult);
+                                    }
+                                    chatMemory.add(new ToolExecutionResultMessage(req.id(), req.name(), persistedToolResult));
                                     memoryWriteSuccess = true;
                                     if (trace != null) {
                                         trace.finishTool(toolSpan, decision, dispatchOutcome);
@@ -493,6 +525,11 @@ public class TextAgentLoopOrchestrator {
                         return AgentResult.error(AgentResult.ErrorType.TOOL_EXECUTION_FAILED,
                                 "VISION_EVIDENCE_UNAVAILABLE:VISION_TOOL_NOT_CALLED");
                     }
+                    if (knowledgeLoopPolicy.beforeModel(session.knowledgeIntentDecision(),session.knowledgeRequestState()).toolRequired()) {
+                        if (requiredNoToolRetryCount++ == 0) continue;
+                        state.markError();
+                        return AgentResult.error(AgentResult.ErrorType.TOOL_EXECUTION_FAILED,"KNOWLEDGE_TOOL_NOT_CALLED");
+                    }
 
                     // LLM 返回文本 → PostProcessor → Terminator → ResultCollector
                     String output = aiMessage.text();
@@ -515,13 +552,26 @@ public class TextAgentLoopOrchestrator {
                     }
     
                     AiMessage processedMsg = AiMessage.from(output);
+                    if (session.knowledgeIntentDecision().requirement()
+                            == com.hirain.aiagent.rag.policy.KnowledgeRequirement.REQUIRED) {
+                        var citation = citationGuard.validate(output,
+                                session.knowledgeRequestState().citationEvidenceMap(), true);
+                        if (!citation.valid()) {
+                            state.markError();
+                            return AgentResult.error(AgentResult.ErrorType.TOOL_EXECUTION_FAILED,
+                                    citation.reasonCode());
+                        }
+                        output = citation.output();
+                    }
                     // 普通文本只写入 PostProcessor 后的最终版本，确保外部回复与 Memory 一致。
                     chatMemory.add(processedMsg);
                     if (config.terminator().shouldStop(loopCtx,
                             ChatResponse.builder().aiMessage(processedMsg).build())) {
                         if (memoryGateway != null
                                 && session.visionIntentDecision().requirement()
-                                == VisionRequirement.NONE) {
+                                == VisionRequirement.NONE
+                                && session.knowledgeIntentDecision().requirement()
+                                != com.hirain.aiagent.rag.policy.KnowledgeRequirement.REQUIRED) {
                             memoryGateway.extractTurnMemory(userId, sessionId,
                                     session.userInput(), output, trace);
                         }

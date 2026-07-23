@@ -1,0 +1,478 @@
+{
+  "_note1": "KEEP THIS FILE! Check it into a version control system (VCS) like git.",
+  "_note2": "ObjectBox manages crucial IDs for your object model. See docs for details.",
+  "_note3": "If you have VCS merge conflicts, you must resolve them according to ObjectBox docs.",
+  "entities": [
+    {
+      "id": "1:2739228543630617458",
+      "lastPropertyId": "32:9223130039144062256",
+      "name": "KnowledgeChunkEntity",
+      "properties": [
+        {
+          "id": "1:6486368371893075597",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:6548533167214940446",
+          "name": "chunkId",
+          "indexId": "1:5168319627140818915",
+          "type": 9,
+          "flags": 40
+        },
+        {
+          "id": "3:6204565378540463910",
+          "name": "chunkLevel",
+          "indexId": "2:4439935147917399420",
+          "type": 9,
+          "flags": 8
+        },
+        {
+          "id": "4:911639503714990928",
+          "name": "parentChunkId",
+          "indexId": "3:4912641928103948708",
+          "type": 9,
+          "flags": 8
+        },
+        {
+          "id": "5:1639802847878657714",
+          "name": "documentId",
+          "indexId": "4:372423995732428372",
+          "type": 9,
+          "flags": 8
+        },
+        {
+          "id": "6:5875839633530314499",
+          "name": "documentTitle",
+          "type": 9
+        },
+        {
+          "id": "7:1897512161151908941",
+          "name": "documentVersion",
+          "type": 9
+        },
+        {
+          "id": "8:294953808311646016",
+          "name": "documentType",
+          "type": 9
+        },
+        {
+          "id": "9:7199085081884654834",
+          "name": "language",
+          "type": 9
+        },
+        {
+          "id": "10:3433141338416904365",
+          "name": "vehicleModel",
+          "indexId": "5:1302865040943978201",
+          "type": 9,
+          "flags": 8
+        },
+        {
+          "id": "11:8715052105065096567",
+          "name": "modelYear",
+          "indexId": "6:2829283986106592437",
+          "type": 9,
+          "flags": 8
+        },
+        {
+          "id": "12:7309570876683278307",
+          "name": "region",
+          "indexId": "7:817793304759504404",
+          "type": 9,
+          "flags": 8
+        },
+        {
+          "id": "13:3255032607333970291",
+          "name": "softwareVersion",
+          "indexId": "8:8967670236143511796",
+          "type": 9,
+          "flags": 8
+        },
+        {
+          "id": "14:8483093510762435582",
+          "name": "configurationCode",
+          "indexId": "9:6685220201012904019",
+          "type": 9,
+          "flags": 8
+        },
+        {
+          "id": "15:8281847020263593880",
+          "name": "chunkType",
+          "type": 9
+        },
+        {
+          "id": "16:4235639905096469594",
+          "name": "headingPath",
+          "type": 9
+        },
+        {
+          "id": "17:4075663881084097383",
+          "name": "chapter",
+          "type": 9
+        },
+        {
+          "id": "18:880501612736511367",
+          "name": "section",
+          "type": 9
+        },
+        {
+          "id": "19:283147131631633816",
+          "name": "content",
+          "type": 9
+        },
+        {
+          "id": "20:8643351590014429061",
+          "name": "sourceFormat",
+          "type": 9
+        },
+        {
+          "id": "21:3357455998202103302",
+          "name": "pdfPageStart",
+          "type": 5
+        },
+        {
+          "id": "22:6496608454779958506",
+          "name": "pdfPageEnd",
+          "type": 5
+        },
+        {
+          "id": "23:1961416389481220370",
+          "name": "printedPageStartLabel",
+          "type": 9
+        },
+        {
+          "id": "24:132564191296431279",
+          "name": "printedPageEndLabel",
+          "type": 9
+        },
+        {
+          "id": "25:5087074299745976387",
+          "name": "htmlElementId",
+          "type": 9
+        },
+        {
+          "id": "26:16530138645976868",
+          "name": "sourceLineStart",
+          "type": 5
+        },
+        {
+          "id": "27:8335736032180762062",
+          "name": "sourceLineEnd",
+          "type": 5
+        },
+        {
+          "id": "28:4695584592495796894",
+          "name": "sectionOrdinal",
+          "type": 5
+        },
+        {
+          "id": "29:889122064469832941",
+          "name": "ordinal",
+          "type": 5
+        },
+        {
+          "id": "30:2255978020176268962",
+          "name": "tokenEstimate",
+          "type": 5
+        },
+        {
+          "id": "31:3403239626327897577",
+          "name": "lexicalDocumentLength",
+          "type": 5
+        },
+        {
+          "id": "32:9223130039144062256",
+          "name": "embedding",
+          "indexId": "10:3933451276062475910",
+          "type": 28,
+          "flags": 8
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "2:489481418553848822",
+      "lastPropertyId": "16:2769976973103135860",
+      "name": "KnowledgeDocumentEntity",
+      "properties": [
+        {
+          "id": "1:2641834749031086512",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:5755217836306878932",
+          "name": "documentId",
+          "indexId": "11:2380070395037178708",
+          "type": 9,
+          "flags": 40
+        },
+        {
+          "id": "3:8903647864219292582",
+          "name": "documentTitle",
+          "type": 9
+        },
+        {
+          "id": "4:4375141596701781888",
+          "name": "documentType",
+          "type": 9
+        },
+        {
+          "id": "5:1163287839582214222",
+          "name": "documentVersion",
+          "type": 9
+        },
+        {
+          "id": "6:9023629397518153160",
+          "name": "language",
+          "type": 9
+        },
+        {
+          "id": "7:3319191048739957240",
+          "name": "vehicleModel",
+          "type": 9
+        },
+        {
+          "id": "8:7777374734402984204",
+          "name": "modelYear",
+          "type": 9
+        },
+        {
+          "id": "9:1311913732002612839",
+          "name": "region",
+          "type": 9
+        },
+        {
+          "id": "10:6507031468875500101",
+          "name": "softwareVersion",
+          "type": 9
+        },
+        {
+          "id": "11:5224548485467779918",
+          "name": "configurationCode",
+          "type": 9
+        },
+        {
+          "id": "12:4013203209065186490",
+          "name": "sourceFormat",
+          "type": 9
+        },
+        {
+          "id": "13:1147451667268014852",
+          "name": "sourceFileName",
+          "type": 9
+        },
+        {
+          "id": "14:1469118359022094510",
+          "name": "sourceSha256",
+          "type": 9
+        },
+        {
+          "id": "15:4620267986151666053",
+          "name": "sourceCharset",
+          "type": 9
+        },
+        {
+          "id": "16:2769976973103135860",
+          "name": "pageCount",
+          "type": 5
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "3:2592972128871532546",
+      "lastPropertyId": "27:8499374435460138503",
+      "name": "KnowledgeStoreMetadataEntity",
+      "properties": [
+        {
+          "id": "1:6001086150186278656",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:8017589098324198999",
+          "name": "bundleId",
+          "type": 9
+        },
+        {
+          "id": "3:1501455479842599174",
+          "name": "bundleVersion",
+          "type": 9
+        },
+        {
+          "id": "4:3240387411979410410",
+          "name": "knowledgeScopeId",
+          "type": 9
+        },
+        {
+          "id": "5:404055956230098902",
+          "name": "formatVersion",
+          "type": 5
+        },
+        {
+          "id": "6:9176033796407283235",
+          "name": "schemaFingerprint",
+          "type": 9
+        },
+        {
+          "id": "7:2250898990433858381",
+          "name": "builderVersion",
+          "type": 9
+        },
+        {
+          "id": "8:8053152080384606436",
+          "name": "objectBoxVersion",
+          "type": 9
+        },
+        {
+          "id": "9:6385958196360554037",
+          "name": "embeddingProvider",
+          "type": 9
+        },
+        {
+          "id": "10:1676751644051527461",
+          "name": "embeddingModel",
+          "type": 9
+        },
+        {
+          "id": "11:2838907982062823693",
+          "name": "embeddingDimension",
+          "type": 5
+        },
+        {
+          "id": "12:5652338884751885190",
+          "name": "distanceType",
+          "type": 9
+        },
+        {
+          "id": "13:5566363150213871393",
+          "name": "hnswConfigFingerprint",
+          "type": 9
+        },
+        {
+          "id": "14:9082914588480288207",
+          "name": "embeddingTemplateVersion",
+          "type": 5
+        },
+        {
+          "id": "15:9085507177955467403",
+          "name": "lexicalAnalyzerVersion",
+          "type": 5
+        },
+        {
+          "id": "16:7020920665060786228",
+          "name": "sourceLocatorSchemaVersion",
+          "type": 5
+        },
+        {
+          "id": "17:3393439204107579093",
+          "name": "parserConfigHash",
+          "type": 9
+        },
+        {
+          "id": "18:7423924796215691169",
+          "name": "supportedSourceFormats",
+          "type": 9
+        },
+        {
+          "id": "19:802530401046638460",
+          "name": "sourceFormatCounts",
+          "type": 9
+        },
+        {
+          "id": "20:7471327433497567386",
+          "name": "chunkingConfigHash",
+          "type": 9
+        },
+        {
+          "id": "21:6065604042023587527",
+          "name": "corpusHash",
+          "type": 9
+        },
+        {
+          "id": "22:5188239796886788687",
+          "name": "documentCount",
+          "type": 6
+        },
+        {
+          "id": "23:5199431301309870829",
+          "name": "parentChunkCount",
+          "type": 6
+        },
+        {
+          "id": "24:1903296035448833023",
+          "name": "childChunkCount",
+          "type": 6
+        },
+        {
+          "id": "25:2919980919857762083",
+          "name": "lexicalTermCount",
+          "type": 6
+        },
+        {
+          "id": "26:2931556965649811157",
+          "name": "averageLexicalDocumentLength",
+          "type": 8
+        },
+        {
+          "id": "27:8499374435460138503",
+          "name": "builtAtEpochMs",
+          "type": 6
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "4:5885898894327830605",
+      "lastPropertyId": "5:3644412166548025057",
+      "name": "LexicalTermEntity",
+      "properties": [
+        {
+          "id": "1:1190334591542359102",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:7817947424826687977",
+          "name": "term",
+          "indexId": "12:2140101156042105613",
+          "type": 9,
+          "flags": 40
+        },
+        {
+          "id": "3:146957079847226613",
+          "name": "documentFrequency",
+          "type": 5
+        },
+        {
+          "id": "4:3936056504018578452",
+          "name": "chunkEntityIds",
+          "type": 27
+        },
+        {
+          "id": "5:3644412166548025057",
+          "name": "termFrequencies",
+          "type": 26
+        }
+      ],
+      "relations": []
+    }
+  ],
+  "lastEntityId": "4:5885898894327830605",
+  "lastIndexId": "12:2140101156042105613",
+  "lastRelationId": "0:0",
+  "lastSequenceId": "0:0",
+  "modelVersion": 5,
+  "modelVersionParserMinimum": 5,
+  "retiredEntityUids": [],
+  "retiredIndexUids": [],
+  "retiredPropertyUids": [],
+  "retiredRelationUids": [],
+  "version": 1
+}

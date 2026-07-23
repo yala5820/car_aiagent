@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 
 /**
  * Session 短期记忆上下文 Provider — 按 ITERATION_DYNAMIC 周期读取当前 session 的 ChatMessage 快照。
@@ -61,7 +62,7 @@ public class SessionMemoryContextProvider implements ContextProvider {
         List<ChatMessage> messages;
         try {
             MemorySnapshot snapshot = memory.sessionMemorySnapshot(sessionId);
-            messages = snapshot.messages();
+            messages = overlayCurrentKnowledgeResults(snapshot.messages(), session);
             Map<String, Object> metadata = new java.util.LinkedHashMap<>();
             metadata.put("session_id", sessionId);
             metadata.put("history_repaired", snapshot.repaired());
@@ -90,5 +91,19 @@ public class SessionMemoryContextProvider implements ContextProvider {
                     ContextErrorCode.REQUIRED_PROVIDER_FAILED);
         }
 
+    }
+
+    /** 当前请求的下一迭代需要完整 Evidence；旧请求没有 Buffer，因此只能保留其紧凑历史投影。 */
+    private static List<ChatMessage> overlayCurrentKnowledgeResults(List<ChatMessage> stored, RequestSession session) {
+        if (stored == null || session == null) return stored == null ? List.of() : stored;
+        List<ChatMessage> output = new java.util.ArrayList<>(stored.size());
+        for (ChatMessage message : stored) {
+            if (message instanceof ToolExecutionResultMessage result
+                    && "searchVehicleKnowledge".equals(result.toolName())) {
+                String complete = session.knowledgeRequestState().turnBuffer().complete(result.id());
+                output.add(complete != null ? new ToolExecutionResultMessage(result.id(), result.toolName(), complete) : result);
+            } else output.add(message);
+        }
+        return List.copyOf(output);
     }
 }

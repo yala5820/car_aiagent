@@ -16,3 +16,16 @@ Thumbs.db
 *.apk
 *.aab
 *.log
+
+# RAG 离线构建端的本地构建、工作目录和临时凭证；正式源码、Schema 与受控 Fixture 必须纳入版本管理。
+/tools/rag-indexer/.gradle/
+/tools/rag-indexer/build/
+/tools/rag-indexer/work/
+/tools/rag-indexer/output/
+/tools/rag-indexer/*.local.properties
+/tools/rag-indexer/*.credentials
+
+# 用户提供的真实车型资料及其云端构建中间产物仅用于本地受控试运行，禁止纳入仓库。
+/tools/rag-indexer/corpus/model_y_2026_refresh_trial/documents/
+/tools/rag-indexer/corpus/model_y_2026_refresh_trial/work/
+/tools/rag-indexer/trial-output/

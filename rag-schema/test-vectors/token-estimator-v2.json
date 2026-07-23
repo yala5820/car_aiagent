@@ -1,0 +1,20 @@
+{
+  "algorithmVersion": "rag-token-estimator-v2",
+  "rules": {
+    "cjk": "HAN/HIRAGANA/KATAKANA/HANGUL code point = 1 token",
+    "latinAndDigit": "each contiguous Latin-letter-or-digit run = ceil(codePoints / 4) tokens",
+    "punctuation": "each Unicode punctuation code point = 1 token",
+    "newline": "each LF, CR or CRLF line break = 1 token",
+    "whitespace": "non-line-break whitespace = 0 token",
+    "other": "each remaining visible code point = 1 token"
+  },
+  "cases": [
+    {"id": "empty", "input": "", "expected": {"total": 0, "cjk": 0, "latinAndDigit": 0, "punctuation": 0, "newline": 0, "other": 0}},
+    {"id": "cjk", "input": "制动液", "expected": {"total": 3, "cjk": 3, "latinAndDigit": 0, "punctuation": 0, "newline": 0, "other": 0}},
+    {"id": "latin-and-model-number", "input": "ModelY2026", "expected": {"total": 3, "cjk": 0, "latinAndDigit": 3, "punctuation": 0, "newline": 0, "other": 0}},
+    {"id": "punctuation", "input": "A-B/C", "expected": {"total": 5, "cjk": 0, "latinAndDigit": 3, "punctuation": 2, "newline": 0, "other": 0}},
+    {"id": "step-newline", "input": "步骤一\n步骤二", "expected": {"total": 7, "cjk": 6, "latinAndDigit": 0, "punctuation": 0, "newline": 1, "other": 0}},
+    {"id": "warning", "input": "警告：请勿操作。", "expected": {"total": 8, "cjk": 6, "latinAndDigit": 0, "punctuation": 2, "newline": 0, "other": 0}},
+    {"id": "whitespace-and-symbol", "input": "  \t★\r\n", "expected": {"total": 2, "cjk": 0, "latinAndDigit": 0, "punctuation": 0, "newline": 1, "other": 1}}
+  ]
+}

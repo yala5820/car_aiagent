@@ -1,0 +1,15 @@
+{
+  "version": "lexical-analyzer-v1",
+  "cases": [
+    {
+      "id": "cjk-acronym-code-version",
+      "input": "请检查制动液 ACC AUTO HOLD P0A1 V1.2.3",
+      "expectedTerms": ["请检", "检查", "查制", "制动", "动液", "请检查", "检查制", "查制动", "制动液", "acc", "auto", "hold", "p0a1", "v1.2.3", "acc auto hold"]
+    },
+    {
+      "id": "unicode-and-punctuation",
+      "input": "ＥＳＰ，胎压-报警；the 2026",
+      "expectedTerms": ["胎压", "报警", "esp", "2026"]
+    }
+  ]
+}

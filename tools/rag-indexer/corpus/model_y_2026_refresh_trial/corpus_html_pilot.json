@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "bundleId": "model-y-2026-refresh-html-pilot",
+  "bundleVersion": "TEST_ONLY-model-y-2026-refresh-html-pilot-v1",
+  "knowledgeScopeId": "model-y-2026-cn-2026-refresh-rwd",
+  "scope": {"vehicleModel":"MODEL_Y","modelYear":"2026","region":"CN","softwareVersion":"2026_REFRESH","configurationCode":"RWD"},
+  "documents": [
+    {"documentId":"tesla-china-vehicle-warranty","title":"车辆质量保证 - 特斯拉中国","documentType":"WARRANTY","documentVersion":"2026-07-22","language":"zh-CN","sourceFormat":"STATIC_HTML","relativePath":"documents/tesla_china_warranty.html","expectedSha256":"a7f2ec5185abc636cefc10419be7a154f753778b76749ab0411bab6bdf4bb178","applicability":{"vehicleModel":"*","modelYear":"*","region":"CN","softwareVersion":"*","configurationCode":"*"}}
+  ]
+}

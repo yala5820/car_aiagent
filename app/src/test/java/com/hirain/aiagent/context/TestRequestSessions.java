@@ -10,6 +10,9 @@ import com.hirain.aiagent.runtime.RequestDeadline;
 import com.hirain.aiagent.toolgroup.ToolGroupId;
 import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
 import com.hirain.aiagent.toolgroup.ToolGroupRegistry;
+import com.hirain.aiagent.rag.policy.KnowledgeIntentDecision;
+import com.hirain.aiagent.rag.policy.KnowledgeRequirement;
+import com.hirain.aiagent.rag.policy.KnowledgeRequestState;
 
 import java.util.List;
 
@@ -61,6 +64,16 @@ public final class TestRequestSessions {
                                 "CHAT_ONLY",
                                 IntentConfidence.HIGH,
                                 false));
+    }
+
+    /** 构造强制知识检索请求，供 Context 断言专属提示词不会泄漏到普通会话。 */
+    public static RequestSession requiredKnowledgeSession(String requestId, String sessionId, String text) {
+        RequestSession base = chatOnlySession(requestId, sessionId, "user-knowledge", "chat", "client-knowledge", text);
+        return new RequestSessionFactory(() -> "generated", System::currentTimeMillis).createWithKnowledge(
+                base.request(), base.traceContext(), base.intentResult(), base.toolGroupSelectionResult(),
+                base.sessionId(), base.deadline(), base.visionIntentDecision(),
+                new KnowledgeIntentDecision(KnowledgeRequirement.REQUIRED, "KNOWLEDGE_QUERY", "test", false),
+                new KnowledgeRequestState());
     }
 
     /** 需要澄清的会话，用于验证 Runtime 前后均不会暴露工具。 */

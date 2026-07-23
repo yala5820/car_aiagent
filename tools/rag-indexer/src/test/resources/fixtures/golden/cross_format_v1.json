@@ -1,0 +1,7 @@
+{
+  "fixture": "synthetic_brake_fluid_condition",
+  "changeReason": "initial_v1_synthetic_fixture",
+  "expectedHeading": "制动液检查",
+  "expectedFact": "液位低时联系服务中心",
+  "formats": ["PDF", "STATIC_HTML", "MARKDOWN"]
+}

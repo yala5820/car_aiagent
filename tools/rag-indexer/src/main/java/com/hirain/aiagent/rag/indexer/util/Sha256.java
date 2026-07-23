@@ -1,0 +1,4 @@
+package com.hirain.aiagent.rag.indexer.util;
+import java.io.InputStream; import java.nio.file.Files; import java.nio.file.Path; import java.security.MessageDigest;
+/** 以流式读取计算源文件 Hash，避免将完整资料一次性加载到内存。 */
+public final class Sha256 { private Sha256(){} public static String file(Path path)throws Exception{MessageDigest d=MessageDigest.getInstance("SHA-256");try(InputStream in=Files.newInputStream(path)){byte[] b=new byte[8192];for(int n;(n=in.read(b))>=0;)d.update(b,0,n);}return hex(d.digest());} public static String ofUtf8(String value){try{return hex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));}catch(Exception e){throw new IllegalStateException("SHA-256 unavailable",e);}} private static String hex(byte[] bytes){StringBuilder s=new StringBuilder();for(byte v:bytes)s.append(String.format("%02x",v));return s.toString();} }

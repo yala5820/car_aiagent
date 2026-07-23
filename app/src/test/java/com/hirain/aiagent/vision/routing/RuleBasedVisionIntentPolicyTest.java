@@ -23,5 +23,10 @@ public class RuleBasedVisionIntentPolicyTest {
         assertTrue(result.compoundIntentDetected());
         assertEquals(VisionRequirement.NONE, result.requirement());
     }
+    @Test public void dashboardAndCabinAreNeverPromotedToFrontView() {
+        assertTrue(policy.decide("看一下仪表盘告警灯", chat()).requirement() != VisionRequirement.REQUIRED);
+        assertTrue(policy.decide("识别车内后排情况", chat()).requirement() != VisionRequirement.REQUIRED);
+        assertEquals(VisionRequirement.REQUIRED, policy.decide("看看前方路牌", chat()).requirement());
+    }
     private static IntentResult chat() { return IntentResult.of(IntentTag.CHAT, IntentConfidence.LOW, List.of(), "", "TEXT", "test"); }
 }

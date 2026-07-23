@@ -2,6 +2,8 @@ package com.hirain.aiagent.runtime;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
+import com.hirain.aiagent.rag.policy.*;
 
 import org.junit.Test;
 
@@ -24,4 +26,5 @@ public class RequestExecutionContextTest {
 
         assertNull(RequestExecutionContext.current());
     }
+    @Test public void bindsSameKnowledgeStateOnlyForScope() { KnowledgeRequestState state=new KnowledgeRequestState();KnowledgeIntentDecision decision=new KnowledgeIntentDecision(KnowledgeRequirement.REQUIRED,"test","v1",false);try(RequestExecutionContext.Scope ignored=RequestExecutionContext.bind("request",RequestDeadline.knowledge(1L),"q",null,decision,state)){assertSame(state,RequestExecutionContext.current().knowledgeRequestState());assertSame(decision,RequestExecutionContext.current().knowledgeIntentDecision());}assertNull(RequestExecutionContext.current()); }
 }

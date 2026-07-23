@@ -5,6 +5,8 @@ import com.hirain.aiagent.intentrouter.IntentResult;
 import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
 import com.hirain.aiagent.trace.TraceContext;
 import com.hirain.aiagent.vision.routing.VisionIntentDecision;
+import com.hirain.aiagent.rag.policy.KnowledgeIntentDecision;
+import com.hirain.aiagent.rag.policy.KnowledgeRequestState;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -34,6 +36,8 @@ public final class RequestSession {
     private final IntentResult intentResult;
     private final ToolGroupSelectionResult toolGroupSelectionResult;
     private final VisionIntentDecision visionIntentDecision;
+    private final KnowledgeIntentDecision knowledgeIntentDecision;
+    private final KnowledgeRequestState knowledgeRequestState;
     private final Map<String, Object> orchestratorContext;
 
     RequestSession(AgentRequest request, String requestId, String sessionId,
@@ -46,7 +50,8 @@ public final class RequestSession {
         this(request, requestId, sessionId, userId, sourceApp, inputType,
                 personaId, clientMessageId, userInput,
                 RequestDeadline.standard(startedAtMs), traceContext, intentResult,
-                toolGroupSelectionResult, VisionIntentDecision.none("legacy_default"), orchestratorContext);
+                toolGroupSelectionResult, VisionIntentDecision.none("legacy_default"),
+                KnowledgeIntentDecision.none("legacy_default"), new KnowledgeRequestState(), orchestratorContext);
     }
 
     RequestSession(AgentRequest request, String requestId, String sessionId,
@@ -57,6 +62,17 @@ public final class RequestSession {
                    ToolGroupSelectionResult toolGroupSelectionResult,
                    VisionIntentDecision visionIntentDecision,
                    Map<String, Object> orchestratorContext) {
+        this(request, requestId, sessionId, userId, sourceApp, inputType, personaId, clientMessageId, userInput,
+                deadline, traceContext, intentResult, toolGroupSelectionResult, visionIntentDecision,
+                KnowledgeIntentDecision.none("legacy_default"), new KnowledgeRequestState(), orchestratorContext);
+    }
+    RequestSession(AgentRequest request, String requestId, String sessionId,
+                   String userId, String sourceApp, String inputType,
+                   String personaId, String clientMessageId, String userInput,
+                   RequestDeadline deadline, TraceContext traceContext,
+                   IntentResult intentResult, ToolGroupSelectionResult toolGroupSelectionResult,
+                   VisionIntentDecision visionIntentDecision, KnowledgeIntentDecision knowledgeIntentDecision,
+                   KnowledgeRequestState knowledgeRequestState, Map<String, Object> orchestratorContext) {
         this.request = request;
         this.requestId = requestId;
         this.sessionId = sessionId;
@@ -74,6 +90,9 @@ public final class RequestSession {
         this.toolGroupSelectionResult = toolGroupSelectionResult;
         this.visionIntentDecision = visionIntentDecision != null
                 ? visionIntentDecision : VisionIntentDecision.none("missing_vision_decision");
+        this.knowledgeIntentDecision = knowledgeIntentDecision != null
+                ? knowledgeIntentDecision : KnowledgeIntentDecision.none("missing_knowledge_decision");
+        this.knowledgeRequestState = knowledgeRequestState != null ? knowledgeRequestState : new KnowledgeRequestState();
         this.orchestratorContext = Collections.unmodifiableMap(
                 new HashMap<>(orchestratorContext));
     }
@@ -93,5 +112,7 @@ public final class RequestSession {
     public IntentResult intentResult() { return intentResult; }
     public ToolGroupSelectionResult toolGroupSelectionResult() { return toolGroupSelectionResult; }
     public VisionIntentDecision visionIntentDecision() { return visionIntentDecision; }
+    public KnowledgeIntentDecision knowledgeIntentDecision() { return knowledgeIntentDecision; }
+    public KnowledgeRequestState knowledgeRequestState() { return knowledgeRequestState; }
     public Map<String, Object> orchestratorContext() { return orchestratorContext; }
 }

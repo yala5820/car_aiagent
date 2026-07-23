@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Vehicle RAG Build V2 Chunking",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "parser", "chunking", "embedding", "objectBox", "lexical", "qualityGate"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "parser": {"type": "object"},
+    "embedding": {"type": "object"},
+    "objectBox": {"type": "object"},
+    "lexical": {"type": "object"},
+    "qualityGate": {"type": "object"},
+    "chunking": {
+      "type": "object", "additionalProperties": false,
+      "required": ["configVersion", "tokenEstimatorVersion", "parentIdealMinTokens", "parentSoftMaxTokens", "parentHardMaxTokens", "childIdealMinTokens", "childTargetTokens", "childSoftMaxTokens", "childHardMaxTokens", "fallbackOverlapMinRatio", "fallbackOverlapMaxRatio", "tableRowsPerChild", "semanticStrategyVersion"],
+      "properties": {
+        "configVersion": {"const": 2}, "tokenEstimatorVersion": {"const": "rag-token-estimator-v2"},
+        "parentIdealMinTokens": {"type": "integer", "minimum": 0}, "parentSoftMaxTokens": {"type": "integer", "minimum": 0}, "parentHardMaxTokens": {"type": "integer", "minimum": 0},
+        "childIdealMinTokens": {"type": "integer", "minimum": 0}, "childTargetTokens": {"type": "integer", "minimum": 0}, "childSoftMaxTokens": {"type": "integer", "minimum": 0}, "childHardMaxTokens": {"type": "integer", "minimum": 0},
+        "fallbackOverlapMinRatio": {"type": "number", "minimum": 0, "maximum": 0.1}, "fallbackOverlapMaxRatio": {"type": "number", "minimum": 0, "maximum": 0.1},
+        "tableRowsPerChild": {"type": "integer", "minimum": 1}, "semanticStrategyVersion": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

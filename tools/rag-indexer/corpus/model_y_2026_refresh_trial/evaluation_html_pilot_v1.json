@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "datasetVersion": "model-y-2026-refresh-html-pilot-v1",
+  "knowledgeScopeId": "model-y-2026-cn-2026-refresh-rwd",
+  "cases": [
+    {
+      "caseId": "battery-and-drive-unit-warranty",
+      "query": "电池和驱动电机有限质量保证",
+      "expectedChunkIds": [
+        "25ac79ff0d6327af8ebfcf5f1702f90a3ac3559e053157f1a45dca5af3a10b3b",
+        "6bc9ffce226477f7c5da478376030200349b20eec074b3d94987d19b8866dd65"
+      ]
+    },
+    {
+      "caseId": "seatbelt-and-airbag-warranty",
+      "query": "座椅安全带和气囊系统有限质量保证",
+      "expectedChunkIds": [
+        "8cc1566c1bbe04d2095179992f0027a92c69e50cb2b387f2503af51bc90148a1",
+        "e0b388cb551b085f40af2f99570f33294e358b42e317c9096ae2e1c880240fac"
+      ]
+    },
+    {
+      "caseId": "basic-vehicle-warranty",
+      "query": "车辆基本有限质量保证",
+      "expectedChunkIds": [
+        "62c230284b2f38a2855d1076c384504ca2a4e09868fcaaf750140e394603c391",
+        "b697c1f23ce0d0fa2675455066d180c19b540eba53b9b711bb212d399cb229fa"
+      ]
+    }
+  ]
+}

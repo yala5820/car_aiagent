@@ -330,7 +330,9 @@ public class TextAgentLoopOrchestratorTest {
         AgentConfig config = configWith(caller, toolExec);
         FakeMemoryGateway memory = new FakeMemoryGateway();
         TextAgentLoopOrchestrator loop = new TextAgentLoopOrchestrator(
-                config, memory, new FakeAssemblyGateway(List.of(), "车控"),
+                config, memory, new FakeAssemblyGateway(List.of(
+                        ToolSpecification.builder().name("set_ac_status").description("ac").build(),
+                        ToolSpecification.builder().name("set_door_lock").description("door").build()), "车控"),
                 safetyEngine, coordinator);
         RequestSession requestSession = session("打开空调并解锁");
 

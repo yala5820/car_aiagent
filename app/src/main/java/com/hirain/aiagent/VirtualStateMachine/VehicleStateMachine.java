@@ -1,6 +1,7 @@
 package com.hirain.aiagent.VirtualStateMachine;
 
 import com.hirain.aiagent.VirtualStateMachine.state.*;
+import com.hirain.aiagent.rag.model.VehicleProfile;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -60,6 +61,8 @@ public class VehicleStateMachine {
     private ChassisState chassis = new ChassisState();
     private FragState frag = new FragState();
     private DmsState dms = new DmsState();
+    /** Profile 独立于动态状态与通用 Patch，避免文本请求把不可信字段写入知识 Scope。 */
+    private VehicleProfileState vehicleProfile = new VehicleProfileState();
     private long stateRevision;
     private String lastObservedSignature;
 
@@ -67,6 +70,15 @@ public class VehicleStateMachine {
         // 初始默认状态不是一次业务写入，revision 从 0 开始；后续 Tool 写入由 snapshot 统一观察。
         lastObservedSignature = stateSignatureLocked();
     }
+
+    /** 只读、类型化的可信 Profile 快照；供 RAG Provider 使用，不向 Tool/Request 暴露写入口。 */
+    public synchronized VehicleProfile vehicleProfileSnapshot(long nowMillis) {
+        return new VehicleProfile(vehicleProfile.vehicleModel, vehicleProfile.modelYear, vehicleProfile.region,
+                vehicleProfile.softwareVersion, vehicleProfile.configurationCode, nowMillis);
+    }
+
+    /** 仅用于诊断/Trace，不能作为模型 Tool 参数或用户可覆盖配置。 */
+    public synchronized boolean isDemoVehicleProfile() { return vehicleProfile.demoProfile; }
 
     // ── 工具方法 ──
 
@@ -537,6 +549,7 @@ public class VehicleStateMachine {
     public synchronized VehicleStateMutationResult reset(long nowMillis) {
         ac = new AcState(); door = new DoorState(); window = new WindowState(); seat = new SeatState();
         speed = new SpeedState(); chassis = new ChassisState(); frag = new FragState(); dms = new DmsState();
+        vehicleProfile = new VehicleProfileState();
         stateRevision++;
         lastObservedSignature = stateSignatureLocked();
         return VehicleStateMutationResult.success(snapshotLocked(nowMillis));

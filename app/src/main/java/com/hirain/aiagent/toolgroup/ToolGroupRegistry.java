@@ -55,6 +55,8 @@ public class ToolGroupRegistry {
         List<String> weatherTools = List.of("getWeatherForecast");
 
         List<String> visionTools = List.of("front_camera_interaction");
+        // 知识 Tool 不加入 ALL_SAFE_DEMO_GROUP；REQUIRED 请求必须以独占组收敛能力边界。
+        List<String> knowledgeTools = List.of("searchVehicleKnowledge");
 
         // ── COMMON_VEHICLE_GROUP：合并全部车辆域 toolName ──
         LinkedHashSet<String> commonVehicleTools = new LinkedHashSet<>();
@@ -119,6 +121,10 @@ public class ToolGroupRegistry {
         groups.put(ToolGroupId.VISION_GROUP,
                 new ToolGroup(ToolGroupId.VISION_GROUP, "视觉工具组", "前向摄像头交互",
                         visionTools, emptyTools, "LOW", true));
+
+        groups.put(ToolGroupId.VEHICLE_KNOWLEDGE_GROUP,
+                new ToolGroup(ToolGroupId.VEHICLE_KNOWLEDGE_GROUP, "车辆知识工具组", "只读车辆官方资料检索",
+                        knowledgeTools, emptyTools, "LOW", true));
 
         // COMMON_VEHICLE_GROUP 从各车辆组动态合并。
         // 风险语义：聚合组的 riskLevel 取所含工具组的最高风险（DOOR/CHASSIS 为 HIGH，因此上浮至 HIGH）。
