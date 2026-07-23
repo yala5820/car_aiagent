@@ -68,6 +68,18 @@ public final class TraceAttributeKeys {
     public static final String VISION_STATUS = "vision.status";
     public static final String VISION_DURATION_MS = "vision.duration_ms";
 
+    // ── RAG（只允许 Hash、ID、计数、模式与稳定错误码） ──
+    public static final String RAG_QUERY_HASH = "rag.query.hash";
+    public static final String RAG_BUNDLE_VERSION = "rag.bundle.version";
+    public static final String RAG_SCOPE_MATCHED = "rag.scope.matched";
+    public static final String RAG_CANDIDATE_COUNT = "rag.candidate.count";
+    public static final String RAG_DOCUMENT_IDS = "rag.document.ids";
+    public static final String RAG_EVIDENCE_IDS = "rag.evidence.ids";
+    public static final String RAG_RETRIEVAL_MODE = "rag.retrieval.mode";
+    public static final String RAG_DURATION_MS = "rag.duration_ms";
+    public static final String RAG_DEADLINE_REMAINING_MS = "rag.deadline.remaining_ms";
+    public static final String RAG_FAILURE_CODE = "rag.failure.code";
+
     public static final String CONFIRMATION_ID = "safety.confirmation.id";
     public static final String CONFIRMATION_STATUS = "safety.confirmation.status";
     public static final String CONFIRMATION_REASON_CODE = "safety.confirmation.reason_code";

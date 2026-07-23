@@ -547,17 +547,18 @@ public class ContextTextEndToEndTest {
                 "req-1", "conv-1", "user-a", "chat", "cl-1", "do two things");
         ContextPrepareResult pr = orch.prepare(session, () -> cancelAfterFirst.get());
         AgentResult result = loop.execute(session, pr);
-        assertEquals("Should cancel during multi-tool", AgentResult.ErrorType.CANCELLED, result.errorType());
+        assertEquals("Hidden tools must fail before any dispatch", AgentResult.ErrorType.TOOL_EXECUTION_FAILED, result.errorType());
 
         ChatMemory sessionMem = mg.perSessionChatMemory.get("conv-1");
         List<ChatMessage> msgs = sessionMem != null ? sessionMem.messages() : mg.chatMemory.messages();
         long toolResultCount = msgs.stream()
                 .filter(m -> m instanceof ToolExecutionResultMessage).count();
-        assertEquals("Two ToolResults should be in chatMemory (1 real, 1 cancelled)", 2, toolResultCount);
+        assertEquals("Two ToolResults should be written for a rejected batch", 2, toolResultCount);
         boolean hasCancelled = msgs.stream().anyMatch(m ->
                 m instanceof ToolExecutionResultMessage
                         && ((ToolExecutionResultMessage) m).text().contains("CANCELLED"));
-        assertTrue("Cancelled tool should have CANCELLED text", hasCancelled);
+        assertTrue("Rejected tool should carry authorization result", msgs.stream().anyMatch(m ->
+                m instanceof ToolExecutionResultMessage && ((ToolExecutionResultMessage) m).text().contains("TOOL_NOT_AUTHORIZED")));
     }
 
     @Test

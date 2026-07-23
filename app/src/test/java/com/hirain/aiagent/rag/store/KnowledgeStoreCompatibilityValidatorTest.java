@@ -1,0 +1,12 @@
+package com.hirain.aiagent.rag.store;
+import com.hirain.aiagent.rag.store.entity.KnowledgeStoreMetadataEntity;
+import org.junit.Test;import java.util.List;import java.util.Map;import static org.junit.Assert.*;
+/** 兼容校验必须拒绝数据库 Metadata 对 Manifest 的任何关键协议漂移。 */
+public class KnowledgeStoreCompatibilityValidatorTest {
+ @Test public void rejectsEmbeddingDimensionMismatch(){var manifest=manifest();var metadata=metadata(manifest);metadata.embeddingDimension=768;var result=new KnowledgeStoreCompatibilityValidator().validate(manifest,metadata);assertFalse(result.valid());assertEquals("STORE_EMBEDDING_MISMATCH",result.reasonCode());}
+ @Test public void rejectsCountMismatch(){var manifest=manifest();var metadata=metadata(manifest);metadata.childChunkCount=3;var result=new KnowledgeStoreCompatibilityValidator().validate(manifest,metadata);assertFalse(result.valid());assertEquals("STORE_COUNT_MISMATCH",result.reasonCode());}
+ private static KnowledgeBundleManifest manifest(){return new KnowledgeBundleManifest(1,"bundle","1","scope","builder",1,"5.4.0",digest('a'),1,new KnowledgeBundleManifest.DataFile("data.mdb",1,hex('a')),new KnowledgeBundleManifest.Embedding("DashScope","text-embedding-v4",1024,"COSINE",1),new KnowledgeBundleManifest.Hnsw(digest('b'),30,100,1F,0,List.of()),Map.of("vehicleModel","M","modelYear","2026","region","CN","softwareVersion","1","configurationCode","D"),digest('c'),List.of("PDF","STATIC_HTML","MARKDOWN"),1,digest('d'),new KnowledgeBundleManifest.Corpus(digest('e'),1,Map.of("MARKDOWN",1L),1,2,3));}
+ private static String digest(char value){return "sha256:"+hex(value);}
+ private static String hex(char value){StringBuilder output=new StringBuilder(64);for(int index=0;index<64;index++)output.append(value);return output.toString();}
+ private static KnowledgeStoreMetadataEntity metadata(KnowledgeBundleManifest m){var v=new KnowledgeStoreMetadataEntity();v.formatVersion=1;v.sourceLocatorSchemaVersion=1;v.bundleId="bundle";v.bundleVersion="1";v.knowledgeScopeId="scope";v.schemaFingerprint=m.schemaFingerprint();v.embeddingProvider="DashScope";v.embeddingModel="text-embedding-v4";v.embeddingDimension=1024;v.distanceType="COSINE";v.embeddingTemplateVersion=1;v.hnswConfigFingerprint=m.hnsw().configFingerprint();v.lexicalAnalyzerVersion=1;v.parserConfigHash=m.parserConfigHash();v.chunkingConfigHash=m.chunkingConfigHash();v.corpusHash=m.corpus().corpusHash();v.documentCount=1;v.parentChunkCount=1;v.childChunkCount=2;v.lexicalTermCount=3;return v;}
+}

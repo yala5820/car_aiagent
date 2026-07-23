@@ -1,0 +1,3 @@
+package com.hirain.aiagent.rag.indexer.corpus;
+import com.hirain.aiagent.rag.indexer.cli.CliCommandException; import org.junit.jupiter.api.Test; import org.junit.jupiter.api.io.TempDir; import java.nio.file.*; import static org.junit.jupiter.api.Assertions.*;
+final class CorpusSecurityValidatorTest { @TempDir Path dir; @Test void shouldRejectOversizedFile()throws Exception{Path f=dir.resolve("x.md");Files.writeString(f,"1234");CliCommandException e=assertThrows(CliCommandException.class,()->new CorpusSecurityValidator().validateFile(f,new CorpusResourceBudget(1,3)));assertEquals("SOURCE_SIZE_LIMIT_EXCEEDED",e.reasonCode());} }

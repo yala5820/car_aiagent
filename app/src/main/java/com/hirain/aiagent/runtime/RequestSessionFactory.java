@@ -5,6 +5,8 @@ import com.hirain.aiagent.intentrouter.IntentResult;
 import com.hirain.aiagent.toolgroup.ToolGroupSelectionResult;
 import com.hirain.aiagent.trace.TraceContext;
 import com.hirain.aiagent.vision.routing.VisionIntentDecision;
+import com.hirain.aiagent.rag.policy.KnowledgeIntentDecision;
+import com.hirain.aiagent.rag.policy.KnowledgeRequestState;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -136,6 +138,14 @@ public class RequestSessionFactory {
                 sourceApp, inputType, normalizedPersonaId, clientMessageId, userInput,
                 deadline, traceContext, intentResult, toolGroupSelectionResult,
                 visionIntentDecision, context);
+    }
+
+    /** Runtime 传入一次性知识决策及同一实例状态，Tool 只能通过该 Session/执行上下文取得它。 */
+    public RequestSession createWithKnowledge(AgentRequest request, TraceContext traceContext, IntentResult intentResult,
+            ToolGroupSelectionResult selection, String resolvedSessionId, RequestDeadline deadline,
+            VisionIntentDecision vision, KnowledgeIntentDecision knowledge, KnowledgeRequestState state) {
+        RequestSession base=create(request,traceContext,intentResult,selection,resolvedSessionId,deadline,vision);
+        return new RequestSession(base.request(),base.requestId(),base.sessionId(),base.userId(),base.sourceApp(),base.inputType(),base.personaId(),base.clientMessageId(),base.userInput(),base.deadline(),base.traceContext(),base.intentResult(),base.toolGroupSelectionResult(),base.visionIntentDecision(),knowledge,state,base.orchestratorContext());
     }
 
     private static String nonEmpty(String value, String fallback) {

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "datasetVersion": "model-y-2026-refresh-pdf-html-diy-service-v4",
+  "knowledgeScopeId": "model-y-2026-cn-2026-refresh-rwd",
+  "cases": [
+    {"caseId":"basic-vehicle-warranty","query":"车辆基本有限质量保证","expectedChunkIds":["b697c1f23ce0d0fa2675455066d180c19b540eba53b9b711bb212d399cb229fa"]},
+    {"caseId":"battery-and-drive-unit-warranty","query":"电池和驱动电机有限质量保证","expectedChunkIds":["25ac79ff0d6327af8ebfcf5f1702f90a3ac3559e053157f1a45dca5af3a10b3b"]},
+    {"caseId":"seatbelt-and-airbag-warranty","query":"座椅安全带和气囊系统有限质量保证","expectedChunkIds":["8cc1566c1bbe04d2095179992f0027a92c69e50cb2b387f2503af51bc90148a1"]},
+    {"caseId":"front-passenger-airbag-for-child","query":"儿童坐在副驾驶座椅时，前排乘客安全气囊应该处于什么状态？","expectedChunkIds":["7ebd0b984efb65978c9187d55af78f2a3313f8440cd4580ea888d6f5b0ec8653"]},
+    {"caseId":"remote-climate-control-in-app","query":"如何通过 Tesla 手机应用启用或禁用暖气或空调，并查看驾驶室温度？","expectedChunkIds":["36d25ea1c55421e887bce9c15ce1d21632db4b8e618f707925947e84e1ad134f","f90bc18f5bc1cedf4b0ffeb962cbcbdb94d8f71499ff1dabe4202458164e2a2b"]},
+    {"caseId":"diy-remove-wheel-nut-cap","query":"Model Y 的轮毂螺母罩如何拆卸和安装？","expectedChunkIds":["0067b15a771e5fbf35d163fdd9c1798c05e5e1a6ab051087b6d91c65f4311849"]},
+    {"caseId":"diy-charge-port-light","query":"充电端口状态指示灯代表什么？","expectedChunkIds":["0b5f5a3f8c137e82efb98c15a1351144920e1eac7f9cc20cd9fa3fba3d7a4bf6"]},
+    {"caseId":"diy-cabin-air-filter-cn-interval","query":"在中国大陆，Model Y 的空调滤清器建议多久更换一次？","expectedChunkIds":["b2fde67ea600d265143f9930c8b26a18931b98f70d5a8bd1c75f00cef327dc2f"]},
+    {"caseId":"diy-tire-pressure-location","query":"Model Y 在哪里查看胎压和推荐冷胎压力？","expectedChunkIds":["6bdf5a069c377bab090d5b113d6422f19ebe7adb6f656a4a57ad29a2b0239b31"]},
+    {"caseId":"diy-roof-rack-installation","query":"安装 Model Y 车顶行李架前有什么要求和步骤？","expectedChunkIds":["3350c527d239713ee1f5a5eede04d023acc9ae1e4faab5b7fd14d4b042357d09"]},
+    {"caseId":"diy-wiper-blade-size","query":"Model Y 雨刮器片的尺寸以及更换前要进入什么模式？","expectedChunkIds":["ba943fb0edcd0a1f4b22241b3647db9d12e4bcc42f695a0dc4d014aaeb6146d3"]},
+    {"caseId":"diy-door-handle-ice","query":"冬天车门把手结冰时应如何处理？","expectedChunkIds":["c82bf56b2767c4b78d7e4adbc307d1aa10a4f8ecad1c87b3b49f2d286c0cec56"]},
+    {"caseId":"diy-bluetooth-troubleshooting","query":"手机蓝牙连接或配对出现问题时如何排查？","expectedChunkIds":["09b9fab7060a62e735bbb6f1aef1361bffb6f42c280fa0b5faede46317151575"]},
+    {"caseId":"diy-brake-fluid-check","query":"如何检查 Model Y 的制动液？","expectedChunkIds":["4a05e07f022907ed7d6ac9f0cb67c2ced61a450dbfda08b03d1285730a01fce0"]},
+    {"caseId":"diy-phone-app-unlock-start","query":"如何使用手机应用程序解锁并启动车辆？","expectedChunkIds":["b259b471b436f3b9780925fd8b95e756660935dc65f7148a7018afedc67ff3ec"]},
+    {"caseId":"diy-service-appointment","query":"如何预约 Tesla 维修服务？","expectedChunkIds":["da6e59dfd260e4df0c2da45c937a32574738769756eb8f7b330ee82b1170538d"]},
+    {"caseId":"diy-hepa-filter","query":"如何更换 Model Y 的 HEPA 空调滤清器？","expectedChunkIds":["01d34da0abaa8ac2c6ecd9b20a5d890858c8a1f2569eca6a2396b5a12424eae5"]},
+    {"caseId":"diy-front-headrest","query":"前排座椅头枕如何拆卸和重新安装？","expectedChunkIds":["c71321784920b9654e2d0598ddbf1e144bc365935b29c1e21c20c30ef7bfffd8"]},
+    {"caseId":"service-center-beijing-liuliqiao","query":"北京六里桥特斯拉中心的地址和服务中心电话是什么？","expectedChunkIds":["a739d11065dbf2b97a96a7266acdd90972a1b576e65b90f130710f140c6aca56"]},
+    {"caseId":"service-center-shanghai-jinqiao","query":"上海金桥特斯拉中心的地址和服务中心电话是什么？","expectedChunkIds":["479360f291bc8a9e5cad933745565cd403ced5b7f4c64db933e55bc279eee563"]}
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "template": "文档：{documentTitle}\n位置：{headingPath}\n类型：{chunkType}\n内容：{content}",
+  "cases": [{"id": "maintenance-brake-fluid", "documentTitle": "车辆保养手册", "headingPath": "保养 > 制动系统", "chunkType": "PROCEDURE", "content": "每 24 个月检查制动液。", "expected": "文档：车辆保养手册\n位置：保养 > 制动系统\n类型：PROCEDURE\n内容：每 24 个月检查制动液。"}]
+}

@@ -56,7 +56,8 @@ public class RuntimeResponseMapper {
             response.setErrorDetail(result.errorDetail());
         } else if ("EXCEPTION".equals(result.errorType())) {
             response.setSuccess(false);
-            response.setText("系统: 请求失败 - " + (result.errorDetail() != null ? result.errorDetail() : "未知错误"));
+            // 异常详情可能包含 HTTP Body、文件路径或堆栈，只能留在受控日志/Trace。
+            response.setText("系统: 请求暂时无法完成，请稍后重试。");
             response.setErrorType("EXCEPTION");
             response.setStatus("EXCEPTION");
             response.setErrorDetail(result.errorDetail());
@@ -108,14 +109,44 @@ public class RuntimeResponseMapper {
             String detail = result.errorDetail() != null ? result.errorDetail() : "记忆压缩执行失败";
             response.setErrorDetail(detail);
             response.setText("系统: " + detail);
+        } else if (isKnowledgeProtocolError(result.errorType())) {
+            response.setSuccess(false);
+            response.setText("系统: 车辆知识回答校验未通过，请重新提问。");
+            response.setErrorType(result.errorType());
+            response.setStatus(result.errorType());
+            response.setErrorDetail(result.errorDetail());
+        } else if (isKnowledgeAvailabilityError(result.errorType())) {
+            response.setSuccess(false);
+            response.setText("系统: 当前无法获取适用的车辆资料。");
+            response.setErrorType(result.errorType());
+            response.setStatus(result.errorType());
+            response.setErrorDetail(result.errorDetail());
         } else {
             response.setSuccess(false);
-            response.setText(result.errorDetail() != null ? result.errorDetail() : "请求失败");
+            response.setText("系统: 请求暂时无法完成，请稍后重试。");
             response.setErrorType(result.errorType());
             response.setStatus(result.errorType());
             response.setErrorDetail(result.errorDetail());
         }
 
         return response;
+    }
+
+    private static boolean isKnowledgeProtocolError(String code) {
+        return "KNOWLEDGE_TOOL_NOT_CALLED".equals(code)
+                || "TOOL_NOT_AUTHORIZED".equals(code)
+                || "KNOWLEDGE_CITATION_INVALID".equals(code);
+    }
+
+    private static boolean isKnowledgeAvailabilityError(String code) {
+        return "KNOWLEDGE_STORE_INITIALIZING".equals(code)
+                || "KNOWLEDGE_STORE_UNAVAILABLE".equals(code)
+                || "PROFILE_INCOMPLETE".equals(code)
+                || "KNOWLEDGE_SCOPE_MISMATCH".equals(code)
+                || "QUERY_EMPTY".equals(code)
+                || "QUERY_TOO_LONG".equals(code)
+                || "EMBEDDING_UNAVAILABLE".equals(code)
+                || "RERANK_UNAVAILABLE".equals(code)
+                || "BUNDLE_INVALID".equals(code);
     }
 }

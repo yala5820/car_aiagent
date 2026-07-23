@@ -10,6 +10,8 @@ public final class RequestDeadline {
 
     public static final long DEFAULT_TIMEOUT_MS = 30_000L;
     public static final long VISION_TIMEOUT_MS = 60_000L;
+    /** 知识检索与最终回答共享的端到端 60 秒绝对期限。 */
+    public static final long KNOWLEDGE_TIMEOUT_MS = 60_000L;
 
     private final long startedAtMs;
     private final long deadlineAtMs;
@@ -29,6 +31,7 @@ public final class RequestDeadline {
     public static RequestDeadline vision(long startedAtMs) {
         return new RequestDeadline(startedAtMs, VISION_TIMEOUT_MS);
     }
+    public static RequestDeadline knowledge(long startedAtMs) { return new RequestDeadline(startedAtMs, KNOWLEDGE_TIMEOUT_MS); }
 
     public long remainingMs(long nowMs) {
         return Math.max(0L, deadlineAtMs - nowMs);

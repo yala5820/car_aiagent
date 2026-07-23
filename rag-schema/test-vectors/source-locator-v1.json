@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "cases": [
+    {"id": "pdf", "sourceFormat": "PDF", "pdfPageStart": 12, "pdfPageEnd": 13, "printedPageStartLabel": "10", "printedPageEndLabel": "11", "htmlElementId": "", "sourceLineStart": 0, "sourceLineEnd": 0},
+    {"id": "static-html", "sourceFormat": "STATIC_HTML", "pdfPageStart": 0, "pdfPageEnd": 0, "htmlElementId": "maintenance-brakes", "sourceLineStart": 0, "sourceLineEnd": 0},
+    {"id": "markdown", "sourceFormat": "MARKDOWN", "pdfPageStart": 0, "pdfPageEnd": 0, "htmlElementId": "", "sourceLineStart": 41, "sourceLineEnd": 49}
+  ],
+  "zeroMeans": "NOT_APPLICABLE_STORED_AS_ZERO"
+}

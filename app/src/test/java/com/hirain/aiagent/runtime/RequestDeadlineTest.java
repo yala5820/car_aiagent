@@ -19,6 +19,7 @@ public class RequestDeadlineTest {
         assertFalse(deadline.isExpired(30_999L));
         assertTrue(deadline.isExpired(31_000L));
     }
+    @Test public void knowledgeDeadlineUsesSameSixtySecondAbsoluteSemanticsAsVision() { RequestDeadline deadline=RequestDeadline.knowledge(1_000L);assertEquals(61_000L,deadline.deadlineAtMs());assertEquals(RequestDeadline.VISION_TIMEOUT_MS,RequestDeadline.KNOWLEDGE_TIMEOUT_MS); }
 
     @Test(expected = IllegalArgumentException.class)
     public void rejectsNonPositiveTimeout() {

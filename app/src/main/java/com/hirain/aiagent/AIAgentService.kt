@@ -60,6 +60,29 @@ import com.hirain.aiagent.tools.vehicle.seat.VehicleSeatManager
 import com.hirain.aiagent.tools.vehicle.speed.VehicleSpeedManager
 import com.hirain.aiagent.tools.vehicle.window.VehicleWindowManager
 import com.hirain.aiagent.VirtualStateMachine.VehicleStateMachine
+import com.hirain.aiagent.rag.store.KnowledgeStoreCoordinator
+import com.hirain.aiagent.rag.store.KnowledgeStoreManager
+import com.hirain.aiagent.rag.VehicleKnowledgeService
+import com.hirain.aiagent.rag.cloud.DashScopeQueryEmbeddingClient
+import com.hirain.aiagent.rag.cloud.DashScopeRerankClient
+import com.hirain.aiagent.rag.cloud.RagHttpCallExecutor
+import com.hirain.aiagent.rag.cloud.RerankRequestBudgeter
+import com.hirain.aiagent.rag.config.RagBudgetConfig
+import com.hirain.aiagent.rag.config.RagRetrievalConfig
+import com.hirain.aiagent.rag.policy.AnswerabilityPolicy
+import com.hirain.aiagent.rag.policy.EvidenceBudgetPolicy
+import com.hirain.aiagent.rag.policy.EvidenceDeduplicator
+import com.hirain.aiagent.rag.policy.EvidenceSelector
+import com.hirain.aiagent.rag.profile.VehicleStateMachineVehicleProfileProvider
+import com.hirain.aiagent.rag.ranking.ReciprocalRankFusion
+import com.hirain.aiagent.rag.ranking.RerankCoordinator
+import com.hirain.aiagent.rag.retrieval.CjkLatinLexicalAnalyzer
+import com.hirain.aiagent.rag.retrieval.HybridRetrievalCoordinator
+import com.hirain.aiagent.rag.retrieval.MetadataEligibilityPolicy
+import com.hirain.aiagent.rag.retrieval.ObjectBoxDenseSearcher
+import com.hirain.aiagent.rag.retrieval.ObjectBoxLexicalSearcher
+import com.hirain.aiagent.rag.retrieval.QueryNormalizer
+import com.hirain.aiagent.tools.knowledge.VehicleKnowledgeTool
 import com.hirain.aiagent.eval.EvalEnvironmentCoordinator
 import com.hirain.aiagent.eval.EvalEnvironmentRegistry
 import com.hirain.aiagent.eval.EvalRequestPermit
@@ -91,18 +114,24 @@ import java.util.TimeZone
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import okhttp3.OkHttpClient as NativeOkHttpClient
 
 class AIAgentService : Service() {
     private val mIAIAgentAidlListeners:  MutableMap<IAIAgentAidlListener, DeathRecipient> = mutableMapOf()
     private var mLastScence:String = ""
     private var mLastDesc:String = ""
     private val mBinder: AIAgentService.AIAgentBinder = AIAgentBinder()
+    /** onDestroy 开始后拒绝新请求，避免关闭中的 Store 被新知识检索重新使用。 */
+    private val serviceStopping = AtomicBoolean(false)
     private var m_connected = false
     private var promptManager: PromptManager? = null
     private lateinit var toolRegistry: ToolRegistry
     private lateinit var memoryOrchestrator: MemoryOrchestrator
     private lateinit var contextOrchestrator: ContextOrchestrator
     private lateinit var vehicleStateMachine: VehicleStateMachine
+    private lateinit var knowledgeStoreCoordinator: KnowledgeStoreCoordinator
+    private lateinit var knowledgeStoreManager: KnowledgeStoreManager
+    private lateinit var vehicleKnowledgeService: VehicleKnowledgeService
     private var evalEnvironmentCoordinator: EvalEnvironmentCoordinator? = null
     private lateinit var toolSafetyEngine: ToolSafetyEngine
     private lateinit var toolConfirmationCoordinator: ToolConfirmationCoordinator
@@ -354,6 +383,10 @@ class AIAgentService : Service() {
 
         // ── 虚拟车辆状态机 ──
         vehicleStateMachine = VehicleStateMachine()
+        // RAG Bundle 安装独占后台线程；开发构建无 main Asset 时只降级知识能力，不影响 Service 启动。
+        knowledgeStoreManager = KnowledgeStoreManager()
+        knowledgeStoreCoordinator = KnowledgeStoreCoordinator(this, knowledgeStoreManager)
+        knowledgeStoreCoordinator.initializeAsync(vehicleStateMachine.vehicleProfileSnapshot(System.currentTimeMillis()))
 
         // ── 全 Persona 共用的确定性 Tool 安全引擎 ──
         toolSafetyEngine = ToolSafetyEngine(
@@ -380,11 +413,39 @@ class AIAgentService : Service() {
         )
         val weatherUtils = WeatherUtils(BuildConfig.WEATHER_API_KEY)
 
+        // RAG 依赖均为 Service 单例；每次实际调用仍从 RequestExecutionContext 读取 requestId/deadline，
+        // 因此不会创建第二套取消注册表，也不会让模型提供 Profile 或 Scope。
+        val retrievalConfig = RagRetrievalConfig.v1()
+        val budgetConfig = RagBudgetConfig.v1()
+        val eligibility = MetadataEligibilityPolicy()
+        val cloudExecutor = RagHttpCallExecutor(NativeOkHttpClient(), requestCallRegistry, 8_000L)
+        val dashScopeBaseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        val retrievalCoordinator = HybridRetrievalCoordinator(
+            CjkLatinLexicalAnalyzer(),
+            ObjectBoxLexicalSearcher(eligibility, retrievalConfig),
+            ObjectBoxDenseSearcher(eligibility),
+            DashScopeQueryEmbeddingClient(cloudExecutor, dashScopeBaseUrl, 20_000L),
+            ReciprocalRankFusion(retrievalConfig.rrfK()),
+            DashScopeRerankClient(cloudExecutor, RerankRequestBudgeter(budgetConfig.rerankMaxCharacters()),
+                "$dashScopeBaseUrl/reranks", 20_000L, retrievalConfig.rerankTopK()),
+            RerankCoordinator()
+        )
+        vehicleKnowledgeService = VehicleKnowledgeService(
+            knowledgeStoreManager,
+            VehicleStateMachineVehicleProfileProvider(vehicleStateMachine),
+            QueryNormalizer(retrievalConfig),
+            retrievalCoordinator,
+            EvidenceSelector(EvidenceDeduplicator(), EvidenceBudgetPolicy(budgetConfig.evidenceMaxCharacters())),
+            AnswerabilityPolicy(),
+            requestCallRegistry
+        )
+        val vehicleKnowledgeTool = VehicleKnowledgeTool(vehicleKnowledgeService)
+
         toolRegistry = ToolRegistry().apply {
             registerAll(
                 weatherUtils, doorManager, windowManager, seatManager,
                 acManager, chassisManager, fragManager,
-                dmsManager, frontViewVisionTool
+                dmsManager, frontViewVisionTool, vehicleKnowledgeTool
             )
         }
         toolConfirmationCoordinator = ToolConfirmationCoordinator(
@@ -494,6 +555,15 @@ class AIAgentService : Service() {
     }
 
     override fun onDestroy() {
+        // 释放顺序：先停止准入并取消当前网络调用，再关闭 Store 与后台线程。
+        serviceStopping.set(true)
+        activeRequestRegistry.current()?.requestId()?.let { requestId ->
+            activeRequestRegistry.cancel(requestId, "service_destroyed", System.currentTimeMillis())
+            requestCallRegistry.cancel(requestId)
+        }
+        if (::knowledgeStoreCoordinator.isInitialized) {
+            knowledgeStoreCoordinator.close()
+        }
         evalEnvironmentCoordinator?.let { coordinator ->
             EvalEnvironmentRegistry.uninstall(coordinator)
             coordinator.shutdown()
@@ -551,6 +621,14 @@ class AIAgentService : Service() {
         @Throws(RemoteException::class)
         override fun processAgentRequest(request: AgentRequest?) {
             if (request == null) return
+            if (serviceStopping.get()) {
+                val response = RuntimeResult.busy(
+                    ensureRequestId(request), request.sessionId, normalizeUserId(request),
+                    normalizeTextPersona(normalizePersonaId(request)), request.clientMessageId,
+                    System.currentTimeMillis())
+                notifyAIAgentListeners(runtimeResponseMapper.toAgentResponse(response))
+                return
+            }
             Log.d("TAG", "processAgentRequest: type=${request.inputType} id=${request.requestId}")
 
             val callingUid = Binder.getCallingUid()
@@ -826,7 +904,8 @@ class AIAgentService : Service() {
                     request.extraContext?.get("vision_demo_image_id")
                 } else null
                 val executionScope = RequestExecutionContext.bind(
-                    requestId, effectiveDeadline, runtimeSession.userInput(), visionDemoImageId)
+                    requestId, effectiveDeadline, runtimeSession.userInput(), visionDemoImageId,
+                    runtimeSession.knowledgeIntentDecision(), runtimeSession.knowledgeRequestState(), session)
                 try {
                     if (activeRequest.state() != ActiveRequest.TerminalState.RUNNING) {
                         return@post
@@ -945,7 +1024,7 @@ class AIAgentService : Service() {
 
         val posted = mTextWorkHandler?.post {
             val traceScope = traceSession.makeCurrent()
-            val executionScope = RequestExecutionContext.bind(requestId, deadline)
+            val executionScope = RequestExecutionContext.bind(requestId, deadline, null, null, null, null, traceSession)
             try {
                 if (activeRequest.state() != ActiveRequest.TerminalState.RUNNING) return@post
                 // 当前只支持一个 Session；请求未显式携带 id 时使用待确认动作所属 session。

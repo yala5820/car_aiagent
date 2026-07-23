@@ -1,6 +1,7 @@
 package com.hirain.aiagent.runtime;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -36,7 +37,7 @@ public class RuntimeResponseMapperTest {
 
         assertEquals(false, response.isSuccess());
         assertNull(response.getSessionId());
-        assertEquals("系统: 请求失败 - boom", response.getText());
+        assertEquals("系统: 请求暂时无法完成，请稍后重试。", response.getText());
         assertEquals("EXCEPTION", response.getErrorType());
         assertEquals("EXCEPTION", response.getStatus());
     }
@@ -57,7 +58,7 @@ public class RuntimeResponseMapperTest {
                 "UNKNOWN", "出错了", 2000L);
         AgentResponse response = new RuntimeResponseMapper().toAgentResponse(failure);
 
-        assertEquals("出错了", response.getText());
+        assertEquals("系统: 请求暂时无法完成，请稍后重试。", response.getText());
         assertEquals("UNKNOWN", response.getErrorType());
         assertEquals("UNKNOWN", response.getStatus());
     }
@@ -96,5 +97,16 @@ public class RuntimeResponseMapperTest {
 
         assertEquals("DUPLICATE_REQUEST", response.getErrorType());
         assertEquals("DUPLICATE_REQUEST", response.getStatus());
+    }
+
+    @Test
+    public void toAgentResponse_keepsKnowledgeCodesButNeverLeaksInternalDetail() {
+        RuntimeResult failure = RuntimeResult.failure("req", "session", "user", "chat", "client",
+                "KNOWLEDGE_CITATION_INVALID", "D:\\private\\data.mdb body=secret", 2_000L);
+        AgentResponse response = new RuntimeResponseMapper().toAgentResponse(failure);
+
+        assertEquals("KNOWLEDGE_CITATION_INVALID", response.getErrorType());
+        assertEquals("系统: 车辆知识回答校验未通过，请重新提问。", response.getText());
+        assertFalse(response.getText().contains("data.mdb"));
     }
 }

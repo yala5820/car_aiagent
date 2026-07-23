@@ -1,0 +1,3 @@
+package com.hirain.aiagent.rag.indexer.parser;
+import com.hirain.aiagent.rag.indexer.model.SourceFormat; import org.junit.jupiter.api.Test; import java.util.List; import static org.junit.jupiter.api.Assertions.*;
+final class DocumentParserRegistryTest { @Test void shouldRequireExactRegisteredFormat(){DocumentParser p=()->SourceFormat.MARKDOWN;DocumentParserRegistry r=new DocumentParserRegistry(List.of(p));assertSame(p,r.require(SourceFormat.MARKDOWN));assertThrows(IllegalArgumentException.class,()->r.require(SourceFormat.PDF));} @Test void shouldRejectDuplicateFormat(){DocumentParser p=()->SourceFormat.PDF;assertThrows(IllegalArgumentException.class,()->new DocumentParserRegistry(List.of(p,p)));} }

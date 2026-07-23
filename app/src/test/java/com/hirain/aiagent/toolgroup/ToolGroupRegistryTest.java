@@ -18,6 +18,7 @@ import com.hirain.aiagent.tools.vehicle.seat.VehicleSeatManager;
 import com.hirain.aiagent.tools.vehicle.speed.VehicleSpeedManager;
 import com.hirain.aiagent.tools.vehicle.window.VehicleWindowManager;
 import com.hirain.aiagent.tools.vision.FrontViewVisionTool;
+import com.hirain.aiagent.tools.knowledge.VehicleKnowledgeTool;
 
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.agent.tool.ToolSpecifications;
@@ -30,7 +31,7 @@ public class ToolGroupRegistryTest {
 
     @Test
     public void toolGroupId_containsFirstVersionIds() {
-        assertEquals(13, ToolGroupId.values().length);
+        assertEquals(14, ToolGroupId.values().length);
         assertEquals(ToolGroupId.CHAT_ONLY_GROUP, ToolGroupId.valueOf("CHAT_ONLY_GROUP"));
         assertEquals(ToolGroupId.BASIC_STATUS_GROUP, ToolGroupId.valueOf("BASIC_STATUS_GROUP"));
         assertEquals(ToolGroupId.AC_GROUP, ToolGroupId.valueOf("AC_GROUP"));
@@ -42,6 +43,7 @@ public class ToolGroupRegistryTest {
         assertEquals(ToolGroupId.DMS_GROUP, ToolGroupId.valueOf("DMS_GROUP"));
         assertEquals(ToolGroupId.WEATHER_GROUP, ToolGroupId.valueOf("WEATHER_GROUP"));
         assertEquals(ToolGroupId.VISION_GROUP, ToolGroupId.valueOf("VISION_GROUP"));
+        assertEquals(ToolGroupId.VEHICLE_KNOWLEDGE_GROUP, ToolGroupId.valueOf("VEHICLE_KNOWLEDGE_GROUP"));
         assertEquals(ToolGroupId.COMMON_VEHICLE_GROUP, ToolGroupId.valueOf("COMMON_VEHICLE_GROUP"));
         assertEquals(ToolGroupId.ALL_SAFE_DEMO_GROUP, ToolGroupId.valueOf("ALL_SAFE_DEMO_GROUP"));
     }
@@ -96,10 +98,10 @@ public class ToolGroupRegistryTest {
     }
 
     @Test
-    public void defaultRegistry_allThirteenGroupsRegistered() {
+    public void defaultRegistry_allFourteenGroupsRegistered() {
         ToolGroupRegistry registry = ToolGroupRegistry.defaultRegistry();
 
-        assertEquals(13, registry.allGroups().size());
+        assertEquals(14, registry.allGroups().size());
         for (ToolGroupId id : ToolGroupId.values()) {
             assertNotNull("Missing group: " + id, registry.group(id));
         }
@@ -466,7 +468,8 @@ public class ToolGroupRegistryTest {
                 VehicleFragManager.class,
                 VehicleSpeedManager.class,
                 VehicleDMSManager.class,
-                FrontViewVisionTool.class
+                FrontViewVisionTool.class,
+                VehicleKnowledgeTool.class
         );
         java.util.Set<String> allRealNames = new java.util.LinkedHashSet<>();
         List<ToolSpecification> realSpecs = new java.util.ArrayList<>();

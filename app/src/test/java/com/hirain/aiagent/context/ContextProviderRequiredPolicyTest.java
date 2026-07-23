@@ -141,6 +141,25 @@ public class ContextProviderRequiredPolicyTest {
         }
     }
 
+    @Test
+    public void promptProvider_knowledgeGroundingIsRequiredOnlyForKnowledgeRequest() {
+        PromptManager pm = new PromptManager(null) {
+            @Override public String render(String name) { return "prompt:" + name; }
+        };
+        ContextBuildInput input = ContextBuildInput.builder().promptManager(pm).build();
+        PromptContextProvider provider = new PromptContextProvider();
+
+        TextContextContribution ordinary = (TextContextContribution) provider.provide(
+                TestRequestSessions.chatOnlySession("r", "c", "u", "chat", "cl", "你好"), input)
+                .contributions().get(0);
+        TextContextContribution knowledge = (TextContextContribution) provider.provide(
+                TestRequestSessions.requiredKnowledgeSession("r-k", "c-k", "车辆空调如何开启"), input)
+                .contributions().get(0);
+
+        assertFalse(ordinary.content().contains("vehicle_knowledge_grounding_policy"));
+        assertTrue(knowledge.content().contains("vehicle_knowledge_grounding_policy"));
+    }
+
     // ═══════════════════════════════════════════
     // ToolGroupContextProvider 内容测试
     // ═══════════════════════════════════════════

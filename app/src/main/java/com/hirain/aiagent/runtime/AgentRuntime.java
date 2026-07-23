@@ -26,6 +26,11 @@ import com.hirain.aiagent.vision.routing.RuleBasedVisionIntentPolicy;
 import com.hirain.aiagent.vision.routing.VisionIntentDecision;
 import com.hirain.aiagent.vision.routing.VisionIntentPolicy;
 import com.hirain.aiagent.vision.routing.VisionRequirement;
+import com.hirain.aiagent.rag.policy.KnowledgeCapabilityPlanner;
+import com.hirain.aiagent.rag.policy.KnowledgeIntentDecision;
+import com.hirain.aiagent.rag.policy.KnowledgeNeedDetector;
+import com.hirain.aiagent.rag.policy.KnowledgeRequestState;
+import com.hirain.aiagent.rag.policy.RuleBasedKnowledgeNeedDetector;
 
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.Tracer;
@@ -56,6 +61,8 @@ public class AgentRuntime {
     private final SessionIdResolver sessionIdResolver;
     private final VisionIntentPolicy visionIntentPolicy;
     private final RequestDeadlinePolicy requestDeadlinePolicy;
+    private final KnowledgeNeedDetector knowledgeNeedDetector;
+    private final KnowledgeCapabilityPlanner knowledgeCapabilityPlanner;
 
     // ── 默认 ContextOrchestrator ──
 
@@ -214,6 +221,8 @@ public class AgentRuntime {
                 ? visionIntentPolicy : new RuleBasedVisionIntentPolicy();
         this.requestDeadlinePolicy = requestDeadlinePolicy != null
                 ? requestDeadlinePolicy : new RequestDeadlinePolicy();
+        this.knowledgeNeedDetector = new RuleBasedKnowledgeNeedDetector();
+        this.knowledgeCapabilityPlanner = new KnowledgeCapabilityPlanner();
     }
 
     // ── Session 创建 ──
@@ -233,14 +242,16 @@ public class AgentRuntime {
                                        RequestDeadline requestDeadline) {
         IntentResult intentResult = routeIntentSafely(request);
         VisionIntentDecision visionDecision = decideVisionSafely(request, intentResult);
+        KnowledgeIntentDecision knowledgeDecision = decideKnowledgeSafely(request, intentResult);
         ToolGroupSelectionResult toolGroupSelectionResult = selectToolGroupsSafely(intentResult, request);
         toolGroupSelectionResult = applyVisionDecision(visionDecision, intentResult, toolGroupSelectionResult);
+        toolGroupSelectionResult = knowledgeCapabilityPlanner.plan(knowledgeDecision, visionDecision, toolGroupSelectionResult);
         long startedAtMs = requestDeadline != null ? requestDeadline.startedAtMs() : timeProvider.nowMillis();
         // 过期准入 deadline 是既有失败关闭信号，绝不能因为视觉规划重新获得 30/60 秒。
         RequestDeadline effectiveDeadline = requestDeadline != null
                 && requestDeadline.isExpired(timeProvider.nowMillis())
                 ? requestDeadline
-                : requestDeadlinePolicy.resolve(startedAtMs, visionDecision, toolGroupSelectionResult);
+                : requestDeadlinePolicy.resolve(startedAtMs, knowledgeDecision, visionDecision, toolGroupSelectionResult);
         writeIntentToTrace(traceContext, intentResult);
         writeToolGroupsToTrace(traceContext, toolGroupSelectionResult);
         writeVisionDecisionToTrace(traceContext, visionDecision, effectiveDeadline);
@@ -248,8 +259,9 @@ public class AgentRuntime {
         // 在构建 Context 前解析 resolvedSessionId
         String resolvedSessionId = resolveSessionIdSafely(request);
 
-        RequestSession session = sessionFactory.create(request, traceContext,
-                intentResult, toolGroupSelectionResult, resolvedSessionId, effectiveDeadline, visionDecision);
+        RequestSession session = sessionFactory.createWithKnowledge(request, traceContext,
+                intentResult, toolGroupSelectionResult, resolvedSessionId, effectiveDeadline, visionDecision,
+                knowledgeDecision, new KnowledgeRequestState());
         writeRequestMetaToTrace(traceContext, session);
         return session;
     }
@@ -454,6 +466,10 @@ public class AgentRuntime {
         } catch (Exception e) {
             return VisionIntentDecision.none("vision_policy_exception");
         }
+    }
+    private KnowledgeIntentDecision decideKnowledgeSafely(AgentRequest request, IntentResult intentResult) {
+        try { return knowledgeNeedDetector.decide(request != null ? request.getText() : "", intentResult); }
+        catch (Exception ignored) { return KnowledgeIntentDecision.none("knowledge_detector_exception"); }
     }
 
     /** 将视觉策略收敛为最小权限工具集合，不改变 ToolGroupSelector 的二参 SAM。 */

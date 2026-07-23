@@ -1,0 +1,12 @@
+{
+  "fixture" : true,
+  "publishable" : false,
+  "source" : "synthetic-controlled-data",
+  "generationCommand" : "gradlew.bat generateObjectBoxFixture",
+  "schemaFingerprint" : "sha256:453278ef0c1d17c8f799f2af9dc4142a802ae87bd8db381e0392bf5eb1606b4c",
+  "sourceFormats" : [ "PDF", "STATIC_HTML", "MARKDOWN" ],
+  "documentCount" : 3,
+  "parentChunkCount" : 3,
+  "childChunkCount" : 3,
+  "lexicalTermCount" : 1
+}

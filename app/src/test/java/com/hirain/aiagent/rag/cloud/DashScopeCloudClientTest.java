@@ -1,0 +1,23 @@
+package com.hirain.aiagent.rag.cloud;
+
+import com.hirain.aiagent.runtime.RequestCallRegistry;
+import com.hirain.aiagent.runtime.RequestDeadline;
+import java.util.List;
+import okhttp3.OkHttpClient;
+import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.MockWebServer;
+import org.junit.Test;
+import static org.junit.Assert.*;
+
+/** MockWebServer 覆盖云调用协议，不依赖真实 Key、网络或车辆信息。 */
+public class DashScopeCloudClientTest {
+    @Test public void embeddingSendsOnlyNormalizedQueryAndValidatesVector() throws Exception {
+        try(MockWebServer server=new MockWebServer()){server.start();server.enqueue(new MockResponse().setResponseCode(200).setBody(embeddingResponse()));RequestCallRegistry registry=new RequestCallRegistry();QueryEmbeddingClient client=new DashScopeQueryEmbeddingClient(new RagHttpCallExecutor(new OkHttpClient(),registry,0),server.url("/").toString(),5_000);float[] vector=client.embed("request","brake fluid",new RequestDeadline(System.currentTimeMillis(),5_000));assertEquals(1024,vector.length);String body=server.takeRequest().getBody().readUtf8();assertTrue(body.contains("brake fluid"));assertFalse(body.contains("VIN"));assertFalse(body.contains("vehicleModel"));}
+    }
+    @Test public void cancellationBeforeCallIsRespected() throws Exception { try(MockWebServer server=new MockWebServer()){server.start();RequestCallRegistry registry=new RequestCallRegistry();registry.cancel("request");QueryEmbeddingClient client=new DashScopeQueryEmbeddingClient(new RagHttpCallExecutor(new OkHttpClient(),registry,0),server.url("/").toString(),5_000);try{client.embed("request","brake",new RequestDeadline(System.currentTimeMillis(),5_000));fail("取消后的调用不得发送");}catch(RagCloudException expected){assertEquals("REQUEST_CANCELLED",expected.reasonCode());}} }
+    @Test public void expiredDeadlineDoesNotStartCloudCall() throws Exception {try(MockWebServer server=new MockWebServer()){server.start();QueryEmbeddingClient client=new DashScopeQueryEmbeddingClient(new RagHttpCallExecutor(new OkHttpClient(),new RequestCallRegistry(),0),server.url("/").toString(),5_000);try{client.embed("request","brake",new RequestDeadline(System.currentTimeMillis()-10L,1L));fail("截止时间耗尽后不得调用云端");}catch(RagCloudException expected){assertEquals("DEADLINE_EXCEEDED",expected.reasonCode());}assertEquals(0,server.getRequestCount());}}
+    @Test public void retriesOnlyTransientServerFailureWithinSameDeadline() throws Exception {try(MockWebServer server=new MockWebServer()){server.start();server.enqueue(new MockResponse().setResponseCode(503));server.enqueue(new MockResponse().setResponseCode(200).setBody(embeddingResponse()));QueryEmbeddingClient client=new DashScopeQueryEmbeddingClient(new RagHttpCallExecutor(new OkHttpClient(),new RequestCallRegistry(),0,1),server.url("/").toString(),5_000);assertEquals(1024,client.embed("request","brake",new RequestDeadline(System.currentTimeMillis(),5_000)).length);assertEquals(2,server.getRequestCount());}}
+    @Test public void rerankRejectsDuplicateResponseIndexes() throws Exception {try(MockWebServer server=new MockWebServer()){server.start();server.enqueue(new MockResponse().setResponseCode(200).setBody("{\"results\":[{\"index\":0,\"relevance_score\":0.9},{\"index\":0,\"relevance_score\":0.8}]}"));RerankClient client=new DashScopeRerankClient(new RagHttpCallExecutor(new OkHttpClient(),new RequestCallRegistry(),0),new RerankRequestBudgeter(100),server.url("rerank").toString(),5_000,5);try{client.rerank("request","brake",List.of(new RerankCandidate("H","text")),new RequestDeadline(System.currentTimeMillis(),5_000));fail("重复索引必须失败");}catch(RagCloudException expected){assertEquals("RERANK_RESPONSE_INVALID",expected.reasonCode());}}}
+    @Test public void rerankPayloadExcludesVehicleIdentityAndDynamicState() throws Exception {try(MockWebServer server=new MockWebServer()){server.start();server.enqueue(new MockResponse().setResponseCode(200).setBody("{\"results\":[{\"index\":0,\"relevance_score\":0.9}]}"));RerankClient client=new DashScopeRerankClient(new RagHttpCallExecutor(new OkHttpClient(),new RequestCallRegistry(),0),new RerankRequestBudgeter(100),server.url("rerank").toString(),5_000,5);assertEquals(1,client.rerank("request","brake",List.of(new RerankCandidate("制动系统","检查制动液")),new RequestDeadline(System.currentTimeMillis(),5_000)).size());String body=server.takeRequest().getBody().readUtf8();assertFalse(body.contains("VIN"));assertFalse(body.contains("vehicleModel"));assertFalse(body.contains("speed"));}}
+    private static String embeddingResponse(){StringBuilder values=new StringBuilder();for(int index=0;index<1024;index++){if(index>0)values.append(',');values.append("0.1");}return "{\"data\":[{\"index\":0,\"embedding\":["+values+"]}]}";}
+}

@@ -11,6 +11,7 @@ import com.hirain.aiagent.context.ContextVisibility;
 import com.hirain.aiagent.context.TextContextContribution;
 import com.hirain.aiagent.prompt.PromptConstants;
 import com.hirain.aiagent.runtime.RequestSession;
+import com.hirain.aiagent.rag.policy.KnowledgeRequirement;
 import com.hirain.aiagent.vision.routing.VisionRequirement;
 
 import java.util.List;
@@ -57,6 +58,16 @@ public class PromptContextProvider implements ContextProvider {
                         PromptConstants.MSG_FRONT_VIEW_GROUNDING_POLICY);
                 if (grounding == null || grounding.trim().isEmpty()) {
                     return ContextProviderResult.failure(name(), "vision grounding prompt is empty",
+                            ContextErrorCode.REQUIRED_PROVIDER_FAILED);
+                }
+                promptText = promptText + "\n\n" + grounding;
+            }
+            // 知识检索的回答必须可回溯到本轮 Evidence，普通对话不注入该约束。
+            if (session.knowledgeIntentDecision().requirement() == KnowledgeRequirement.REQUIRED) {
+                String grounding = input.promptManager().render(
+                        PromptConstants.MSG_VEHICLE_KNOWLEDGE_GROUNDING_POLICY);
+                if (grounding == null || grounding.trim().isEmpty()) {
+                    return ContextProviderResult.failure(name(), "knowledge grounding prompt is empty",
                             ContextErrorCode.REQUIRED_PROVIDER_FAILED);
                 }
                 promptText = promptText + "\n\n" + grounding;

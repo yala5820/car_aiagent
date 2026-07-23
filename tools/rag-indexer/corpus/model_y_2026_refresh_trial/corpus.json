@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "bundleId": "model-y-2026-refresh-trial",
+  "bundleVersion": "TEST_ONLY-model-y-2026-refresh-v4-expanded",
+  "knowledgeScopeId": "model-y-2026-cn-2026-refresh-rwd",
+  "scope": {"vehicleModel":"MODEL_Y","modelYear":"2026","region":"CN","softwareVersion":"2026_REFRESH","configurationCode":"RWD"},
+  "documents": [
+    {"documentId":"model-y-owners-manual","title":"Model Y Owners Manual","documentType":"OWNER_MANUAL","documentVersion":"2026_REFRESH","language":"zh-CN","sourceFormat":"PDF","relativePath":"documents/owners_manual.pdf","expectedSha256":"9845df2089fc290aaf854696b5a8776af40cfe1dbdd12b50d6c929c48736af98","applicability":{"vehicleModel":"MODEL_Y","modelYear":"2026","region":"CN","softwareVersion":"2026_REFRESH","configurationCode":"RWD"}},
+    {"documentId":"tesla-china-vehicle-warranty","title":"车辆质量保证 - 特斯拉中国","documentType":"WARRANTY","documentVersion":"2026-07-22","language":"zh-CN","sourceFormat":"STATIC_HTML","relativePath":"documents/tesla_china_warranty.html","expectedSha256":"a7f2ec5185abc636cefc10419be7a154f753778b76749ab0411bab6bdf4bb178","sourceLayout":"SINGLE_FILE","applicability":{"vehicleModel":"*","modelYear":"*","region":"CN","softwareVersion":"*","configurationCode":"*"}},
+    {"documentId":"model-y-diy-operations-guide","title":"Model Y DIY 操作指南","documentType":"DIY_GUIDE","documentVersion":"2026-07-23","language":"zh-CN","sourceFormat":"STATIC_HTML","relativePath":"documents/DiyService","expectedSha256":"f3d10d53d5ec2048da9d37c4808a5301d07ef4797ffd24fe15110b4642c80046","sourceLayout":"STATIC_HTML_DIRECTORY","applicability":{"vehicleModel":"MODEL_Y","modelYear":"2026","region":"CN","softwareVersion":"2026_REFRESH","configurationCode":"RWD"}},
+    {"documentId":"tesla-china-mainland-service-centers","title":"中国大陆特斯拉服务中心","documentType":"SERVICE_CENTER","documentVersion":"2026-07-23","language":"zh-CN","sourceFormat":"STATIC_HTML","relativePath":"documents/services_China_Mainland.html","expectedSha256":"2f0b7f46f6d1218a2cae96a4240051b17343b5959f6f5e661f104bc15431d5c6","sourceLayout":"SINGLE_FILE","applicability":{"vehicleModel":"*","modelYear":"*","region":"CN","softwareVersion":"*","configurationCode":"*"}}
+  ]
+}

@@ -1,4 +1,7 @@
 package com.hirain.aiagent.runtime;
+import com.hirain.aiagent.rag.policy.KnowledgeIntentDecision;
+import com.hirain.aiagent.rag.policy.KnowledgeRequestState;
+import com.hirain.aiagent.trace.TraceSession;
 
 /**
  * TEXT worker 当前执行请求的线程上下文。
@@ -27,8 +30,18 @@ public final class RequestExecutionContext {
             throw new IllegalArgumentException("deadline must not be null");
         }
         State previous = CURRENT.get();
-        CURRENT.set(new State(requestId, deadline, originalUserQuestion, visionDemoImageId));
+        CURRENT.set(new State(requestId, deadline, originalUserQuestion, visionDemoImageId, null, null));
         return new Scope(previous);
+    }
+    public static Scope bind(String requestId, RequestDeadline deadline, String question, String imageId,
+                             KnowledgeIntentDecision knowledge, KnowledgeRequestState state) {
+        return bind(requestId, deadline, question, imageId, knowledge, state, null);
+    }
+    /** TraceSession 仅随当前 worker Scope 存活，禁止缓存到 Tool 或 RAG 单例。 */
+    public static Scope bind(String requestId, RequestDeadline deadline, String question, String imageId,
+                             KnowledgeIntentDecision knowledge, KnowledgeRequestState state, TraceSession traceSession) {
+        if (requestId == null || requestId.trim().isEmpty() || deadline == null) throw new IllegalArgumentException("requestId and deadline required");
+        State previous=CURRENT.get(); CURRENT.set(new State(requestId,deadline,question,imageId,knowledge,state,traceSession)); return new Scope(previous);
     }
 
     public static State current() {
@@ -40,19 +53,31 @@ public final class RequestExecutionContext {
         private final RequestDeadline deadline;
         private final String originalUserQuestion;
         private final String visionDemoImageId;
+        private final KnowledgeIntentDecision knowledgeIntentDecision;
+        private final KnowledgeRequestState knowledgeRequestState;
+        private final TraceSession traceSession;
 
         private State(String requestId, RequestDeadline deadline,
-                      String originalUserQuestion, String visionDemoImageId) {
+                      String originalUserQuestion, String visionDemoImageId, KnowledgeIntentDecision knowledgeIntentDecision, KnowledgeRequestState knowledgeRequestState) {
+            this(requestId, deadline, originalUserQuestion, visionDemoImageId, knowledgeIntentDecision, knowledgeRequestState, null);
+        }
+        private State(String requestId, RequestDeadline deadline,
+                      String originalUserQuestion, String visionDemoImageId, KnowledgeIntentDecision knowledgeIntentDecision, KnowledgeRequestState knowledgeRequestState, TraceSession traceSession) {
             this.requestId = requestId;
             this.deadline = deadline;
             this.originalUserQuestion = originalUserQuestion;
             this.visionDemoImageId = visionDemoImageId;
+            this.knowledgeIntentDecision=knowledgeIntentDecision; this.knowledgeRequestState=knowledgeRequestState;
+            this.traceSession=traceSession;
         }
 
         public String requestId() { return requestId; }
         public RequestDeadline deadline() { return deadline; }
         public String originalUserQuestion() { return originalUserQuestion; }
         public String visionDemoImageId() { return visionDemoImageId; }
+        public KnowledgeIntentDecision knowledgeIntentDecision() { return knowledgeIntentDecision; }
+        public KnowledgeRequestState knowledgeRequestState() { return knowledgeRequestState; }
+        public TraceSession traceSession() { return traceSession; }
     }
 
     public static final class Scope implements AutoCloseable {
