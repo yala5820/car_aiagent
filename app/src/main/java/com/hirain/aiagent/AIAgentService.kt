@@ -912,6 +912,12 @@ class AIAgentService : Service() {
                     }
                     Log.d("TAG", "handleTextRequest begin")
                     val runtimeResult = agentRuntime.execute(runtimeSession)
+                    if (BuildConfig.DEBUG) {
+                        // 仅记录稳定终态与原因码，不输出用户文本、Evidence 或 HTTP Body。
+                        Log.d("TAG", "handleTextRequest result success=${runtimeResult.success()} " +
+                                "errorType=${runtimeResult.errorType()} " +
+                                "errorDetail=${stableDebugReason(runtimeResult.errorDetail())}")
+                    }
                     val terminalState = terminalStateFor(runtimeResult)
                     if (activeRequestRegistry.tryComplete(requestId, terminalState)) {
                         if (terminalState == ActiveRequest.TerminalState.TIMEOUT
@@ -1124,6 +1130,11 @@ class AIAgentService : Service() {
             "CANCELLED" -> ActiveRequest.TerminalState.CANCELLED
             else -> ActiveRequest.TerminalState.FAILED
         }
+    }
+
+    private fun stableDebugReason(detail: String?): String {
+        if (detail.isNullOrBlank()) return "NONE"
+        return if (detail.matches(Regex("[A-Z0-9_:.-]{1,160}"))) detail else "REDACTED"
     }
 
     private fun handleControlRequest(request: AgentRequest) {

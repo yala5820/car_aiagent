@@ -34,11 +34,21 @@ public final class KnowledgeStoreCoordinator implements AutoCloseable {
         if (closed.get()) return;
         KnowledgeAssetInstaller installer = new KnowledgeAssetInstaller(layout, new AndroidStorageCapacityChecker(), this::verifyCandidate);
         KnowledgeInstallResult recovered = installer.recoverActive();
-        if (recovered.reused()) activate(recovered);
         manager.installStarted();
         KnowledgeInstallResult result = installer.install(new KnowledgeInstallPlan(new AndroidKnowledgeAssetSource(context.getAssets()), ASSET_ROOT, profile, UUID.randomUUID().toString().replace("-", "")));
-        if (!result.installed() && !result.reused()) { manager.installFailed(result.reasonCode()); return; }
-        activate(result);
+        if (result.installed() || result.reused()) {
+            // 恢复指针与 APK Asset 很可能指向同一版本。必须等最终结果确定后只打开一次，
+            // 否则对同一目录重复创建 BoxStore 会留下未被 Manager 接管的实例，
+            // Android Finalizer 回收该实例时可能阻塞并触发 FinalizerWatchdog 杀死进程。
+            activate(result);
+            return;
+        }
+        if (recovered.reused()) {
+            // 新 Asset 安装失败时仍恢复上次已验证的活动库；随后记录本轮安装失败，
+            // 使知识能力保持 READY，同时保留可诊断的稳定失败原因码。
+            activate(recovered);
+        }
+        manager.installFailed(result.reasonCode());
     }
     private void activate(KnowledgeInstallResult result) {
         try {

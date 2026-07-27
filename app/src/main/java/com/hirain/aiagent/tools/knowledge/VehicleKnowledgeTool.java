@@ -23,7 +23,7 @@ public final class VehicleKnowledgeTool {
     private final VehicleKnowledgeToolResultMapper mapper=new VehicleKnowledgeToolResultMapper();
     private final RagJsonCodec codec=new RagJsonCodec();
     public VehicleKnowledgeTool(VehicleKnowledgeService service) { this.service=service; }
-    @Tool(name="searchVehicleKnowledge", value="查询当前车辆的官方使用条件、故障提示、功能限制和版本差异。仅传入需要检索的问题。")
+    @Tool(name="searchVehicleKnowledge", value="查询当前车辆的官方使用条件、维护与更换步骤、故障提示、功能限制和版本差异。仅传入需要检索的问题。")
     public String searchVehicleKnowledge(@P("车辆知识检索问题") String query) {
         RequestExecutionContext.State context=RequestExecutionContext.current();
         if(context==null||context.knowledgeRequestState()==null||service==null) return failure("KNOWLEDGE_REQUEST_CONTEXT_MISSING");
