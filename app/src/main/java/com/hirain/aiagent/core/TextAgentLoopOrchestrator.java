@@ -551,7 +551,6 @@ public class TextAgentLoopOrchestrator {
                                 "cancelled_before_result");
                     }
     
-                    AiMessage processedMsg = AiMessage.from(output);
                     if (session.knowledgeIntentDecision().requirement()
                             == com.hirain.aiagent.rag.policy.KnowledgeRequirement.REQUIRED) {
                         var citation = citationGuard.validate(output,
@@ -563,6 +562,8 @@ public class TextAgentLoopOrchestrator {
                         }
                         output = citation.output();
                     }
+                    // CitationGuard 可能追加服务端可信来源，最终消息必须在引用处理完成后创建。
+                    AiMessage processedMsg = AiMessage.from(output);
                     // 普通文本只写入 PostProcessor 后的最终版本，确保外部回复与 Memory 一致。
                     chatMemory.add(processedMsg);
                     if (config.terminator().shouldStop(loopCtx,

@@ -13,7 +13,7 @@ public class SourceLocatorEntityMapperTest {
     public void mapsHtmlWithoutPdfOrMarkdownLocation() {
         KnowledgeChunkEntity entity = new KnowledgeChunkEntity();
         entity.sourceFormat = "STATIC_HTML";
-        entity.headingPath = "2:系统2:升级";
+        entity.headingPath = "v1:2:系统2:升级";
         entity.pdfPageStart = 0; entity.pdfPageEnd = 0;
         entity.sourceLineStart = 0; entity.sourceLineEnd = 0;
         entity.htmlElementId = "upgrade-condition"; entity.sectionOrdinal = 4;
@@ -31,7 +31,7 @@ public class SourceLocatorEntityMapperTest {
     public void mapsMarkdownLineRangeWithoutHtmlAnchor() {
         KnowledgeChunkEntity entity = new KnowledgeChunkEntity();
         entity.sourceFormat = "MARKDOWN";
-        entity.headingPath = "4:P001";
+        entity.headingPath = "v1:4:P001";
         entity.pdfPageStart = 0; entity.pdfPageEnd = 0;
         entity.sourceLineStart = 120; entity.sourceLineEnd = 128;
         entity.htmlElementId = ""; entity.sectionOrdinal = 2;

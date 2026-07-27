@@ -5,6 +5,7 @@ import com.hirain.aiagent.rag.cloud.RagCloudException;
 import com.hirain.aiagent.rag.cloud.RerankCandidate;
 import com.hirain.aiagent.rag.cloud.RerankClient;
 import com.hirain.aiagent.rag.cloud.RerankItem;
+import com.hirain.aiagent.BuildConfig;
 import com.hirain.aiagent.rag.document.SourceLocatorEntityMapper;
 import com.hirain.aiagent.rag.model.*;
 import com.hirain.aiagent.rag.ranking.*;
@@ -70,6 +71,7 @@ public final class HybridRetrievalCoordinator {
         List<String> lexicalIds = lexicalHits.stream().map(RankedCandidate::chunkId).collect(Collectors.toList());
         List<String> denseIds = denseHits.stream().map(value -> value.chunk().chunkId).collect(Collectors.toList());
         List<FusionCandidate> fused = rrf.fuse(denseIds, lexicalIds);
+        debugCounts("recall", lexicalHits.size(), denseHits.size(), fused.size(), 0, 0, 0);
         Map<String, RankedCandidate> lexicalById = new HashMap<>();
         for (RankedCandidate item : lexicalHits) lexicalById.put(item.chunkId(), item);
         Map<String, DenseCandidate> denseById = new HashMap<>();
@@ -81,6 +83,7 @@ public final class HybridRetrievalCoordinator {
         // RRF 已按 Chunk ID 合并同一候选；此处再按正文和 Parent 占位做统一去重，避免同一 Parent 独占 Rerank 输入。
         CandidateDeduplicationResult deduplication = candidateDeduplicator.deduplicate(fused, chunks);
         fused = deduplication.candidates();
+        debugCounts("dedup", lexicalHits.size(), denseHits.size(), fused.size(), chunks.size(), 0, 0);
 
         // Rerank 输入只来自已通过 Scope/Metadata 过滤的 Child 候选。
         if (mode == RetrievalMode.HYBRID_FUSION_ONLY && rerank != null && rerankCoordinator != null && !fused.isEmpty()) {
@@ -122,8 +125,39 @@ public final class HybridRetrievalCoordinator {
                     fusion.sources(), Applicability.EXACT, RetrievalConfidence.UNASSESSED, null));
         }
 
-        List<RetrievalEvidence> parents = parentAssembler.assemble(store, parentAggregator.aggregate(childEvidence));
-        return new Outcome(parentBudget.select(parents), mode, List.copyOf(degraded), deduplication);
+        List<ParentCandidate> parentCandidates = parentAggregator.aggregate(childEvidence);
+        List<RetrievalEvidence> parents = parentAssembler.assemble(store, parentCandidates);
+        List<RetrievalEvidence> selectedParents = parentBudget.select(parents);
+        debugCounts("parent", lexicalHits.size(), denseHits.size(), fused.size(), chunks.size(),
+                parentCandidates.size(), selectedParents.size());
+        if (BuildConfig.DEBUG) {
+            debugLog("retrieve mode=" + mode
+                    + " rerankScores=" + rerankScores.size()
+                    + " childEvidence=" + childEvidence.size()
+                    + " mappedParents=" + parents.size()
+                    + " degradedCount=" + degraded.size());
+        }
+        return new Outcome(selectedParents, mode, List.copyOf(degraded), deduplication);
+    }
+
+    private static void debugCounts(String stage, int lexical, int dense, int fused, int loadedChunks,
+                                    int parentCandidates, int selectedParents) {
+        if (!BuildConfig.DEBUG) return;
+        debugLog("stage=" + stage
+                + " lexical=" + lexical
+                + " dense=" + dense
+                + " fused=" + fused
+                + " loadedChunks=" + loadedChunks
+                + " parentCandidates=" + parentCandidates
+                + " selectedParents=" + selectedParents);
+    }
+
+    private static void debugLog(String message) {
+        try {
+            android.util.Log.d("RAG", message);
+        } catch (RuntimeException ignored) {
+            // Local JVM 单测没有 Android Log 实现；诊断日志不得改变检索行为。
+        }
     }
 
     public record Outcome(List<RetrievalEvidence> evidence, RetrievalMode mode, List<String> degradedReasons,
