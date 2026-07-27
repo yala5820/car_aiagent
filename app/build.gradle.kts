@@ -103,8 +103,14 @@ val verifyRagSharedSchema by tasks.registering {
     doLast {
         check(sharedObjectBoxModel.isFile) { "缺少共享 ObjectBox Meta Model，禁止 Android 自动重新生成 UID。" }
         check(sharedObjectBoxModelHash.isFile) { "缺少共享 Schema Hash 基线。" }
+        // JSON 在 Windows 工作区可能被检出为 CRLF；Schema Hash 的语义是
+        // “规范化后的模型内容”，不能因为操作系统换行符不同而误报漂移。
+        val canonicalModelBytes = sharedObjectBoxModel.readText(Charsets.UTF_8)
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .toByteArray(Charsets.UTF_8)
         val actual = MessageDigest.getInstance("SHA-256")
-            .digest(sharedObjectBoxModel.readBytes())
+            .digest(canonicalModelBytes)
             .joinToString("") { "%02x".format(it) }
         val expected = sharedObjectBoxModelHash.readText().trim()
         check(actual == expected) {
