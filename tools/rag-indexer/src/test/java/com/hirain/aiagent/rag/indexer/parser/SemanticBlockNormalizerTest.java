@@ -21,16 +21,15 @@ final class SemanticBlockNormalizerTest {
     }
 
     @Test
-    void shouldMergeOnlyAnExplicitPdfCrossPageContinuation() {
+    void shouldKeepPdfVisualLinesUntouchedForParentReconstruction() {
         StructuredBlock first = block(BlockType.PARAGRAPH, "跨页句子尚未完成", locator(SourceFormat.PDF, 1, 1, 1, "Maintenance"), new BoundingBox(100, 100, 400, 120), false);
         StructuredBlock second = block(BlockType.PARAGRAPH, "下一页继续完成。", locator(SourceFormat.PDF, 2, 2, 2, "Maintenance"), new BoundingBox(100, 100, 400, 120), false);
 
         List<StructuredBlock> result = new SemanticBlockNormalizer().normalize(new ParseResult(List.of(first, second), List.of())).blocks();
 
-        assertEquals(1, result.size());
-        assertEquals("跨页句子尚未完成下一页继续完成。", result.get(0).text());
-        assertEquals(1, result.get(0).locator().pdfPageStart());
-        assertEquals(2, result.get(0).locator().pdfPageEnd());
+        assertEquals(2, result.size());
+        assertEquals("跨页句子尚未完成", result.get(0).text());
+        assertEquals("下一页继续完成。", result.get(1).text());
     }
 
     @Test

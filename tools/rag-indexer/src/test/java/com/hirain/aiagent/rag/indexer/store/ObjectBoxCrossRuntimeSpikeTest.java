@@ -78,12 +78,20 @@ final class ObjectBoxCrossRuntimeSpikeTest {
             long htmlChildId = chunks.put(child("html-child", "html-parent", "html-maintenance", "STATIC_HTML", 0, 0, 0, 0, 0.02f));
             long markdownChildId = chunks.put(child("md-child", "md-parent", "md-warning", "MARKDOWN", 0, 0, 41, 45, 0.03f));
 
-            LexicalTermEntity brakeFluid = new LexicalTermEntity();
-            brakeFluid.term = "制动液";
-            brakeFluid.documentFrequency = 3;
-            brakeFluid.chunkEntityIds = new long[]{pdfChildId, htmlChildId, markdownChildId};
-            brakeFluid.termFrequencies = new int[]{1, 1, 1};
-            terms.put(brakeFluid);
+            // 当前 Android BM25 协议按 TITLE/BODY 独立倒排；Fixture 必须使用与正式 Bundle
+            // 相同的字段前缀和中文二/三元词，避免测试绕过真实检索协议。
+            for (String field : List.of("TITLE", "BODY")) {
+                for (String rawTerm : List.of("制动", "动液", "制动液")) {
+                    LexicalTermEntity term = new LexicalTermEntity();
+                    term.term = field + ":" + rawTerm;
+                    term.field = field;
+                    term.rawTerm = rawTerm;
+                    term.documentFrequency = 3;
+                    term.chunkEntityIds = new long[]{pdfChildId, htmlChildId, markdownChildId};
+                    term.termFrequencies = new int[]{1, 1, 1};
+                    terms.put(term);
+                }
+            }
 
             KnowledgeStoreMetadataEntity current = new KnowledgeStoreMetadataEntity();
             current.bundleId = "synthetic-objectbox-v1";
@@ -109,18 +117,23 @@ final class ObjectBoxCrossRuntimeSpikeTest {
             current.documentCount = 3;
             current.parentChunkCount = 3;
             current.childChunkCount = 3;
-            current.lexicalTermCount = 1;
+            current.lexicalTermCount = 6;
             current.averageLexicalDocumentLength = 5.0;
+            current.averageLexicalTitleLength = 5.0;
+            current.averageLexicalBodyLength = 5.0;
+            current.bm25TitleWeight = 1.0;
+            current.bm25BodyWeight = 1.0;
+            current.lexicalFieldVersion = 2;
             current.builtAtEpochMs = 0;
             metadata.put(current);
 
             assertEquals(3, documents.count());
             assertEquals(6, chunks.count());
-            assertEquals(1, terms.count());
+            assertEquals(6, terms.count());
             assertEquals(1, metadata.count());
             assertEquals(1024, chunks.get(pdfChildId).embedding.length);
             assertTrue(chunks.get(pdfParent.id).embedding == null);
-            summary = new FixtureSummary(3, 3, 3, 1, schemaFingerprint());
+            summary = new FixtureSummary(3, 3, 3, 6, schemaFingerprint());
         }
 
         Files.copy(storeDirectory.resolve("data.mdb"), outputDirectory.resolve("data.mdb"));

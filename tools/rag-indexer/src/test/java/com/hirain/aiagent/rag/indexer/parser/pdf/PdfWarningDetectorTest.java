@@ -30,8 +30,11 @@ final class PdfWarningDetectorTest {
 
         List<StructuredBlock> result = new PdfWarningDetector().markWarnings(source);
 
-        assertEquals(2, result.size());
-        assertEquals("警告：制动液不足时禁止行驶\n请先补充至规定液位", result.get(0).text());
+        assertEquals(3, result.size());
+        assertEquals(BlockType.WARNING, result.get(0).type());
+        assertEquals("警告：制动液不足时禁止行驶", result.get(0).text());
+        assertEquals(BlockType.WARNING, result.get(1).type());
+        assertEquals("请先补充至规定液位", result.get(1).text());
     }
 
     @Test

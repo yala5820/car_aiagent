@@ -18,8 +18,10 @@ public final class StoreModelStageAssembler {
         for (var child : state.chunkResult().children()) {
             var parent = parents.get(child.parentOrdinal()); String childId = ids.childIds().get(child); String parentId = ids.parentIds().get(child.parentOrdinal());
             if (parent == null || childId == null || parentId == null) throw new IllegalStateException("Chunk 稳定 ID 映射缺失");
-            int length = lexical.documentLengths().getOrDefault(childId, -1); float[] vector = state.childEmbeddings().get(childId);
-            result.add(mapper.mapChild(childId, parentId, parent, child, state.corpusDocument(), length, vector));
+            int titleLength = lexical.titleLengths().getOrDefault(childId, -1);
+            int bodyLength = lexical.bodyLengths().getOrDefault(childId, -1);
+            float[] vector = state.childEmbeddings().get(childId);
+            result.add(mapper.mapChild(childId, parentId, parent, child, state.corpusDocument(), titleLength, bodyLength, vector));
         }
         return List.copyOf(result);
     }

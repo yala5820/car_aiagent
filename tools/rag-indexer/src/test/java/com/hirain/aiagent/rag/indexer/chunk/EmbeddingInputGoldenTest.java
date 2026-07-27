@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 final class EmbeddingInputGoldenTest {
     @Test
     void shouldMatchSharedEmbeddingInputGolden() throws Exception {
-        JsonNode root = new ObjectMapper().readTree(Path.of("..", "..", "rag-schema", "test-vectors", "embedding-input-v1.json").toFile());
+        JsonNode root = new ObjectMapper().readTree(Path.of("..", "..", "rag-schema", "test-vectors", "embedding-input-v2.json").toFile());
         JsonNode item = root.path("cases").get(0);
 
         String actual = new EmbeddingTextRenderer().render(item.path("documentTitle").asText(), item.path("headingPath").asText(),

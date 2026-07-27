@@ -22,12 +22,18 @@ public final class KnowledgeStoreMetadataMapper {
             entity.embeddingProvider = KnowledgeStoreContract.EMBEDDING_PROVIDER; entity.embeddingModel = KnowledgeStoreContract.EMBEDDING_MODEL;
             entity.embeddingDimension = KnowledgeStoreContract.EMBEDDING_DIMENSION; entity.distanceType = KnowledgeStoreContract.DISTANCE_TYPE;
             entity.hnswConfigFingerprint = input.hnswConfigFingerprint(); entity.embeddingTemplateVersion = EmbeddingTextRenderer.TEMPLATE_VERSION;
-            entity.lexicalAnalyzerVersion = 1; entity.sourceLocatorSchemaVersion = KnowledgeStoreContract.SOURCE_LOCATOR_SCHEMA_VERSION;
+            entity.lexicalAnalyzerVersion = KnowledgeStoreContract.LEXICAL_FIELD_VERSION; entity.sourceLocatorSchemaVersion = KnowledgeStoreContract.SOURCE_LOCATOR_SCHEMA_VERSION;
             entity.parserConfigHash = input.parserConfigHash(); entity.chunkingConfigHash = input.chunkingConfigHash(); entity.corpusHash = input.corpusHash();
             entity.supportedSourceFormats = mapper.writeValueAsString(new TreeSet<>(input.supportedSourceFormats()));
             entity.sourceFormatCounts = mapper.writeValueAsString(new TreeMap<>(input.sourceFormatCounts()));
             entity.documentCount = input.documentCount(); entity.parentChunkCount = input.parentChunkCount(); entity.childChunkCount = input.childChunkCount();
-            entity.lexicalTermCount = input.lexicalTermCount(); entity.averageLexicalDocumentLength = input.averageLexicalDocumentLength();
+            entity.lexicalTermCount = input.lexicalTermCount();
+            entity.averageLexicalTitleLength = input.averageLexicalTitleLength();
+            entity.averageLexicalBodyLength = input.averageLexicalBodyLength();
+            entity.averageLexicalDocumentLength = input.averageLexicalBodyLength();
+            entity.bm25TitleWeight = KnowledgeStoreContract.BM25_TITLE_WEIGHT;
+            entity.bm25BodyWeight = KnowledgeStoreContract.BM25_BODY_WEIGHT;
+            entity.lexicalFieldVersion = KnowledgeStoreContract.LEXICAL_FIELD_VERSION;
             entity.builtAtEpochMs = input.builtAtEpochMs();
             return entity;
         } catch (Exception exception) {

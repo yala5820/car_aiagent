@@ -30,6 +30,8 @@ public class KnowledgeChunkEntity {
     @Index(type = IndexType.VALUE)
     public String documentId;
     public String documentTitle;
+    /** Parent 对应的二级标题；Child 冗余复制，用于 Dense/BM25 与 Evidence 展示。 */
+    public String parentTitle;
     public String documentVersion;
     public String documentType;
     public String language;
@@ -62,6 +64,9 @@ public class KnowledgeChunkEntity {
     public int ordinal;
     public int tokenEstimate;
     public int lexicalDocumentLength;
+    /** 标题字段与正文段字段分别统计，禁止在 BM25 中把两者拼成单字段。 */
+    public int lexicalTitleDocumentLength;
+    public int lexicalBodyDocumentLength;
     /** Parent 保持 null；可检索 Child 必须写入恰好 1024 维有限向量。 */
     @HnswIndex(
             dimensions = KnowledgeStoreContract.EMBEDDING_DIMENSION,

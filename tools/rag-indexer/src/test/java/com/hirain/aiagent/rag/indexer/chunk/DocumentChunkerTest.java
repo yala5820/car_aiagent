@@ -83,6 +83,19 @@ final class DocumentChunkerTest {
     }
 
     @Test
+    void shouldKeepOnlySoftSizedParentAsParentAsChild() {
+        ParseResult parsed=new ParseResult(List.of(
+                v2(BlockType.HEADING,"Maintenance",1,"Maintenance",1),
+                v2(BlockType.PARAGRAPH,"甲".repeat(210),2,"Maintenance",0),
+                v2(BlockType.PARAGRAPH,"乙".repeat(290),3,"Maintenance",0)),List.of());
+
+        ChunkResult result=new DocumentChunker(new ChunkBoundaryPolicy(256,0,2,320,512)).chunk(source(),parsed);
+
+        assertEquals(List.of(210,290), result.children().stream().map(ChildChunk::tokenEstimate).toList());
+        assertTrue(result.children().stream().noneMatch(chunk -> "PARENT_AS_CHILD".equals(chunk.splitReason())));
+    }
+
+    @Test
     void shouldSafelySplitAnOverlongUnpunctuatedBlockWithoutOverlap() {
         ParseResult parsed=new ParseResult(List.of(
                 v2(BlockType.HEADING,"Maintenance",1,"Maintenance",1),
@@ -96,10 +109,39 @@ final class DocumentChunkerTest {
         assertTrue(result.diagnostics().stream().anyMatch(diagnostic -> "CHILD_LENGTH_FALLBACK_WITHOUT_SENTENCE_BOUNDARY".equals(diagnostic.reasonCode())));
     }
 
+    @Test
+    void shouldSplitOversizedAtomicListBetweenCompleteItems() {
+        ParseResult parsed=new ParseResult(List.of(
+                v2(BlockType.HEADING,"Maintenance",1,"Maintenance",1),
+                atomicV2(BlockType.LIST_ITEM,"步骤一".repeat(200),2,"Maintenance","steps"),
+                atomicV2(BlockType.LIST_ITEM,"步骤二".repeat(200),3,"Maintenance","steps"),
+                atomicV2(BlockType.LIST_ITEM,"步骤三".repeat(200),4,"Maintenance","steps")),List.of());
+
+        ChunkResult result=new DocumentChunker(new ChunkBoundaryPolicy(256,0,2,320,512)).chunk(source(),parsed);
+
+        assertTrue(result.children().size() >= 2);
+        assertTrue(result.children().stream().allMatch(chunk -> chunk.tokenEstimate() <= 512));
+        assertTrue(result.diagnostics().stream().anyMatch(diagnostic -> "CHILD_ATOMIC_GROUP_SPLIT_FALLBACK".equals(diagnostic.reasonCode())), result.diagnostics().toString());
+    }
+
+    @Test
+    void shouldSplitOversizedAtomicWarningAtSentenceOrSecondaryBoundaries() {
+        ParseResult parsed=new ParseResult(List.of(
+                v2(BlockType.HEADING,"Maintenance",1,"Maintenance",1),
+                atomicV2(BlockType.WARNING,"警告："+"请先确认安全条件；".repeat(300),2,"Maintenance","warning")),List.of());
+
+        ChunkResult result=new DocumentChunker(new ChunkBoundaryPolicy(256,0,2,320,512)).chunk(source(),parsed);
+
+        assertTrue(result.children().size() >= 2);
+        assertTrue(result.children().stream().allMatch(chunk -> chunk.tokenEstimate() <= 512));
+        assertTrue(result.diagnostics().stream().anyMatch(diagnostic -> "CHILD_ATOMIC_GROUP_SPLIT_FALLBACK".equals(diagnostic.reasonCode())));
+    }
+
     private StructuredBlock block(BlockType type, String text, int line) {
         return new StructuredBlock(type, text, new SourceLocator(SourceFormat.MARKDOWN, 0, 0, null, line, line, "Brakes", line), null, ExtractionConfidence.HIGH);
     }
     private StructuredBlock v2(BlockType type,String text,int line,String path,int level){SourceLocator locator=new SourceLocator(SourceFormat.MARKDOWN,0,0,null,line,line,path,line);return new StructuredBlock(type,text,locator,null,ExtractionConfidence.HIGH,new BlockStructure(level,path,null,SequenceType.NONE,0,false,line));}
+    private StructuredBlock atomicV2(BlockType type,String text,int line,String path,String group){SourceLocator locator=new SourceLocator(SourceFormat.MARKDOWN,0,0,null,line,line,path,line);return new StructuredBlock(type,text,locator,null,ExtractionConfidence.HIGH,new BlockStructure(0,path,group,SequenceType.ORDERED_STEPS,1,true,line));}
 
     private SourceDocument source() {
         return new SourceDocument(Path.of("manual.md"), SourceFormat.MARKDOWN, new DocumentMetadata("manual", "Manual", "en"));

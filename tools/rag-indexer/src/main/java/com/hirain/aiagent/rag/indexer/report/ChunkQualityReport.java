@@ -8,4 +8,6 @@ public record ChunkQualityReport(long parentCount,long childCount,long parentUnd
                                  long childUnderIdeal,long childOverSoft,long childOverHard,long parentAsChildCount,
                                  long fallbackOverlapCount,long atomicOverHardCount,Map<String,Long> childrenPerParent,
                                  Map<String,Long> duplicateContentHashes,Map<String,Long> childOverHardBySplitReason,
-                                 List<String> diagnostics,List<ChunkQualityFinding> findings) { }
+                                 List<String> diagnostics,List<ChunkQualityFinding> findings,
+                                 long parentOverlapCount,long paragraphCount,long semanticMergeCount,
+                                 long childBelowForceMerge,long childDirectMergeRange,long smallParagraphUnmergedCount) { }

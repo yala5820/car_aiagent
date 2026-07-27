@@ -24,9 +24,9 @@ public class ObjectBoxLocalSearchInstrumentedTest {
         try (ObjectBoxKnowledgeStoreGateway gateway = new ObjectBoxKnowledgeStoreGateway(MyObjectBox.builder().androidContext(target).directory(directory).build())) {
             VehicleProfile matching = new VehicleProfile("DEMO_MODEL", "2026", "CN", "DEMO_VERSION", "DEFAULT", 0);
             List<DenseCandidate> dense = new ObjectBoxDenseSearcher(new MetadataEligibilityPolicy()).search(gateway, vector(), matching, 3);
-            assertFalse(dense.isEmpty()); assertTrue(dense.get(0).distance() >= 0d);
+            assertFalse("dense search returned no candidates", dense.isEmpty()); assertTrue(dense.get(0).distance() >= 0d);
             List<RankedCandidate> lexical = new ObjectBoxLexicalSearcher(new MetadataEligibilityPolicy(), RagRetrievalConfig.v1()).search(gateway, new CjkLatinLexicalAnalyzer().analyze("制动液"), matching, 3);
-            assertFalse(lexical.isEmpty());
+            assertFalse("lexical search returned no candidates", lexical.isEmpty());
             VehicleProfile mismatching = new VehicleProfile("DEMO_MODEL", "2026", "US", "DEMO_VERSION", "DEFAULT", 0);
             assertTrue(new ObjectBoxDenseSearcher(new MetadataEligibilityPolicy()).search(gateway, vector(), mismatching, 3).isEmpty());
             assertTrue(new ObjectBoxLexicalSearcher(new MetadataEligibilityPolicy(), RagRetrievalConfig.v1()).search(gateway, new CjkLatinLexicalAnalyzer().analyze("制动液"), mismatching, 3).isEmpty());

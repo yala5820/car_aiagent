@@ -28,7 +28,7 @@ final class SharedSchemaContractTest {
             "build", "generated", "sources", "annotationProcessor", "java", "main",
             "com", "hirain", "aiagent", "rag", "store", "MyObjectBox.java"
     );
-    private static final String SHARED_MODEL_FINGERPRINT = "sha256:453278ef0c1d17c8f799f2af9dc4142a802ae87bd8db381e0392bf5eb1606b4c";
+    private static final String SHARED_MODEL_FINGERPRINT = "sha256:0d0e7d4deaff92a4ca8d140848e5a12ddef0e4b8281ae2fb2677841fd1fe33de";
 
     @Test
     void shouldKeepRequiredEntityContractAndGeneratedModel() throws Exception {

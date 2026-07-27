@@ -8,6 +8,7 @@ import java.util.List;
 public interface KnowledgeStoreGateway extends AutoCloseable {
  KnowledgeStoreMetadataEntity metadata();
  List<KnowledgeChunkEntity> childChunksByIds(List<String> chunkIds);
+ default List<KnowledgeChunkEntity> parentChunksByIds(List<String> parentIds) { return childChunksByIds(parentIds); }
  List<KnowledgeChunkEntity> childChunksByEntityIds(List<Long> entityIds);
  List<KnowledgeChunkEntity> nearestChildren(float[] queryVector, int limit);
  List<LexicalTermEntity> lexicalTermsByTerms(List<String> terms);

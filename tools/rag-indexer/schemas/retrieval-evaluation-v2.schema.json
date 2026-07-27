@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Vehicle Agent Retrieval Evaluation V2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "datasetVersion", "knowledgeScopeId", "cases"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "datasetVersion": {"type": "string", "minLength": 1},
+    "knowledgeScopeId": {"type": "string", "minLength": 1},
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["caseId", "query", "category", "answerability", "answerCriteria", "acceptableEvidenceSets", "tags", "split"],
+        "properties": {
+          "caseId": {"type": "string", "minLength": 1},
+          "query": {"type": "string", "minLength": 1},
+          "category": {"enum": ["WARRANTY", "DIY_OPERATION", "VEHICLE_OPERATION", "SERVICE_CENTER", "SAFETY", "OTHER"]},
+          "answerability": {"enum": ["ANSWERABLE", "NO_EVIDENCE"]},
+          "answerCriteria": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "acceptableEvidenceSets": {"type": "array", "items": {"$ref": "#/$defs/evidenceSet"}},
+          "tags": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "split": {"enum": ["TRAIN", "DEV", "TEST"]}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "evidenceSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requiredParentIds", "optionalLocatorChildIds", "rationale"],
+      "properties": {
+        "requiredParentIds": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "optionalLocatorChildIds": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "rationale": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

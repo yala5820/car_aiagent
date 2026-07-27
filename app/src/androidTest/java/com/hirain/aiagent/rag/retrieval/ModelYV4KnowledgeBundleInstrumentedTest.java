@@ -26,11 +26,11 @@ import org.junit.Assume;
 import org.junit.Test;
 
 /**
- * 只在本机存在 V4 候选时执行：验证真实资料仍以 TEST_ONLY 方式装入 androidTest APK，
+ * 只在本机存在 Parent-Child V2 候选时执行：验证真实资料仍以 TEST_ONLY 方式装入 androidTest APK，
  * 并在 Android ObjectBox Runtime 上完成 Scope、BM25 和 Dense 的最小闭环。
  */
 public class ModelYV4KnowledgeBundleInstrumentedTest {
-    private static final String ASSET_ROOT = "rag/model_y_v4_candidate";
+    private static final String ASSET_ROOT = "rag/model_y_title_v2_candidate";
     private static final VehicleProfile MODEL_Y_2026_CN_RWD =
             new VehicleProfile("MODEL_Y", "2026", "CN", "2026_REFRESH", "RWD", 0L);
 
@@ -38,9 +38,9 @@ public class ModelYV4KnowledgeBundleInstrumentedTest {
     public void installsAndSearchesLocalV4CandidateWithTrustedModelYScope() throws Exception {
         Context target = InstrumentationRegistry.getInstrumentation().getTargetContext();
         Context test = InstrumentationRegistry.getInstrumentation().getContext();
-        Assume.assumeTrue("本机未生成 V4 TEST_ONLY 候选，跳过真实资料设备验收", hasV4Asset(test));
+        Assume.assumeTrue("本机未生成 Parent-Child V2 TEST_ONLY 候选，跳过真实资料设备验收", hasCandidateAsset(test));
 
-        File root = new File(target.getCacheDir(), "rag-model-y-v4-" + System.nanoTime());
+        File root = new File(target.getCacheDir(), "rag-model-y-title-v2-" + System.nanoTime());
         assertTrue(root.mkdirs());
         KnowledgeAssetInstaller installer = new KnowledgeAssetInstaller(
                 new KnowledgeStorageLayout(root.toPath()),
@@ -48,8 +48,8 @@ public class ModelYV4KnowledgeBundleInstrumentedTest {
                 (directory, manifest) -> verify(target, directory, manifest));
         KnowledgeInstallResult result = installer.install(new KnowledgeInstallPlan(
                 new AndroidKnowledgeAssetSource(test.getAssets()), ASSET_ROOT,
-                MODEL_Y_2026_CN_RWD, "model-y-v4-instrumented"));
-        assertTrue(result.installed());
+                MODEL_Y_2026_CN_RWD, "model-y-title-v2-instrumented"));
+        assertTrue("Model Y install failed: " + result.reasonCode(), result.installed());
         assertTrue(installer.recoverActive().reused());
 
         try (io.objectbox.BoxStore store = MyObjectBox.builder().androidContext(target)
@@ -69,7 +69,7 @@ public class ModelYV4KnowledgeBundleInstrumentedTest {
         }
     }
 
-    private static boolean hasV4Asset(Context context) {
+    private static boolean hasCandidateAsset(Context context) {
         try (InputStream ignored = context.getAssets().open(ASSET_ROOT + "/manifest.json")) {
             return true;
         } catch (Exception error) {

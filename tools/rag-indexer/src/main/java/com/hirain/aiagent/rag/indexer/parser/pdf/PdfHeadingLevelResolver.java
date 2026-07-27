@@ -12,4 +12,8 @@ final class PdfHeadingLevelResolver {
         if(ratio>=1.32f) return 2;
         return 0;
     }
+
+    int resolve(PdfTextLine line, float pageAverageFontSize, PdfTocEntry tocEntry) {
+        return tocEntry == null ? resolve(line, pageAverageFontSize) : tocEntry.level();
+    }
 }

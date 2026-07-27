@@ -25,6 +25,14 @@ Thumbs.db
 /tools/rag-indexer/*.local.properties
 /tools/rag-indexer/*.credentials
 
+# 本地 Gradle 运行时缓存，不属于项目源码或构建产物。
+/.gradle-local/
+
+# ObjectBox Fixture 修复过程中的本地备份，不作为测试夹具发布。
+/rag-schema/test-fixtures/*-pre-*/
+/rag-schema/test-fixtures/*-pre-*
+/rag-schema/test-fixtures/**/*-pre-*
+
 # 用户提供的真实车型资料及其云端构建中间产物仅用于本地受控试运行，禁止纳入仓库。
 /tools/rag-indexer/corpus/model_y_2026_refresh_trial/documents/
 /tools/rag-indexer/corpus/model_y_2026_refresh_trial/work/

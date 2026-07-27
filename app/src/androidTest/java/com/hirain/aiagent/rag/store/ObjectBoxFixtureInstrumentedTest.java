@@ -51,8 +51,8 @@ public class ObjectBoxFixtureInstrumentedTest {
 
             assertEquals(1, metadata.count());
             assertEquals("demo-model-2026-cn-demo-version-default", metadata.getAll().get(0).knowledgeScopeId);
-            assertEquals(1, terms.count());
-            assertEquals("制动液", terms.getAll().get(0).term);
+            assertEquals(6, terms.count());
+            assertTrue(terms.getAll().stream().anyMatch(term -> "TITLE:制动".equals(term.term)));
             assertEquals(3, terms.getAll().get(0).chunkEntityIds.length);
 
             try (Query<KnowledgeChunkEntity> denseQuery = chunks.query()

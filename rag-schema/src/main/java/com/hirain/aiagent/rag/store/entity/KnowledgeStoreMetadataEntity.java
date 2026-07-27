@@ -37,6 +37,11 @@ public class KnowledgeStoreMetadataEntity {
     public long childChunkCount;
     public long lexicalTermCount;
     public double averageLexicalDocumentLength;
+    public double averageLexicalTitleLength;
+    public double averageLexicalBodyLength;
+    public double bm25TitleWeight;
+    public double bm25BodyWeight;
+    public int lexicalFieldVersion;
     public long builtAtEpochMs;
 
     public KnowledgeStoreMetadataEntity() {

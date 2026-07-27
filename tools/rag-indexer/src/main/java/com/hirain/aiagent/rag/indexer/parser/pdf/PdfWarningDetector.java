@@ -12,30 +12,38 @@ import java.util.List;
 final class PdfWarningDetector {
     List<StructuredBlock> markWarnings(List<StructuredBlock> blocks) {
         List<StructuredBlock> output = new ArrayList<>();
-        for (int index = 0; index < blocks.size(); index++) {
-            StructuredBlock block = blocks.get(index);
-            if (!isWarning(block.text())) {
+        String warningGroup = null;
+        int warningPage = -1;
+        int warningColumn = -2;
+        boolean continuationExpected = false;
+        for (StructuredBlock block : blocks) {
+            boolean startsWarning = isWarning(block.text());
+            boolean sameWarning = warningGroup != null && continuationExpected && canJoin(warningPage, warningColumn, block);
+            if (!startsWarning && !sameWarning) {
+                warningGroup = null;
+                continuationExpected = false;
                 output.add(block);
                 continue;
             }
-            StringBuilder text = new StringBuilder(block.text());
-            int consumed = index;
-            // 仅在显式 Warning 还没有形成完整句子时补入紧随其后的续行，避免把同页后续章节吞入 Warning。
-            while (needsContinuation(text) && consumed + 1 < blocks.size() && canJoin(block, blocks.get(consumed + 1))) {
-                text.append("\n").append(blocks.get(++consumed).text());
+            if (startsWarning) {
+                warningGroup = "warning-" + block.structure().documentOrdinal();
+                warningPage = block.locator().pdfPageStart();
+                warningColumn = block.structure().columnIndex();
             }
-            BlockStructure source=block.structure();
-            output.add(new StructuredBlock(BlockType.WARNING, text.toString(), block.locator(), block.boundingBox(), block.confidence(),
-                    new BlockStructure(source.headingLevel(),source.sectionPath(),"warning-"+source.documentOrdinal(),SequenceType.WARNING,0,true,source.documentOrdinal())));
-            index = consumed;
+            BlockStructure source = block.structure();
+            output.add(new StructuredBlock(BlockType.WARNING, block.text(), block.locator(), block.boundingBox(), block.confidence(),
+                    new BlockStructure(source.headingLevel(), source.sectionPath(), warningGroup, SequenceType.WARNING, 0,
+                            true, source.documentOrdinal(), source.columnIndex(), source.fullWidth()), block.pdfLineMetadata()));
+            continuationExpected = needsContinuation(block.text());
         }
         return List.copyOf(output);
     }
 
-    private boolean canJoin(StructuredBlock warningStart, StructuredBlock candidate) {
+    private boolean canJoin(int page, int column, StructuredBlock candidate) {
         return candidate.type() != BlockType.HEADING
-                && candidate.locator().pdfPageStart() == warningStart.locator().pdfPageStart()
-                && !isWarning(candidate.text());
+                && candidate.locator().pdfPageStart() == page
+                && candidate.structure().columnIndex() == column
+                && !candidate.structure().fullWidth();
     }
 
     private boolean isWarning(String text) {
@@ -43,8 +51,8 @@ final class PdfWarningDetector {
         return text.matches("(?s)^\\s*(警告|注意|禁止|危险)(?:[：:]|\\s|$).*?");
     }
 
-    private boolean needsContinuation(StringBuilder text) {
-        String value=text.toString().stripTrailing();
+    private boolean needsContinuation(String text) {
+        String value=text.stripTrailing();
         return value.isEmpty() || !"。！？.!?".contains(value.substring(value.length()-1));
     }
 }

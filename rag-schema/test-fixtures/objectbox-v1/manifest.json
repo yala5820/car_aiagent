@@ -5,72 +5,67 @@
   "knowledgeScopeId" : "demo-model-2026-cn-demo-version-default",
   "builderVersion" : "rag-indexer-fixture",
   "builtAtEpochMs" : 0,
-  "schemaFingerprint" : "sha256:453278ef0c1d17c8f799f2af9dc4142a802ae87bd8db381e0392bf5eb1606b4c",
+  "schemaFingerprint" : "sha256:0d0e7d4deaff92a4ca8d140848e5a12ddef0e4b8281ae2fb2677841fd1fe33de",
   "objectBoxVersion" : "5.4.0",
   "sourceLocatorSchemaVersion" : 1,
   "dataFile" : {
-    "sha256" : "21c71b1677f72eb335ecdac5d046b33ab2f7d47d140c6d4b85c56ba0f665a713",
-    "sizeBytes" : 106496,
-    "name" : "data.mdb"
+    "name" : "data.mdb",
+    "sha256" : "d392a002f0b17e673da13c60759cd201d1e38b5fec868521989c4eae88617e82",
+    "sizeBytes" : 106496
   },
   "embedding" : {
-    "dimension" : 1024,
-    "provider" : "DashScope",
     "distanceType" : "COSINE",
     "model" : "text-embedding-v4",
-    "templateVersion" : 1
+    "templateVersion" : 1,
+    "dimension" : 1024,
+    "provider" : "DashScope"
   },
   "hnsw" : {
-    "configFingerprint" : "sha256:476d4f8735703d10155252dab761db7d02c4989facfd85f90369ec867edab20c",
-    "neighborsPerNode" : 30,
-    "indexingSearchCount" : 100,
-    "reparationBacklinkProbability" : 1.0,
-    "vectorCacheHintSizeKB" : 0,
-    "flags" : [ ]
+    "configFingerprint" : "sha256:476d4f8735703d10155252dab761db7d02c4989facfd85f90369ec867edab20c"
   },
   "scope" : {
-    "modelYear" : "2026",
-    "vehicleModel" : "DEMO_MODEL",
     "softwareVersion" : "DEMO_VERSION",
     "region" : "CN",
-    "configurationCode" : "DEFAULT"
+    "configurationCode" : "DEFAULT",
+    "modelYear" : "2026",
+    "vehicleModel" : "DEMO_MODEL"
   },
   "parsers" : {
-    "markdown" : {
-      "syntax" : "COMMONMARK",
-      "extensions" : [ "GFM_TABLE" ]
-    },
     "pdf" : {
       "fixture" : true
     },
     "html" : {
-      "mode" : "STATIC_DOM_ONLY",
       "scriptExecution" : false,
-      "networkAccess" : false
+      "networkAccess" : false,
+      "mode" : "STATIC_DOM_ONLY"
     },
     "supportedSourceFormats" : [ "PDF", "STATIC_HTML", "MARKDOWN" ],
-    "configHash" : "sha256:3a627d8cbd27902b0ad5790f7d727d9d186f2f68e45adbd8f94dcd2e69b14395"
+    "configHash" : "sha256:3a627d8cbd27902b0ad5790f7d727d9d186f2f68e45adbd8f94dcd2e69b14395",
+    "markdown" : {
+      "syntax" : "COMMONMARK",
+      "extensions" : [ "GFM_TABLE" ]
+    }
   },
   "lexical" : {
-    "analyzerVersion" : 1,
-    "languages" : [ "zh", "en" ],
     "tokenization" : "CJK_BIGRAM_TRIGRAM_WITH_EXACT_LATIN",
-    "algorithm" : "BM25"
+    "algorithm" : "BM25",
+    "analyzerVersion" : 1,
+    "languages" : [ "zh", "en" ]
   },
   "chunking" : {
     "configVersion" : 1,
     "configHash" : "sha256:0580f5f1869044306352bb77699ac4cd389dce06d3588b6ac8f699610642380e"
   },
   "corpus" : {
-    "corpusHash" : "sha256:feab4945fe3a344b8ee425b88e336cecd42f4ed9f5d1d4583d9f2cd78464e895",
-    "sourceFormatCounts" : {
-      "PDF" : 1,
-      "MARKDOWN" : 1,
-      "STATIC_HTML" : 1
-    },
-    "lexicalTermCount" : 1,
+    "lexicalTermCount" : 6,
     "parentChunkCount" : 3,
     "childChunkCount" : 3,
-    "documentCount" : 3
+    "documentCount" : 3,
+    "corpusHash" : "sha256:feab4945fe3a344b8ee425b88e336cecd42f4ed9f5d1d4583d9f2cd78464e895",
+    "sourceFormatCounts" : {
+      "MARKDOWN" : 1,
+      "STATIC_HTML" : 1,
+      "PDF" : 1
+    }
   }
 }

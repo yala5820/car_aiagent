@@ -52,24 +52,45 @@ public final class OfflineHybridEvaluator {
     private final ObjectBoxStoreFactory storeFactory;
     private final DocumentEmbeddingClient embeddingClient;
     private final CjkLatinLexicalAnalyzer analyzer = new CjkLatinLexicalAnalyzer(LexicalAnalyzerConfig.v1());
-    private final boolean rerankEnabled;
+    private final AblationMode ablationMode;
     private final List<RerankDiagnostic> rerankDiagnostics = new ArrayList<>();
+    private final List<HybridDiagnostic> hybridDiagnostics = new ArrayList<>();
 
     public OfflineHybridEvaluator(DocumentEmbeddingClient embeddingClient) {
-        this(new ObjectBoxStoreFactory(), embeddingClient, false);
+        this(new ObjectBoxStoreFactory(), embeddingClient, AblationMode.RRF_NEAR_DEDUP);
     }
 
-    public OfflineHybridEvaluator(DocumentEmbeddingClient embeddingClient, boolean rerankEnabled) { this(new ObjectBoxStoreFactory(), embeddingClient, rerankEnabled); }
+    public OfflineHybridEvaluator(DocumentEmbeddingClient embeddingClient, boolean rerankEnabled) {
+        this(new ObjectBoxStoreFactory(), embeddingClient, rerankEnabled ? AblationMode.RRF_RERANK : AblationMode.RRF_NEAR_DEDUP);
+    }
 
-    OfflineHybridEvaluator(ObjectBoxStoreFactory storeFactory, DocumentEmbeddingClient embeddingClient) { this(storeFactory, embeddingClient, false); }
+    public OfflineHybridEvaluator(DocumentEmbeddingClient embeddingClient, AblationMode mode) {
+        this(new ObjectBoxStoreFactory(), embeddingClient, mode);
+    }
+
+    OfflineHybridEvaluator(ObjectBoxStoreFactory storeFactory, DocumentEmbeddingClient embeddingClient) { this(storeFactory, embeddingClient, AblationMode.RRF_NEAR_DEDUP); }
     OfflineHybridEvaluator(ObjectBoxStoreFactory storeFactory, DocumentEmbeddingClient embeddingClient, boolean rerankEnabled) {
+        this(storeFactory, embeddingClient, rerankEnabled ? AblationMode.RRF_RERANK : AblationMode.RRF_NEAR_DEDUP);
+    }
+    OfflineHybridEvaluator(ObjectBoxStoreFactory storeFactory, DocumentEmbeddingClient embeddingClient, AblationMode mode) {
         this.storeFactory = storeFactory;
         this.embeddingClient = embeddingClient;
-        this.rerankEnabled = rerankEnabled;
+        this.ablationMode = mode == null ? AblationMode.RRF_NEAR_DEDUP : mode;
+    }
+
+    public enum AblationMode {
+        DENSE_ONLY,
+        BM25_ONLY,
+        RRF_RAW,
+        RRF_EXACT_DEDUP,
+        RRF_NEAR_DEDUP,
+        RRF_RERANK,
+        RRF_RERANK_FALLBACK
     }
 
     public RetrievalMetrics evaluate(Path bundle, RetrievalEvaluationDataset dataset) throws EmbeddingException {
         rerankDiagnostics.clear();
+        hybridDiagnostics.clear();
         try (BoxStore store = storeFactory.openReadOnlyExisting(bundle)) {
             KnowledgeStoreMetadataEntity metadata = requireMetadata(store);
             if (!dataset.knowledgeScopeId().equals(metadata.knowledgeScopeId)) {
@@ -95,20 +116,43 @@ public final class OfflineHybridEvaluator {
     /** 仅包含 ID、长度和分数的评测诊断；禁止写入 Query 与正文。 */
     public List<RerankDiagnostic> rerankDiagnostics() { return List.copyOf(rerankDiagnostics); }
 
+    /** 仅保存候选计数与去重原因，正文和 Query 不进入报告。 */
+    public List<HybridDiagnostic> hybridDiagnostics() { return List.copyOf(hybridDiagnostics); }
+
+    public record HybridDiagnostic(String caseId, int denseCandidateCount, int lexicalCandidateCount,
+                                   int rrfCandidateCount, int postDedupCandidateCount,
+                                   int exactDuplicateDropCount, int nearDuplicateDropCount,
+                                   int parentOccupancyDropCount, boolean rerankAttempted) { }
+
     private RetrievalMetrics.CaseResult evaluateCase(BoxStore store, KnowledgeStoreMetadataEntity metadata,
                                                      Map<String, KnowledgeChunkEntity> children,
                                                      Map<Long, KnowledgeChunkEntity> childrenByEntityId,
                                                      Map<String, LexicalTermEntity> terms,
                                                      RetrievalEvaluationDataset.Case value) throws EmbeddingException {
         String query = normalize(value.query());
-        float[] vector = embeddingClient.embed(List.of(new EmbeddingRequest(0, value.caseId(), query))).vectors().get(0);
-        if (vector == null || vector.length != 1024) {
-            throw new IllegalArgumentException("EVALUATION_QUERY_VECTOR_INVALID");
+        float[] vector = null;
+        if (ablationMode != AblationMode.BM25_ONLY) {
+            vector = embeddingClient.embed(List.of(new EmbeddingRequest(0, value.caseId(), query))).vectors().get(0);
+            if (vector == null || vector.length != 1024) throw new IllegalArgumentException("EVALUATION_QUERY_VECTOR_INVALID");
         }
-        List<String> dense = dense(store, vector);
-        List<String> lexical = lexical(query, metadata, childrenByEntityId, terms);
-        List<String> ranked = fuse(dense, lexical);
+        List<String> dense = vector == null ? List.of() : dense(store, vector);
+        List<String> lexical = ablationMode == AblationMode.DENSE_ONLY ? List.of() : lexical(query, metadata, childrenByEntityId, terms);
+        List<String> ranked = switch (ablationMode) {
+            case DENSE_ONLY -> dense;
+            case BM25_ONLY -> lexical;
+            default -> fuse(dense, lexical);
+        };
+        int rrfCandidateCount = ranked.size();
+        DedupResult dedup = switch (ablationMode) {
+            case RRF_EXACT_DEDUP -> deduplicate(ranked, children, DedupLevel.EXACT);
+            case RRF_NEAR_DEDUP, RRF_RERANK, RRF_RERANK_FALLBACK -> deduplicate(ranked, children, DedupLevel.NEAR);
+            default -> new DedupResult(List.copyOf(ranked), 0, 0, 0);
+        };
+        ranked = dedup.ids();
+        boolean rerankEnabled = ablationMode == AblationMode.RRF_RERANK;
         if (rerankEnabled) ranked = rerank(value, query, ranked, children);
+        hybridDiagnostics.add(new HybridDiagnostic(value.caseId(), dense.size(), lexical.size(), rrfCandidateCount,
+                ranked.size(), dedup.exactDrops(), dedup.nearDrops(), dedup.parentOccupancyDrops(), rerankEnabled));
         ranked = ranked.stream().limit(REPORT_TOP_K).toList();
         int rank = 0;
         for (int index = 0; index < ranked.size(); index++) {
@@ -133,19 +177,27 @@ public final class OfflineHybridEvaluator {
                                  Map<Long, KnowledgeChunkEntity> childrenByEntityId, Map<String, LexicalTermEntity> terms) {
         Map<String, Double> scores = new HashMap<>();
         for (String token : new HashSet<>(analyzer.analyze(query))) {
-            LexicalTermEntity term = terms.get(token);
-            if (term == null) continue;
-            for (int index = 0; index < term.chunkEntityIds.length; index++) {
-                KnowledgeChunkEntity child = childrenByEntityId.get(term.chunkEntityIds[index]);
-                if (child == null) continue;
-                scores.merge(child.chunkId, bm25(term.termFrequencies[index], term.documentFrequency,
-                        (int) metadata.childChunkCount, child.lexicalDocumentLength,
-                        metadata.averageLexicalDocumentLength), Double::sum);
-            }
+            scoreField(terms.get("TITLE:" + token), "TITLE", metadata, childrenByEntityId, scores);
+            scoreField(terms.get("BODY:" + token), "BODY", metadata, childrenByEntityId, scores);
         }
         return scores.entrySet().stream().sorted(Map.Entry.<String, Double>comparingByValue().reversed()
                         .thenComparing(Map.Entry::getKey))
                 .limit(LEXICAL_TOP_K).map(Map.Entry::getKey).toList();
+    }
+
+    private static void scoreField(LexicalTermEntity term, String field, KnowledgeStoreMetadataEntity metadata,
+                                   Map<Long, KnowledgeChunkEntity> childrenByEntityId, Map<String, Double> scores) {
+        if (term == null) return;
+        double average = "TITLE".equals(field) ? metadata.averageLexicalTitleLength : metadata.averageLexicalBodyLength;
+        double weight = "TITLE".equals(field) ? metadata.bm25TitleWeight : metadata.bm25BodyWeight;
+        for (int index = 0; index < term.chunkEntityIds.length; index++) {
+            KnowledgeChunkEntity child = childrenByEntityId.get(term.chunkEntityIds[index]);
+            if (child == null) continue;
+            int length = "TITLE".equals(field) ? child.lexicalTitleDocumentLength : child.lexicalBodyDocumentLength;
+            if (length == 0 && "BODY".equals(field)) length = child.lexicalDocumentLength;
+            scores.merge(child.chunkId, weight * bm25(term.termFrequencies[index], term.documentFrequency,
+                    (int) metadata.childChunkCount, length, average), Double::sum);
+        }
     }
 
     private static Map<String, KnowledgeChunkEntity> children(BoxStore store) {
@@ -169,6 +221,79 @@ public final class OfflineHybridEvaluator {
         return scores.entrySet().stream().sorted(Map.Entry.<String, Double>comparingByValue().reversed()
                         .thenComparing(Map.Entry::getKey)).map(Map.Entry::getKey).toList();
     }
+
+    private enum DedupLevel { EXACT, NEAR }
+
+    private static DedupResult deduplicate(List<String> input, Map<String, KnowledgeChunkEntity> children, DedupLevel level) {
+        List<String> output = new ArrayList<>();
+        Map<String, String> exact = new HashMap<>();
+        Map<String, Integer> parentCounts = new HashMap<>();
+        int exactDrops = 0;
+        int nearDrops = 0;
+        int occupancyDrops = 0;
+        for (String id : input) {
+            if (output.size() >= 30) break;
+            KnowledgeChunkEntity chunk = children.get(id);
+            String parent = chunk == null ? null : chunk.parentChunkId;
+            if (parent != null && parentCounts.getOrDefault(parent, 0) >= 2) {
+                occupancyDrops++;
+                continue;
+            }
+            String normalized = normalizeContent(chunk == null ? "" : chunk.content);
+            String hash = Sha256.ofUtf8(normalized);
+            if (exact.containsKey(hash)) {
+                exactDrops++;
+                continue;
+            }
+            boolean near = false;
+            for (String kept : output) {
+                KnowledgeChunkEntity prior = children.get(kept);
+                if (level == DedupLevel.NEAR && jaccard(normalized, normalizeContent(prior == null ? "" : prior.content)) >= 0.92D) {
+                    near = true;
+                    break;
+                }
+            }
+            if (near) {
+                nearDrops++;
+                continue;
+            }
+            output.add(id);
+            exact.put(hash, id);
+            if (parent != null) parentCounts.merge(parent, 1, Integer::sum);
+        }
+        return new DedupResult(List.copyOf(output), exactDrops, nearDrops, occupancyDrops);
+    }
+
+    private static String normalizeContent(String value) {
+        return value == null ? "" : value.replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+    }
+
+    private static double jaccard(String left, String right) {
+        Set<String> a = shingles(left);
+        Set<String> b = shingles(right);
+        if (a.isEmpty() && b.isEmpty()) return 1D;
+        if (a.isEmpty() || b.isEmpty()) return 0D;
+        Set<String> intersection = new HashSet<>(a);
+        intersection.retainAll(b);
+        Set<String> union = new HashSet<>(a);
+        union.addAll(b);
+        return union.isEmpty() ? 0D : (double) intersection.size() / union.size();
+    }
+
+    private static Set<String> shingles(String value) {
+        Set<String> output = new HashSet<>();
+        int[] points = value.codePoints().toArray();
+        if (points.length <= 2) {
+            if (points.length > 0) output.add(value);
+            return output;
+        }
+        for (int index = 0; index < points.length - 1; index++) {
+            output.add(new String(points, index, 2));
+        }
+        return output;
+    }
+
+    private record DedupResult(List<String> ids, int exactDrops, int nearDrops, int parentOccupancyDrops) { }
 
     /** 与 Android qwen3-rerank 请求协议对齐；只发送已通过本地候选链路的标题路径与 Chunk 文本。 */
     private List<String> rerank(RetrievalEvaluationDataset.Case evaluationCase, String query, List<String> candidates, Map<String, KnowledgeChunkEntity> children) throws EmbeddingException {

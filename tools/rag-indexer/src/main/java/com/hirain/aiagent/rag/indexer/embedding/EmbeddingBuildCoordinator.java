@@ -1,6 +1,7 @@
 package com.hirain.aiagent.rag.indexer.embedding;
 
 import com.hirain.aiagent.rag.indexer.pipeline.BuildCancellationToken;
+import com.hirain.aiagent.rag.indexer.chunk.EmbeddingTextRenderer;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -12,12 +13,19 @@ public final class EmbeddingBuildCoordinator {
     private final EmbeddingCache cache;
     private final int batchSize;
     private final int maxRetries;
+    private final String strategyVersion;
 
     public EmbeddingBuildCoordinator(DocumentEmbeddingClient client, EmbeddingCache cache, int batchSize, int maxRetries) {
+        this(client, cache, batchSize, maxRetries, "child-embedding-v1");
+    }
+
+    public EmbeddingBuildCoordinator(DocumentEmbeddingClient client, EmbeddingCache cache, int batchSize, int maxRetries,
+                                     String strategyVersion) {
         this.client = client;
         this.cache = cache;
         this.batchSize = batchSize;
         this.maxRetries = maxRetries;
+        this.strategyVersion = strategyVersion == null || strategyVersion.isBlank() ? "child-embedding-v1" : strategyVersion;
     }
 
     public Map<String, float[]> embed(List<EmbeddingRequest> requests, BuildCancellationToken cancellationToken) throws EmbeddingException {
@@ -58,6 +66,6 @@ public final class EmbeddingBuildCoordinator {
     }
 
     private EmbeddingCacheKey key(EmbeddingRequest request) {
-        return EmbeddingCacheKey.of("DashScope", "text-embedding-v4", 1024, 1, request.embeddingText());
+        return EmbeddingCacheKey.of("DashScope", "text-embedding-v4", 1024, EmbeddingTextRenderer.TEMPLATE_VERSION, strategyVersion, request.embeddingText());
     }
 }

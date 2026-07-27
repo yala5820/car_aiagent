@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "dedup": {
+    "maxCandidates": 30,
+    "maxPerParent": 2,
+    "nearDuplicateThreshold": 0.92,
+    "inputChunkIds": ["c1", "c2", "c3", "c4"],
+    "expectedChunkIds": ["c1", "c4"],
+    "reasons": ["EXACT_CONTENT", "PARENT_OCCUPANCY"]
+  },
+  "parentAggregation": {
+    "childOrder": ["c1", "c2", "c4"],
+    "childParents": {"c1": "p1", "c2": "p1", "c4": "p2"},
+    "expectedParentOrder": ["p1", "p2"]
+  },
+  "evidenceBudget": {
+    "maxParents": 4,
+    "maxTokens": 5000,
+    "parentTokens": {"p1": 2100, "p2": 1800, "p3": 1600},
+    "rankedParents": ["p1", "p2", "p3"],
+    "expectedParents": ["p1", "p2"]
+  }
+}

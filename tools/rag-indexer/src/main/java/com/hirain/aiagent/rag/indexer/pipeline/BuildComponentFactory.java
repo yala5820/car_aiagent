@@ -2,6 +2,7 @@ package com.hirain.aiagent.rag.indexer.pipeline;
 
 import com.hirain.aiagent.rag.indexer.chunk.ChunkBoundaryPolicy;
 import com.hirain.aiagent.rag.indexer.chunk.DocumentChunker;
+import com.hirain.aiagent.rag.indexer.chunk.ParagraphEmbeddingProvider;
 import com.hirain.aiagent.rag.indexer.config.RagBuildConfig;
 import com.hirain.aiagent.rag.indexer.parser.DocumentParserRegistry;
 import com.hirain.aiagent.rag.indexer.parser.DocumentParsingPipeline;
@@ -32,8 +33,16 @@ public final class BuildComponentFactory {
     }
 
     public DocumentChunker createChunker(RagBuildConfig config) {
+        return createChunker(config, null);
+    }
+
+    public DocumentChunker createChunker(RagBuildConfig config, ParagraphEmbeddingProvider paragraphEmbeddingProvider) {
         var policy = config.chunkingConfig();
         return new DocumentChunker(new ChunkBoundaryPolicy(policy.childTargetTokens(), policy.overlapTokens(),
-                policy.tableRowsPerChild(), policy.childSoftMaxTokens(), policy.childHardMaxTokens(), policy.childIdealMinTokens()));
+                policy.tableRowsPerChild(), policy.childSoftMaxTokens(), policy.childHardMaxTokens(), policy.childIdealMinTokens(),
+                policy.parentSoftMaxTokens(), policy.parentHardMaxTokens(), policy.parentSplitOverlapRatio(),
+                policy.configVersion() == 2 ? policy.paragraphCosineThreshold() : 0.7d,
+                policy.configVersion() == 2 ? policy.childForceMergeMaxTokens() : 0,
+                policy.configVersion() == 2 ? policy.childDirectMergeMaxTokens() : 0), paragraphEmbeddingProvider);
     }
 }

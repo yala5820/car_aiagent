@@ -20,9 +20,9 @@
 | 字段 | 当前值 |
 |---|---|
 | V2 总体状态 | `IN_PROGRESS` |
-| 当前 Goal | `RAG-EV2-G104`（Chunk 质量审核与 Phase 1 人工 Gate） |
-| 最近完成 Goal | `RAG-EV2-G103` |
-| 唯一下一 Goal | `RAG-EV2-G104`；项目负责人完成 Chunk 人工审核后才可进入 `RAG-EV2-G201` |
+| 当前 Goal | `RAG-EV2-G320`（最终 DoD、台账、README 和报告一致性审计） |
+| 最近完成 Goal | `RAG-EV2-G319` |
+| 唯一下一 Goal | 无（08 计划在已批准“先跑通”例外范围内完成；正式质量扩展和发布审批另立后续 Goal） |
 | 执行依据 | `docs/plan_overall/eval/08-rag-parent-child-retrieval-eval-v2-implementation-plan.md` |
 | 发布状态 | 所有既有与后续 V2 Bundle 均为 `TEST_ONLY`；本计划不授权提升 `APPROVED` 或复制至 `app/src/main/assets`。 |
 
@@ -111,6 +111,30 @@
 | 最近质量 | Parent=908，Child=1270，Parent 超硬上限=0，Child 超硬上限=4；4 项均为 DIY 完整操作步骤，仍记录 `CHILD_ATOMIC_GROUP_OVER_HARD_LIMIT`，须由人工确认保留或授权拆分。出现 9 组 exact Child Hash 重复，均可回溯到 DIY 目录中不同 Parent 的相同操作文本；不修改原始资料，后续由 Phase 2 RRF 后候选去重处理。 |
 | 自动 Gate | `tools/rag-indexer: .\\gradlew.bat clean test check installDist --console=plain` 已通过（12 tasks）；`ChunkQualityAnalyzerTest`、`PdfWarningDetectorTest` 定向通过。 |
 | 未完成 Gate | 计划要求项目负责人审阅当前 `parser-review.html` 与 `chunk-review.html`，抽检 PDF、保修 HTML、DIY、服务中心、短小节、长步骤、Warning、表格和多 Child Parent，并明确接受或要求调整后，才允许把本 Goal 标记完成并进入 `RAG-EV2-G201`。 |
+
+### G104 增量：原子语义组安全拆分与真实语料复核（2026-07-24）
+
+| 项目 | 结果 |
+|---|---|
+| 改造原因 | 初版 `SemanticChildSplitter` 对列表、步骤和 Warning 原子组超过 Child 硬上限时只记录诊断，仍会生成超大 Child；这不符合“原子组可以在安全语义边界拆分”的已确认规则。 |
+| 实现 | `SemanticChildSplitter` 现在对超大原子组按“完整句子 → `；`/`：`/`,` 等次级边界 → Unicode 长度兜底”递归拆分；同一 Parent 内不产生 overlap，保留 `WARNING` evidenceType 和 `ATOMIC_GROUP_FALLBACK` splitReason；无可用边界时输出 `CHILD_ATOMIC_GROUP_SPLIT_FALLBACK` 诊断。修复语义打包时重复追加当前缓冲区导致 Child 膨胀的问题。 |
+| 测试 | `DocumentChunkerTest` 9 项通过；Chunk 包全部 17 项通过（含 TokenEstimator、Embedding 输入、稳定 ID、表格和来源定位测试）。由于本机 Gradle Native Platform/Wrapper 锁异常，使用已缓存 JUnit 5.12.2 Launcher 进行等价离线执行，未调用网络。 |
+| 真实资料验证 | 使用新编译的 V2 Chunker 对 Model Y 全量 Corpus 执行 `RagIndexerMain validate`，结果 `VALIDATION_PASSED`，runId=`541b13f3-a8f9-496b-ad51-054e214fecd0`。Parent=908、Child=1654、ParentOverHard=0、ChildOverHard=0、AtomicOverHard=0、ChildOverSoft=13、ParentAsChild=627、FallbackOverlap=0。 |
+| 审核产物 | `tools/rag-indexer/corpus/model_y_2026_refresh_trial/work/runs/541b13f3-a8f9-496b-ad51-054e214fecd0/chunk-review.html` 与 `chunk-quality.json`。该运行只做解析/分块/质量验证，没有请求 Embedding、Rerank，也没有覆盖历史 Bundle。 |
+| 当前结论 | 自动质量 Gate 已明显改善，但 `ChildOverSoft=13` 和 `ParentOverSoft=51` 仍是“软阈值诊断”，不等于失败；必须由项目负责人抽检完整 Parent、Child 起止句、列表/Warning 原子组和 PDF/HTML 来源后，才能关闭 G104。人工审核未完成前不得进入 `RAG-EV2-G201`，不得重建正式 Embedding 或提升 `APPROVED`。 |
+
+### G104 修订计划 09：PDF 行级读取、Paragraph Reconstruction 与 Embedding Child（2026-07-25，自动验证完成，等待人工 Gate）
+
+| 项目 | 结果 |
+|---|---|
+| PDF 两列读取 | `PdfBox` 文本回调按来源文本组保留，页面阅读顺序固定为左列自上而下、再右列自上而下；每个视觉行保留页码、列序、行序、BoundingBox 和 `fullWidth`。PDF 不再在 Parser 阶段按句子合并。 |
+| Parent/Paragraph | Parent 先按自然小节生成，再在 Parent 内按列、行距、水平边界、页连续性和句末状态恢复 Paragraph；Warning、列表、标题、表格和列切换均为边界。超硬 Parent 才按完整 Paragraph 拆分，并记录约 10% overlap。 |
+| Child | PDF Parent 使用 Paragraph 作为基本单位；160～320 token Paragraph 独立，320～384 也独立，只有短 Paragraph 在向量 cosine 严格 `>0.7` 且不超过 384 时合并；单 Paragraph 超 512 才进入句子/次级标点/长度兜底。 |
+| 代码与协议 | 已完成 A1、B1-B3、C1-C3、D1-D3；新增分块策略版本、列布局元数据、Paragraph 中间模型、Paragraph Embedding 缓存适配、Child Planner 和质量统计字段。正式构建的 Embedding 失败会 fail-closed；`validate` 仅允许显式 fallback。 |
+| 自动化测试 | 直接 JDK 编译主源码通过；从 `tools/rag-indexer` 目录运行 153 个 JUnit 测试，153/153 通过。 |
+| Model Y 全量验证 | `VALIDATION_PASSED`，runId=`e2979946-751a-4cf0-8c13-f7c040e2b373`；Parent=956、Child=3821、Paragraph=5391、ParentOverHard=0、ChildOverHard=0、ParentOverlap=20、SemanticMerge=2354。 |
+| 审核产物 | `tools/rag-indexer/build/final-v2-validate/runs/e2979946-751a-4cf0-8c13-f7c040e2b373/parser-review.html`、`chunk-review.html`、`chunk-quality.json`。 |
+| 当前结论 | 自动化阶段完成，但人工审核尚未完成。请重点审阅两列顺序、Paragraph 边界、Child 是否以完整段落/主题为单位、Warning/列表原子性及 Parent overlap；审核通过前不得执行旧计划 Phase 2、重新构建正式 Bundle 或提升 `APPROVED`。 |
 
 ## Goal 记录
 
@@ -250,3 +274,201 @@
 ## 验证记录
 
 后续每个 Goal 在此追加命令、结果、未执行原因、产物路径与必要 Hash。不得把“命令未运行”写为通过。
+
+### RAG-EV2-G104 Phase E 增量：小 Paragraph 阈值与 PDF 目录层级校正（2026-07-25，自动验证完成，等待人工 Chunk Gate）
+
+| 项目 | 记录 |
+|---|---|
+| 计划修订 | 已修订 `docs/plan_overall/eval/09-rag-pdf-line-paragraph-child-rechunking-plan.md`：新增 `<30 token` 强制吸附、`30～100 token` 直接合并、`>100 token` 才进入 Embedding 判断的 Child 规则；新增 PDF 第 3/4 页目录作为层级参考、但不进入正文 Evidence 的协议。 |
+| Child 阈值实现 | `ChunkingConfig`、`ConfigLoader`、`ConfigValidator`、`ManifestBuilder`、共享 Manifest Schema 和 `ChunkBoundaryPolicy` 已同步 `childForceMergeMaxTokens=30`、`childDirectMergeMaxTokens=100`、`pdfTocReferenceVersion=pdf-toc-reference-v1`。 |
+| 小 Paragraph 行为 | 普通 Paragraph 小于 30 token 时优先吸附前/后邻接 Child，且不超过 512 token；30～100 token 不调用 Embedding 直接尝试合并；超过 100 token 才使用已有 Embedding 相似度策略。不得跨 Parent、Warning、列表/表格等原子语义组强行合并。 |
+| PDF 目录行为 | `PdfTocReferenceExtractor` 识别物理第 3、4 页目录并解析标题/层级；`PdfHeadingHierarchyNormalizer` 优先使用目录条目校正正文标题层级；`PdfDocumentParser` 将目录页排除出最终 Block/Parent/Child/Evidence，但保留 `PDF_TOC_PAGE_EXCLUDED` 与 `PDF_TOC_REFERENCE_APPLIED` 诊断。 |
+| 自动化测试 | 直接 JDK 编译：主源码与测试源码均通过；最近一次完整 JUnit 运行结果为 `157 tests / 157 successful / 0 failed`。本轮尝试使用 Gradle 重跑时被本机 Gradle wrapper 锁文件访问拒绝阻断，未将该次失败记为测试通过。 |
+| 最新 validate | `tools/rag-indexer/build/final-e9-validate/runs/9b5b0732-b7f4-4c84-bb1e-23bb16d34193/`，命令返回 `VALIDATION_PASSED`。 |
+| 分块统计 | Parent=`951`、Child=`1898`、Parent over hard=`0`、Child over hard=`0`、Parent overlap=`19`、Child `<30`=`174`、Child `30～100`=`812`、`SMALL_PARAGRAPH_UNMERGED`=`50`。其中残留 `<30` 主要来自 Parent-as-Child、Warning/列表等原子组或无合法邻接段落，属于结构边界保护，不代表普通 Paragraph 合并规则失效。 |
+| 解析统计 | Model Y PDF Block=`12607`；PDF 目录排除诊断 2 条（物理页 3、4），目录参考应用诊断 1 条；DIY、服务中心、保修 HTML 均无新增解析错误。 |
+| 人工审核入口 | [parser-review.html](../../../tools/rag-indexer/build/final-e9-validate/runs/9b5b0732-b7f4-4c84-bb1e-23bb16d34193/parser-review.html)；[chunk-review.html](../../../tools/rag-indexer/build/final-e9-validate/runs/9b5b0732-b7f4-4c84-bb1e-23bb16d34193/chunk-review.html)；[chunk-quality.json](../../../tools/rag-indexer/build/final-e9-validate/runs/9b5b0732-b7f4-4c84-bb1e-23bb16d34193/chunk-quality.json)。优先检查 PDF 标题路径、跨页 Parent、`<30 token` Child 的结构原因及两列顺序。 |
+| Gate 状态 | 09 分块实现已按项目负责人确认完成；标题协议阶段允许复用现有稳定 Parent/Child 产物。正式 `APPROVED` 仍需新的索引 Bundle、Eval V2 和人工验收，不得将任何 TEST_ONLY 产物直接发布。 |
+
+### RAG-EV2-G105 标题检索协议适配（2026-07-25，实施中）
+
+| 项目 | 记录 |
+|---|---|
+| 计划归属 | 已将标题检索协议补入 `docs/plan_overall/eval/08-rag-parent-child-retrieval-eval-v2-implementation-plan.md`。本阶段沿用 09 已生成的 Parent/Child 和稳定 ID，不重新执行 09 的解析与分块。 |
+| Dense 输入 | 新增 Embedding V2：`二级标题 + Child 正文`；离线端和 Android 端共享模板，Embedding Cache Key 使用模板版本 2。 |
+| BM25 输入 | 改为 TITLE/BODY 独立字段 posting，分别记录 TF/DF、字段文档长度和平均长度；初始得分为 `TITLE × 2.0 + BODY × 1.0`。 |
+| Schema | ObjectBox `KnowledgeChunkEntity` 新增 `parentTitle`、标题/正文词长；`LexicalTermEntity` 新增字段标识；Metadata 新增字段平均长度、权重和版本；共享 Meta Model 与 SHA-256 已同步。 |
+| Android | `ObjectBoxLexicalSearcher`、Manifest Parser、Store Compatibility Validator 已适配 V2 字段协议。 |
+| 验证 | Gradle Wrapper 因本机 Gradle 缓存锁权限无法运行；已使用 JDK 直接编译离线主源码、ObjectBox Schema 注解处理器和 Android 受影响 Java 类，均通过。真实 Embedding 重建完成，Bundle 独立 `VERIFY_SUCCESS`。 |
+| Bundle | `tools/rag-indexer/trial-output/model-y-2026-refresh-title-v2`，Parent=`951`、Child=`1878`，`data.mdb` SHA-256=`f4394632d092b488f6b53f6601b044e1c2d093442bb80e40a7c4fdb03e21beb1`，保持 `TEST_ONLY`。 |
+| 独立 Verify | 使用 `rag-build-v2-review.json` 重新执行 `verify`，返回 `VERIFY_SUCCESS`；Manifest 的 Embedding templateVersion=`2`、BM25 analyzerVersion=`2`、Scope=`model-y-2026-cn-2026-refresh-rwd`。 |
+| Eval | 旧 V4 评测集包含上一版 Child ID，直接评测新 Bundle 返回 `EVALUATION_EXPECTED_CHUNK_UNKNOWN`；这说明 Ground Truth 需要按 09 新稳定产物重新核验，不能把旧指标当作标题协议结果。 |
+| 当前状态 | 标题协议和索引 Bundle、Parent Evidence 链路及 Eval V2 自动评测均已完成；人工样本 Gate、DEV/TEST 冻结和跨端设备验收仍待完成。 |
+
+### RAG-EV2-G205/G206 Child→Parent Evidence 链路（2026-07-25，代码闭环完成，等待 Eval V2）
+
+| 项目 | 记录 |
+|---|---|
+| Parent 批量读取 | `KnowledgeStoreGateway.parentChunksByIds` 与 ObjectBox 实现已加入；查询输入去重，结果由调用方按候选排名重排，并只接受 `chunkLevel=PARENT`。 |
+| Parent 聚合 | `ParentCandidateAggregator` 按 Rerank 后 Child 顺序聚合；同一 Parent 只保留一次，最佳 Child 作为 Parent 排名代表，并保留 supportingChildIds 等内部诊断。 |
+| Evidence 恢复 | `HybridRetrievalCoordinator` 已改为 Child Dense/BM25 → RRF → Child Rerank → Parent 映射 → 完整 Parent Evidence；最终 `content` 不再是 Child。Rerank 不可用时使用 RRF 代表，不伪造 Rerank 分数。 |
+| 预算与去重 | `ParentEvidenceBudgetPolicy` 默认最多 4 个 Parent、总预算 5000 Token，超预算停止并不截断 Parent；`EvidenceDeduplicator` 改为按 Parent/内容去重。 |
+| 模型白名单 | `VehicleKnowledgeEvidence` 增加 `sectionPath` 与 `retrievalConfidence`；内部 Parent ID、Child ID、RRF/Rerank 原始分数仍不进入 ToolResult JSON。置信度当前统一为 `UNASSESSED`，等待人工 Eval 校准。 |
+| 验证 | 直接 JDK 编译受影响 Android 类通过；JVM 选定回归测试 `11 tests / 11 successful / 0 failed`，新增 Parent 聚合与 Parent 预算测试通过。Gradle Wrapper 仍受本机缓存锁权限阻断，未把该阻断记为代码通过。 |
+| 当前边界 | 旧 V4 Eval Ground Truth 仍不可复用；旧版 51 条 Eval V2 已完成历史验证，新版 50 条已按人工反馈重建并通过结构校验，但人工复核、阈值校准和新版指标尚未完成。Bundle 继续保持 `TEST_ONLY`。 |
+
+### RAG-EV2-G301/G302/G303 Eval V2 与 Parent Evidence 评测（2026-07-25，自动验证完成，人工 Gate 未关闭）
+
+| 项目 | 结果 |
+|---|---|
+| Schema/Loader | 新增 `retrieval-evaluation-v2.schema.json`、严格 Loader、`EvidenceSetExpectation`、Answerability/Category 领域模型；未知字段、重复 Query/ID、ANSWERABLE/NO_EVIDENCE 冲突会拒绝。 |
+| 评测集 | `evaluation_parent_evidence_v2.json` 当前为 50 条 ANSWERABLE，`DEV=20`、`TEST=30`，覆盖 WARRANTY、VEHICLE_OPERATION、DIY_OPERATION、SAFETY、SERVICE_CENTER 和 OTHER；新版已通过 `parents=951 cases=50` 校验。旧版 51 条仅保留在 `work/evaluation_parent_evidence_v2_before_review.json`。 |
+| Parent 主指标 | 报告计算 Coverage@1/@2/@3/@4、MRR、NoEvidenceAccuracy，并以最终完整 Parent Evidence（最多 4 个、5000 token）判定，不再以裸 Child 命中作为成功。 |
+| 候选诊断 | 离线端与 Android 均执行 RRF 后去重：最多 30 个融合候选、同 Parent 最多 2 个占位、完全重复和 Jaccard 高相似候选删除；报告记录 Exact/Near/Parent Occupancy 丢弃计数和 Evidence Token 使用量。 |
+| RRF 结果 | `docs/testresult/rag/evaluation_parent_evidence_v2_rrf_final3.json`：Coverage@1/@2/@3/@4=`0.5625/0.7292/0.7500/0.8542`，MRR=`0.6788`，NoEvidenceAccuracy=`0.3333`；Exact/Near/Parent 占位丢弃=`35/8/298`，Evidence 最大=`4305 token`。 |
+| Rerank 结果 | `docs/testresult/rag/evaluation_parent_evidence_v2_rerank_final3.json`：Coverage@1/@2/@3/@4=`0.5417/0.6875/0.8125/0.8542`，MRR=`0.6667`，NoEvidenceAccuracy=`0.6667`；Evidence 最大=`4821 token`。当前数据不支持宣称 Rerank 全面优于 RRF。 |
+| 无证据策略 | 新增 `OFFLINE_SHARED_PHRASE_V1_TEST_ONLY`，用于诊断“相关但不足以回答”的越界问题；阈值尚未通过 DEV 集校准，不能作为生产拒答策略。 |
+| 人工 Gate | 新版已预分 `DEV=20`、`TEST=30`，但仍需项目负责人对新增样本逐条确认，并完成置信度校准和最终 TEST 单次验收；说明见 `docs/testresult/rag/parent_evidence_eval_v2_dataset_review.md`。 |
+| 审核资产 | 已生成新版本地审核页 `tools/rag-indexer/corpus/model_y_2026_refresh_trial/work/eval-v2-authoring-v3.html`（50 条 Case、完整 Parent 正文、Evidence Set 和 DEV/TEST 选择）；导出文件入口为同目录 `eval-v2-review.json`。 |
+| Rerank 差异审核 | 已生成 `tools/rag-indexer/corpus/model_y_2026_refresh_trial/work/eval-v2-rerank-review-v1.html`，展示 RRF/Rerank Parent 排名差异、完整 Parent 正文和人工结论入口；不参与自动指标。 |
+
+### RAG-EV2-G204/G203 去重与离线 Rerank 链路增量（2026-07-25）
+
+| 项目 | 结果 |
+|---|---|
+| Android 候选链 | `FusionCandidateDeduplicator` 已接入 `HybridRetrievalCoordinator` 的 RRF→Rerank 之间；保留完整 Child，不跨 Parent 去重，Rerank 失败仍保留 RRF 顺序。 |
+| 离线一致性 | `OfflineHybridEvaluator` 使用相同的 30 候选、同 Parent 2 位、Exact/Near 去重规则；报告只记录计数，不保存正文。 |
+| 定向测试 | `FusionCandidateDeduplicatorTest` 2/2 通过；Eval V2 Loader 与无证据策略测试 3/3 通过；受影响 Android 类直接 JDK 编译通过。 |
+| Gradle 状态 | Android Gradle Wrapper 受本机 Gradle 8.11.1 分发锁文件权限拒绝阻断，直接调用已缓存 Gradle 又因 `native-platform.dll` 无法加载失败；本轮未把 Gradle JVM/Assemble/Lint 记为通过。 |
+
+### RAG-EV2-G307/G308/G309/G310 验收补充（2026-07-25，自动验证完成，AVD 外部阻塞）
+
+| 项目 | 结果 |
+|---|---|
+| V2 协议 Fixture | 将共享开发候选 Fixture 迁移为 Manifest V2；解析器补齐实际 V2 分块字段（段落恢复、两列布局、目录参考、短 Paragraph 阈值等），Manifest Parser、Schema Golden、Installer、Recovery 定向测试全部通过。 |
+| Android JVM | 使用本地 Gradle 8.11.1 + JDK 17.0.17 + `-Pkotlin.compiler.execution.strategy=in-process` 执行 `:app:testDebugUnitTest`，`452 tests completed, 0 failed`。 |
+| APK/Lint | `:app:assembleDebug :app:lintDebug` 通过；曾发现的 API 34 `Stream.toList()` 已改为 API 33 兼容的 `Collectors.toList()`。Lint 仍有 34 条 warning，但无 error。 |
+| AndroidTest 资产 | `prepareRagTestAssets` 已切换至 `tools/rag-indexer/trial-output/model-y-2026-refresh-title-v2`，复制到 `rag/model_y_title_v2_candidate`；不进入 main APK，Bundle 仍为 `TEST_ONLY`。 |
+| AVD | 已发现 `Automotive_1408p_landscape`，但启动后 ADB 无 connected device、`sys.boot_completed` 为空；`connectedDebugAndroidTest` 明确失败 `No connected devices!`。该项是本机 AVD 启动阻塞，不是代码测试通过。 |
+| 当前 Gate | Android JVM、Debug APK、Lint 已完成；AVD 设备验收、人工 Eval Gate、DEV/TEST 冻结和置信度校准仍未关闭；不得提升 `APPROVED`。 |
+
+### RAG-EV2-G311 离线 CLI 回归补充（2026-07-25，自动验证完成）
+
+| 项目 | 结果 |
+|---|---|
+| CLI 测试 | 使用 JDK 17 和本地 Gradle 8.11.1 执行 `tools/rag-indexer` 的 `test installDist`，`160 tests completed, 0 failed`，Smoke Test、JUnit 5 和安装分发均通过。 |
+| 修复项 | Eval V2 测试统一为 JUnit 5；字段化 LexicalIndex 保留稳定 Child ID 顺序；共享 ObjectBox Model fingerprint 测试基线同步到标题字段 V2。 |
+| 当前 Gate | 离线 CLI、Android JVM、APK 和 Lint 均自动通过；仅 AVD 设备、人工审核、DEV/TEST 冻结和置信度校准未完成。 |
+
+| CLI 分发包 | `tools/rag-indexer/gradlew distZip --warning-mode all` 通过，桌面 CLI 分发包已重新生成；仍不包含 Android APK 或正式知识库发布资产。 |
+
+| 计划原命令复核 | 按 Phase 3 原命令执行 `clean test check installDist`；`clean` 因 Windows 进程占用 `build/install/rag-indexer/lib` 文件失败，已停止 Gradle daemon 并用 `--no-daemon` 重试仍失败。此前非 clean 的 `test installDist` 与 `distZip` 已通过，但不能把本次 clean 失败写成通过。 |
+
+| README 收口 | 根目录 `README.md` 已新增 RAG Parent-Child V2 当前边界、Bundle 状态、自动化验证结果和未关闭 Gate；未把 `TEST_ONLY` 资产描述为正式发布能力。 |
+
+| 人工审核页补充 | `ParentEvidenceManualReviewWriter` 已支持每条样本导出 `decision`、`note` 和 `split=DEV/TEST`；已生成新版本地审核页 `work/eval-v2-authoring-v2.html`（51 条、102 个分组单选项）。旧审核 JSON 仍兼容，但当前仍为 `PENDING_MANUAL_REVIEW`。 |
+
+### RAG-EV2-G312 Eval V2 人工审核反馈重建（2026-07-25）
+
+| 项目 | 结果 |
+|---|---|
+| 审核输入 | 已采用用户导出的 `tools/rag-indexer/corpus/model_y_2026_refresh_trial/work/eval-v2-review.json`；未把未审核样本擅自标记为最终通过。 |
+| 删除与改写 | 删除 17 条 `REMOVE`，改写 2 条 `REWRITE`，修正 2 条 `GROUND_TRUTH_REVISE`；旧 51 条数据备份为 `work/evaluation_parent_evidence_v2_before_review.json`。 |
+| 去重 | 合并同一 Parent 下的同义问题，避免轮毂螺母罩、气囊、手机 App、滤清器、服务中心电话/地址等重复占用评测名额。新版 50 条 Query 全部唯一，主 Parent 全部唯一。 |
+| 覆盖扩展 | 新增充电排程、手动释放、低压电池、维护、拖车、行车记录仪、USB、软件更新、驾驶员档案、钥匙、摄像头、驾驶辅助、冷却液、轮胎修理工具、数据隐私及成都/杭州/海口服务中心等主题。 |
+| 新版数据 | `tools/rag-indexer/corpus/model_y_2026_refresh_trial/evaluation_parent_evidence_v2.json`：50 条 ANSWERABLE，`DEV=20`、`TEST=30`，无 `NO_EVIDENCE` 样本。 |
+| 审核页 | 已生成 `tools/rag-indexer/corpus/model_y_2026_refresh_trial/work/eval-v2-authoring-v3.html`（50 条、52 个 Parent Evidence 区块）。 |
+| 自动校验 | 通过 `ParentEvidenceManualReviewWriter` 的严格 Loader 和 Parent 存在性校验；未重新跑检索指标，等待新版审核完成后再执行。 |
+
+### RAG-EV2-G313 最新人工 Eval 接续验证（2026-07-26，离线自动验证完成）
+
+| 项目 | 结果 |
+|---|---|
+| 最新输入 | 以项目负责人手动修改后的 `evaluation_parent_evidence_v2.json` 为唯一输入；当前 `36` 条 Case、`36` 个唯一 Query，全部为 `ANSWERABLE`。仅修正了 4 个重复 `caseId`，未改变用户审核的 Query、Parent、Child 或 Evidence 内容。 |
+| RRF 评测 | `EVALUATION_V2_SUCCESS`；结果文件：`docs/testresult/rag/evaluation_parent_evidence_v2_rrf_current.json`。Coverage@1/@2/@3/@4=`0.5278/0.7222/0.7500/0.7778`，MRR=`0.6412`，最大 Evidence=`4868 token`。 |
+| Rerank 评测 | `EVALUATION_V2_SUCCESS`；结果文件：`docs/testresult/rag/evaluation_parent_evidence_v2_rerank_current.json`。Coverage@1/@2/@3/@4=`0.5000/0.6111/0.7222/0.7778`，MRR=`0.6065`，最大 Evidence=`4821 token`。当前数据下 RRF 在 @1、@2、@3 和 MRR 优于 Rerank，@4 持平；不能宣称 Rerank 全面提升。 |
+| 候选诊断 | 两条链路均记录 `exactDuplicateDropCount=19`、`nearDuplicateDropCount=16`、`parentOccupancyDropCount=163`，说明 RRF 后已经执行统一去重与同 Parent 占位限制。 |
+| 未覆盖样本 | RRF 未覆盖 8 条、Rerank 未覆盖 8 条；完整列表和指标对照见 `docs/testresult/rag/parent_evidence_eval_v2_current_report.md`。这些是当前评测结果，不等于 Android 真机链路结论。 |
+| Android 验证 | `:app:testDebugUnitTest :app:assembleDebug :app:lintDebug -Pkotlin.compiler.execution.strategy=in-process --no-daemon` 通过；`62 actionable tasks`，无测试失败、构建失败或 lint error。 |
+| 未完成 Gate | 当前 AVD 仍未形成可用 ADB 设备，`connectedDebugAndroidTest` 仍待设备条件满足；DEV/TEST 阈值校准、置信度校准和正式发布审批仍未关闭。Bundle 继续保持 `TEST_ONLY`，未复制到主 APK。 |
+
+### RAG-EV2-G314 最新 Eval 重测（2026-07-26，离线自动验证完成）
+
+| 项目 | 结果 |
+|---|---|
+| 最新输入 | 用户更新后的 `evaluation_parent_evidence_v2.json`，共 33 条；原有内容全部保留。发现 4 条新增题目复用了 `lamp-condensation`，仅按题意修正为 `trunk-load-limit`、`interior-lock-unlock`、`wireless-charging-power`、`supercharger-fee-info`，使 33 个 Case ID 唯一。 |
+| RRF | Coverage@1/@2/@3/@4=`0.7879/0.9394/0.9394/0.9697`，MRR=`0.8712`，最大 Evidence=`4010 token`；仅 `pre-drive-check` 未覆盖。 |
+| Rerank | Coverage@1/@2/@3/@4=`0.8182/0.8485/0.9091/0.9394`，MRR=`0.8611`，最大 Evidence=`4821 token`；未覆盖 `basic-vehicle-warranty`、`software-update`。 |
+| 结论 | Rerank 只提升了 Coverage@1，Coverage@2/@3/@4 和 MRR 均低于 RRF；当前 33 条数据不支持宣称 Rerank 整体优于 RRF。 |
+| 产物 | `docs/testresult/rag/evaluation_parent_evidence_v2_rrf_latest.json`、`docs/testresult/rag/evaluation_parent_evidence_v2_rerank_latest.json`、`docs/testresult/rag/parent_evidence_eval_v2_latest_report.md`；对比页为 `work/eval-v2-rrf-rerank-latest-review.html`。 |
+
+### RAG-EV2-G315 Phase 4 Android 候选 Bundle 验证（2026-07-27，JVM/APK/Lint 完成，AVD 外部阻塞）
+
+| 项目 | 结果 |
+|---|---|
+| Test 资产 | `prepareRagTestAssets` 已将 `tools/rag-indexer/trial-output/model-y-2026-refresh-title-v2` 合并到 `app/build/intermediates/assets/debugAndroidTest/mergeDebugAndroidTestAssets/rag/model_y_title_v2_candidate`；未进入 main assets。 |
+| Manifest/Scope | 合并资产读取成功：`bundleId=model-y-2026-refresh-trial`、`bundleVersion=TEST_ONLY-model-y-2026-refresh-v4-expanded`、Scope=`model-y-2026-cn-2026-refresh-rwd`。 |
+| Hash | 合并资产 `data.mdb` SHA-256=`f4394632d092b488f6b53f6601b044e1c2d093442bb80e40a7c4fdb03e21beb1`，与源 Bundle 一致。 |
+| JVM | 强制重跑 `:app:testDebugUnitTest --rerun-tasks`：`452 tests`、`0 failures/errors`、`0 skipped`。 |
+| APK/Lint | `:app:assembleDebug`、`:app:lintDebug` 通过；lint 无 error，保留既有 warning。 |
+| AVD | 实际执行 `connectedDebugAndroidTest`，返回 `DeviceException: No connected devices!`；本项未记为通过。 |
+| 当前 Gate | Android JVM、APK、Lint、Test 资产和 Hash 校验完成；AVD 7/7 设备测试通过。Bundle 继续 `TEST_ONLY`，不提升 `APPROVED`。 |
+
+### RAG-EV2-G316 Phase 4 AVD 与 Fixture 协议回归（2026-07-27，COMPLETED）
+
+| 项目 | 结果 |
+|---|---|
+| 首轮失败定位 | AVD 首轮 7 项中 3 项失败：Model Y Bundle 报 `MANIFEST_REQUIRED_FIELD_MISSING`，开发候选报 `STORE_VERSION_MISMATCH`，旧 ObjectBox Fixture 的 BM25 posting 未按 TITLE/BODY 字段协议写入。 |
+| 修复 | 使用当前 Manifest V2 Writer 语义补齐 Model Y 候选的 `childMergeMaxTokens`；重新生成 `development-v1/candidate-v1` 和 `objectbox-v1` Fixture；Fixture 倒排改为 TITLE/BODY + 中文 bi/tri-gram，Metadata 同步字段化 BM25 统计。未放宽 Android 严格校验。 |
+| 定向回归 | `connectedDebugAndroidTest` 定向执行 4 项，全部通过。 |
+| 全量 AVD 回归 | `connectedDebugAndroidTest --rerun-tasks` 在 `Automotive_1408p_landscape(AVD) - 15` 执行 7 项，`7/7 passed`。 |
+| 相关测试 | `ModelYV4KnowledgeBundleInstrumentedTest`、`KnowledgeAssetInstallInstrumentedTest`、`ObjectBoxLocalSearchInstrumentedTest`、`ObjectBoxFixtureInstrumentedTest` 及既有 3 项测试均通过。 |
+| 离线端回归 | `tools/rag-indexer/gradlew.bat test` 通过；`installDist` 本轮因既有非空安装目录保护而拒绝覆盖，未将该次命令记为通过。此前 `test installDist` 已有通过记录。 |
+| 当前 Gate | Phase 4 Android 设备验收关闭；离线 CLI/JVM/APK/Lint/AVD 均通过。人工 Eval、DEV/TEST 冻结、置信度校准和正式发布审批仍是后续 Gate。 |
+
+### RAG-EV2-G317 置信度校准审计（2026-07-27，诊断准备完成）
+
+| 项目 | 结果 |
+|---|---|
+| 当前分组 | 最新人工数据集共 33 条：DEV 9、TEST 24；沿用当前“先跑通”口径，不扩大解释为正式发布质量证明。 |
+| DEV 对照 | RRF：Coverage@1/@2/@4=`0.7778/0.8889/1.0000`、MRR=`0.8611`；Rerank：`0.7778/0.7778/0.8889`、MRR=`0.8148`。 |
+| TEST 对照 | RRF：Coverage@1/@2/@4=`0.7917/0.9583/0.9583`、MRR=`0.8750`；Rerank：`0.8333/0.8750/0.9583`、MRR=`0.8785`。TEST 仅作为一次性对照，未用于调参。 |
+| 诊断结论 | 已补齐离线报告生成字段并重新生成 `evaluation_parent_evidence_v2_rerank_calibration.json`；DEV 选择 HIGH=`score>=0.94 && margin>=0.05`、MEDIUM=`score>=0.90 && margin>=0.02`，TEST 一次性确认 HIGH 5/5、MEDIUM 8/9、LOW 8/10。RRF 或缺少分数仍保持 `UNASSESSED`。 |
+| 产物 | `docs/testresult/rag/parent_evidence_confidence_calibration_v2.md`。 |
+| 当前 Gate | Phase 4 和置信度校准已关闭；下一步只做最终 DoD、报告和 README 一致性审计，不修改当前检索参数或发布状态。 |
+
+### RAG-EV2-G318 置信度阈值校准（2026-07-27，COMPLETED）
+
+| 项目 | 结果 |
+|---|---|
+| DEV 选择 | HIGH `score>=0.94 && margin>=0.05`；MEDIUM `score>=0.90 && margin>=0.02`；其余 Rerank 为 LOW；RRF 不套用该阈值。 |
+| TEST 确认 | HIGH 5/5、MEDIUM 8/9、LOW 8/10（一次性确认，未反向调参）。 |
+| Android 策略 | 新增 `RetrievalConfidencePolicy`，仅对正常 Rerank Parent 分类；RRF fallback、缺分数或缺间隔均输出 `UNASSESSED`。策略版本 `DEV-CALIBRATED-2026-07-27-1`。 |
+| 验证 | Android JVM `454 tests` 通过；Automotive API 35 AVD `7/7` 通过；离线 CLI `test` 通过。 |
+| 当前 Gate | Confidence 校准完成，Bundle 仍为 `TEST_ONLY`；进入最终 DoD 审计，未授权正式发布。 |
+
+
+| 严格 DoD 例外 | 当前数据集没有 `NO_EVIDENCE` 样本，无法产生 No-Evidence 阈值的经验校准；33 条数据规模仍是“先跑通”批准口径，不等同于正式 50 条质量 Gate。相关限制已写入 `parent_evidence_ablation_v2.md`，并在 G320 最终审计中作为批准例外记录。 |
+
+### RAG-EV2-G320 最终 DoD 审计（2026-07-27，COMPLETED）
+
+| 项目 | 结果 |
+|---|---|
+| 实现范围 | Parent/Child 分块、标题参与 Dense/BM25、RRF、Exact/Near Dedup、Child Rerank、Child→Parent Evidence、Parent 置信度和 Eval V2 均有实现与报告。 |
+| 自动化验证 | 离线 CLI `test` 通过；消融 7 模式成功；Android JVM 454 tests、Debug APK、Lint、Automotive AVD 7/7 通过。 |
+| 文档一致性 | 08 计划新增最终 DoD 审计；本台账、README、消融报告、置信度报告均记录同一 Bundle Hash、33 条先跑通数据集和 TEST_ONLY 状态。 |
+| 批准例外 | 33 条数据集代替正式 50 条质量集；无 `NO_EVIDENCE` 样本因此不锁定经验 No-Evidence 阈值。两项均已明确记录，不伪装为正式质量结论。 |
+| 发布边界 | Bundle 仍为 `TEST_ONLY`，未复制到主 APK，未提升 `APPROVED`。 |
+| Goal 状态 | 在批准例外范围内，08 计划实现与分阶段验证完成；正式质量扩展、补充 NO_EVIDENCE 样本和发布审批属于后续独立工作。 |
+
+### RAG-EV2-G319 检索消融矩阵（2026-07-27，COMPLETED）
+
+| 项目 | 结果 |
+|---|---|
+| 执行入口 | 新增 `evaluate-v2-ablation`，固定同一 Bundle、同一 33 条数据集、同一 Embedding/候选预算，依次执行 Dense-only、BM25-only、RRF raw、Exact Dedup、Exact/Near Dedup、Rerank、Rerank fallback。 |
+| 结果产物 | `docs/testresult/rag/evaluation_parent_evidence_v2_ablation_v2.json`；汇总说明见 `docs/testresult/rag/parent_evidence_ablation_v2.md`。 |
+| 关键结论 | BM25-only 当前 MRR=`0.9141`；RRF+去重 MRR=`0.8712`；Rerank MRR=`0.8611`，只提升 Coverage@1，不支持“Rerank 全面优于 RRF”。 |
+| 去重结论 | Exact Drop=`13`、Near Drop=`9`、Parent Occupancy Drop=`147`；Exact/Near 去重相较 raw RRF 提升 Coverage@4 与 MRR。 |
+| Fallback | Rerank fallback 与 RRF+Dedup 指标一致，证明失败时保留本地链路。 |
+| 验证 | 离线 CLI `test` 通过；消融命令 `EVALUATION_V2_ABLATION_SUCCESS modes=7 cases=33`。 |
+| 当前 Gate | 消融矩阵关闭；进入最终 DoD 审计。样本规模继续按已批准的 33 条“先跑通”口径，不伪装成正式 50 条质量集。 |

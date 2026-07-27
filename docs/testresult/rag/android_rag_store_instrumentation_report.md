@@ -1,6 +1,8 @@
 # Android RAG Store Instrumentation 测试报告
 
-状态：`PASSED`。本报告验证 Android 端使用开发 Fixture 与 V4 `TEST_ONLY` 真实资料候选的 Asset 安装、无主 Asset 降级和只读 ObjectBox 读取链路；不验证正式 Bundle 候选，也不代表 `RAG-G905` 已完成。
+状态：`HISTORICAL_V4_RESULT`。本报告记录此前 Android 端使用开发 Fixture 与 V4 `TEST_ONLY` 真实资料候选的 Asset 安装、无主 Asset 降级和只读 ObjectBox 读取链路；不代表当前 Parent-Child V2 Bundle 的设备 Gate 已完成，也不代表 `RAG-G905` 已完成。
+
+> 当前 V2 验收状态：`connectedDebugAndroidTest` 已切换到 `model_y_title_v2_candidate` 并成功构建测试 APK，但本机 AVD 未注册为 ADB device，Gradle 返回 `No connected devices!`。下文 V4 结果仅作为历史基线保留。
 
 ## 执行环境
 

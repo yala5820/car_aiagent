@@ -8,9 +8,15 @@ import java.util.List;
 
 /** Parent 表示完整主题；稳定 ID 在 G302 生成，G301 仅保留确定顺序与可追溯范围。 */
 public record ParentChunk(int ordinal, String documentId, String title, String headingPath, String text, SourceLocator locator,
-                          List<StructuredBlock> blocks, List<TableBlock> tables) {
+                          List<StructuredBlock> blocks, List<TableBlock> tables,
+                          List<ReconstructedParagraph> paragraphs, int segmentIndex, boolean overlapSegment) {
+    public ParentChunk(int ordinal, String documentId, String title, String headingPath, String text, SourceLocator locator,
+                       List<StructuredBlock> blocks, List<TableBlock> tables) {
+        this(ordinal, documentId, title, headingPath, text, locator, blocks, tables, List.of(), 0, false);
+    }
     public ParentChunk {
         blocks = List.copyOf(blocks);
         tables = List.copyOf(tables);
+        paragraphs = List.copyOf(paragraphs);
     }
 }

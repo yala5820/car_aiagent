@@ -16,7 +16,7 @@ public final class RagJsonCodec {
         return root.toString();
     }
     private static JsonObject evidence(VehicleKnowledgeEvidence value) {
-        JsonObject result = new JsonObject(); result.addProperty("evidenceId", value.evidenceId()); result.addProperty("content", value.content()); result.addProperty("documentTitle", value.documentTitle()); result.addProperty("documentVersion", value.documentVersion()); result.add("sourceLocator", locator(value.sourceLocator())); result.addProperty("applicability", value.applicability().name()); return result;
+        JsonObject result = new JsonObject(); result.addProperty("evidenceId", value.evidenceId()); result.addProperty("content", value.content()); result.addProperty("documentTitle", value.documentTitle()); result.addProperty("documentVersion", value.documentVersion()); if (value.sectionPath() != null) result.addProperty("sectionPath", value.sectionPath()); result.add("sourceLocator", locator(value.sourceLocator())); result.addProperty("applicability", value.applicability().name()); result.addProperty("retrievalConfidence", value.retrievalConfidence().name()); return result;
     }
     private static JsonObject locator(SourceLocator value) {
         JsonObject result = new JsonObject(); result.addProperty("sourceFormat", value.sourceFormat().name()); JsonArray path = new JsonArray(); for (String part : value.headingPath()) path.add(part); result.add("headingPath", path);

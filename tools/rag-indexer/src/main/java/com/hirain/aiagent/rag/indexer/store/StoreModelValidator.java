@@ -26,7 +26,12 @@ public final class StoreModelValidator {
         }
         if (parentCount != model.metadata().parentChunkCount || childCount != model.metadata().childChunkCount) throw new IllegalArgumentException("Chunk 计数不一致");
         chunks.values().stream().filter(chunk -> "CHILD".equals(chunk.chunkLevel)).forEach(child -> validateChild(child, chunks));
-        model.lexicalIndex().postingsByTerm().forEach((term, postings) -> {
+        validatePostings(model.lexicalIndex().titlePostingsByTerm(), chunks);
+        validatePostings(model.lexicalIndex().bodyPostingsByTerm(), chunks);
+    }
+
+    private static void validatePostings(Map<String, java.util.List<LexicalPosting>> postingsByTerm, Map<String, KnowledgeChunkEntity> chunks) {
+        postingsByTerm.forEach((term, postings) -> {
             for (LexicalPosting posting : postings) {
                 KnowledgeChunkEntity child = chunks.get(posting.childId());
                 if (child == null || !"CHILD".equals(child.chunkLevel)) throw new IllegalArgumentException("词法 posting 引用非 Child");

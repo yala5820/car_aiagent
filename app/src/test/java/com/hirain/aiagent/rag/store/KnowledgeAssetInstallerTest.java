@@ -34,7 +34,7 @@ public class KnowledgeAssetInstallerTest {
         Path files = Files.createTempDirectory("rag-install-");
         KnowledgeAssetInstaller installer = installer(files);
         assertTrue(installer.install(plan(source(manifest()), "first")).installed());
-        String changed = manifest().replace("c8cc09d2bb36e21d2e3f00b46ef7d11a7ba4b3cbe95290ca514b8e27b8fe07a9", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        String changed = manifest().replace("84fde8f27c282150769786757a935948e28d6a33e57651a21a5b4b072d6d914b", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         KnowledgeInstallResult result = installer.install(plan(source(changed), "second"));
         assertFalse(result.installed());
         assertEquals("BUNDLE_VERSION_REUSED_WITH_DIFFERENT_CONTENT", result.reasonCode());

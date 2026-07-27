@@ -27,7 +27,7 @@ final class ManifestBuilderTest {
         assertEquals(100, manifest.hnsw().get("indexingSearchCount"));
     }
     static KnowledgeStoreMetadataEntity metadata() {
-        var value = new KnowledgeStoreMetadataEntity(); value.bundleId="bundle"; value.bundleVersion="1"; value.knowledgeScopeId="scope"; value.builderVersion="1"; value.builtAtEpochMs=0; value.objectBoxVersion="5.4.0"; value.schemaFingerprint=hash(); value.parserConfigHash=hash(); value.chunkingConfigHash=hash(); value.corpusHash=hash(); value.hnswConfigFingerprint=hash(); value.embeddingProvider="DashScope"; value.embeddingModel="text-embedding-v4"; value.embeddingDimension=1024; value.distanceType="COSINE"; value.embeddingTemplateVersion=1; value.lexicalAnalyzerVersion=1; value.sourceLocatorSchemaVersion=1; value.sourceFormatCounts="{}"; return value;
+        var value = new KnowledgeStoreMetadataEntity(); value.bundleId="bundle"; value.bundleVersion="1"; value.knowledgeScopeId="scope"; value.builderVersion="1"; value.builtAtEpochMs=0; value.objectBoxVersion="5.4.0"; value.schemaFingerprint=hash(); value.parserConfigHash=hash(); value.chunkingConfigHash=hash(); value.corpusHash=hash(); value.hnswConfigFingerprint=hash(); value.embeddingProvider="DashScope"; value.embeddingModel="text-embedding-v4"; value.embeddingDimension=1024; value.distanceType="COSINE"; value.embeddingTemplateVersion=2; value.lexicalAnalyzerVersion=2; value.lexicalFieldVersion=2; value.bm25TitleWeight=2.0; value.bm25BodyWeight=1.0; value.sourceLocatorSchemaVersion=1; value.sourceFormatCounts="{}"; return value;
     }
     static String hash() { return "sha256:" + "a".repeat(64); }
     private static Map<String, Object> hnsw(String fingerprint) {

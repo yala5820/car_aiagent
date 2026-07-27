@@ -9,6 +9,6 @@ public final class ParentContextResolver {
     public List<KnowledgeChunkEntity> resolve(KnowledgeStoreGateway gateway, List<KnowledgeChunkEntity> selectedChildren) {
         if (gateway == null || selectedChildren == null || selectedChildren.isEmpty()) return List.of();
         java.util.ArrayList<String> parentIds = new java.util.ArrayList<>(); for (KnowledgeChunkEntity child : selectedChildren) if (child != null && child.parentChunkId != null && !child.parentChunkId.isBlank()) parentIds.add(child.parentChunkId);
-        return gateway.childChunksByIds(parentIds);
+        return gateway.parentChunksByIds(parentIds);
     }
 }

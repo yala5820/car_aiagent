@@ -7,6 +7,7 @@ import com.hirain.aiagent.rag.indexer.corpus.CorpusDocumentDefinition;
 import com.hirain.aiagent.rag.indexer.model.SourceFormat;
 import com.hirain.aiagent.rag.indexer.model.SourceLocator;
 import com.hirain.aiagent.rag.store.KnowledgeStoreContract;
+import com.hirain.aiagent.rag.store.HeadingTitleResolver;
 import com.hirain.aiagent.rag.store.entity.KnowledgeChunkEntity;
 
 /** Parent/Child 的受控映射；Child Metadata 仅从 Corpus applicability 冗余复制。 */
@@ -20,14 +21,22 @@ public final class KnowledgeChunkEntityMapper {
     }
 
     public KnowledgeChunkEntity mapChild(String chunkId, String parentChunkId, ParentChunk parent, ChildChunk child,
-                                         CorpusDocumentDefinition document, int lexicalDocumentLength, float[] embedding) {
-        if (lexicalDocumentLength < 0) throw new IllegalArgumentException("Child lexicalDocumentLength 非法");
+                                         CorpusDocumentDefinition document, int lexicalTitleLength, int lexicalBodyLength,
+                                         float[] embedding) {
+        if (lexicalTitleLength < 0 || lexicalBodyLength < 0) throw new IllegalArgumentException("Child 字段 lexicalDocumentLength 非法");
         validateEmbedding(embedding);
         KnowledgeChunkEntity entity = base(chunkId, "CHILD", parentChunkId, parent.documentId(), parent.title(), parent.headingPath(),
                 child.text(), child.evidenceType(), child.locator(), child.ordinal(), document);
         entity.embedding = embedding.clone();
-        entity.lexicalDocumentLength = lexicalDocumentLength;
+        entity.lexicalTitleDocumentLength = lexicalTitleLength;
+        entity.lexicalBodyDocumentLength = lexicalBodyLength;
+        entity.lexicalDocumentLength = lexicalBodyLength;
         return entity;
+    }
+
+    public KnowledgeChunkEntity mapChild(String chunkId, String parentChunkId, ParentChunk parent, ChildChunk child,
+                                         CorpusDocumentDefinition document, int lexicalDocumentLength, float[] embedding) {
+        return mapChild(chunkId, parentChunkId, parent, child, document, 0, lexicalDocumentLength, embedding);
     }
 
     private KnowledgeChunkEntity base(String chunkId, String level, String parentChunkId, String documentId, String title,
@@ -36,7 +45,8 @@ public final class KnowledgeChunkEntityMapper {
         if (!document.documentId().equals(documentId)) throw new IllegalArgumentException("Chunk 与 Corpus Document 不一致");
         KnowledgeChunkEntity entity = new KnowledgeChunkEntity();
         entity.chunkId = chunkId; entity.chunkLevel = level; entity.parentChunkId = parentChunkId; entity.documentId = documentId;
-        entity.documentTitle = title; entity.documentVersion = document.documentVersion(); entity.documentType = document.documentType();
+        entity.documentTitle = title; entity.parentTitle = HeadingTitleResolver.parentTitle(headingPath, title);
+        entity.documentVersion = document.documentVersion(); entity.documentType = document.documentType();
         entity.language = document.language(); entity.vehicleModel = document.applicability().vehicleModel();
         entity.modelYear = document.applicability().modelYear(); entity.region = document.applicability().region();
         entity.softwareVersion = document.applicability().softwareVersion(); entity.configurationCode = document.applicability().configurationCode();

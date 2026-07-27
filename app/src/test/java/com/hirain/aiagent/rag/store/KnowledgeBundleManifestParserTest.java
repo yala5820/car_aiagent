@@ -29,9 +29,9 @@ public class KnowledgeBundleManifestParserTest {
         }
     }
     @Test public void acceptsDeclaredStaticHtmlExtractionStrategyButRejectsUnknownStrategy() throws Exception {
-        String json = new String(Files.readAllBytes(Path.of("..", "rag-schema", "test-fixtures", "development-v1", "candidate-v1", "manifest.json")), java.nio.charset.StandardCharsets.UTF_8);
+        String json = modelYManifest();
         String declared = json.replace("\"scriptExecution\":false", "\"embeddedDataExtraction\":\"TESLA_SERVICE_CENTERS_V1\",\"scriptExecution\":false");
-        assertEquals("dev-fixture", new KnowledgeBundleManifestParser().parse(declared).bundleId());
+        assertEquals("model-y-2026-refresh-trial", new KnowledgeBundleManifestParser().parse(declared).bundleId());
         try {
             new KnowledgeBundleManifestParser().parse(declared.replace("TESLA_SERVICE_CENTERS_V1", "UNREVIEWED_DYNAMIC_EXECUTION"));
             fail("未审核 HTML 提取策略不得被 Android 激活");
@@ -40,11 +40,14 @@ public class KnowledgeBundleManifestParserTest {
         }
     }
     @Test public void acceptsCompleteV2ChunkingButRejectsUnknownTokenEstimator() throws Exception {
-        String json = new String(Files.readAllBytes(Path.of("..", "rag-schema", "test-fixtures", "development-v1", "candidate-v1", "manifest.json")), java.nio.charset.StandardCharsets.UTF_8);
-        String v1="\"chunking\":{\"configHash\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"configVersion\":1}";
-        String v2="\"chunking\":{\"configHash\":\"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\",\"configVersion\":2,\"tokenEstimatorVersion\":\"rag-token-estimator-v2\",\"parentIdealMinTokens\":150,\"parentSoftMaxTokens\":1200,\"parentHardMaxTokens\":2000,\"childIdealMinTokens\":160,\"childTargetTokens\":256,\"childSoftMaxTokens\":384,\"childHardMaxTokens\":512,\"fallbackOverlapMinRatio\":0.05,\"fallbackOverlapMaxRatio\":0.1,\"tableRowsPerChild\":20,\"semanticStrategyVersion\":\"structural-semantic-v2\"}";
-        assertEquals("dev-fixture",new KnowledgeBundleManifestParser().parse(json.replace(v1,v2)).bundleId());
-        try { new KnowledgeBundleManifestParser().parse(json.replace(v1,v2.replace("rag-token-estimator-v2","unknown"))); fail("未知 TokenEstimator 不得激活"); }
+        String json = modelYManifest();
+        assertEquals("model-y-2026-refresh-trial",new KnowledgeBundleManifestParser().parse(json).bundleId());
+        try { new KnowledgeBundleManifestParser().parse(json.replace("rag-token-estimator-v2","unknown")); fail("未知 TokenEstimator 不得激活"); }
         catch (IllegalArgumentException expected) { assertEquals("MANIFEST_CHUNKING_INCOMPATIBLE",expected.getMessage()); }
+    }
+
+    private static String modelYManifest() throws Exception {
+        return new String(Files.readAllBytes(Path.of("..", "tools", "rag-indexer", "trial-output",
+                "model-y-2026-refresh-title-v2", "manifest.json")), java.nio.charset.StandardCharsets.UTF_8);
     }
 }

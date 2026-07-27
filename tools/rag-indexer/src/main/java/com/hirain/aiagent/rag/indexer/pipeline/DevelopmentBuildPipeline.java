@@ -17,6 +17,7 @@ import com.hirain.aiagent.rag.indexer.embedding.DashScopeDocumentEmbeddingClient
 import com.hirain.aiagent.rag.indexer.embedding.DocumentEmbeddingClient;
 import com.hirain.aiagent.rag.indexer.embedding.EmbeddingBuildCoordinator;
 import com.hirain.aiagent.rag.indexer.embedding.FileEmbeddingCache;
+import com.hirain.aiagent.rag.indexer.embedding.ParagraphEmbeddingCoordinator;
 import com.hirain.aiagent.rag.indexer.lexical.CjkLatinLexicalAnalyzer;
 import com.hirain.aiagent.rag.indexer.lexical.LexicalAnalyzerConfig;
 import com.hirain.aiagent.rag.indexer.lexical.LexicalDocument;
@@ -71,10 +72,19 @@ public final class DevelopmentBuildPipeline {
             checkpoint(run, BuildPhase.VALIDATED, config);
 
             BuildComponentFactory components = new BuildComponentFactory();
+            ParagraphEmbeddingCoordinator paragraphEmbedding = new ParagraphEmbeddingCoordinator(embeddingClient,
+                    new FileEmbeddingCache(run.resolve("embedding-cache")), 8, 2,
+                    config.chunkingConfig().paragraphReconstructionVersion());
             DocumentBuildStageRunner documentRunner = new DocumentBuildStageRunner(
-                    components.createParsingPipeline(config), components.createChunker(config));
+                    components.createParsingPipeline(config), components.createChunker(config, paragraphEmbedding));
             List<DocumentBuildState> chunked = new ArrayList<>();
-            for (DocumentBuildState state : states) chunked.add(documentRunner.parseAndChunk(state, context.cancellationToken()));
+            for (DocumentBuildState state : states) {
+                try {
+                    chunked.add(documentRunner.parseAndChunk(state, context.cancellationToken()));
+                } catch (ParagraphEmbeddingCoordinator.ParagraphEmbeddingUnavailableException exception) {
+                    throw new com.hirain.aiagent.rag.indexer.embedding.EmbeddingException(exception.getMessage(), false);
+                }
+            }
             checkpoint(run, BuildPhase.CHUNKED, config);
 
             StableIdStageRunner idRunner = new StableIdStageRunner();
@@ -82,7 +92,7 @@ public final class DevelopmentBuildPipeline {
             Map<String, ChunkStableIds> idsByDocument = new LinkedHashMap<>();
             List<DocumentBuildState> embedded = new ArrayList<>();
             EmbeddingStageRunner embeddingRunner = new EmbeddingStageRunner(new EmbeddingBuildCoordinator(embeddingClient,
-                    new FileEmbeddingCache(run.resolve("embedding-cache")), 8, 2));
+                    new FileEmbeddingCache(run.resolve("embedding-cache")), 8, 2, "child-embedding-title-v2"));
             for (DocumentBuildState state : chunked) {
                 ChunkStableIds ids = idRunner.assign(state); idsByDocument.put(state.corpusDocument().documentId(), ids);
                 embedded.add(embeddingRunner.embed(state, requestBuilder.build(state, ids), context.cancellationToken()));
@@ -98,7 +108,7 @@ public final class DevelopmentBuildPipeline {
             Map<String, Object> hnsw = new LinkedHashMap<>(KnowledgeStoreContract.hnswManifestDetails());
             hnsw.put("configFingerprint", hnswFingerprint());
             new ManifestWriter().write(BundleLayout.manifest(staging), new ManifestBuilder().build(BundleLayout.data(staging), model,
-                    scope(corpus), parserDetails(config), Map.copyOf(hnsw)));
+                    scope(corpus), parserDetails(config), Map.copyOf(hnsw), config.chunkingConfig()));
             boolean approved = "APPROVED".equals(config.canonicalJson().path("qualityGate").path("state").asText());
             new BuildReportWriter().write(BundleLayout.report(staging), report(context, corpus, embedded, lexical, model, approved));
             new VerifyPipeline().verifyUsingBundledSchema(staging);
@@ -123,7 +133,13 @@ public final class DevelopmentBuildPipeline {
         List<LexicalDocument> documents = new ArrayList<>();
         for (DocumentBuildState state : states) {
             ChunkStableIds ids = idsByDocument.get(state.corpusDocument().documentId());
-            for (ChildChunk child : state.chunkResult().children()) documents.add(new LexicalDocument(ids.childIds().get(child), child.text()));
+            var parents = new java.util.HashMap<Integer, com.hirain.aiagent.rag.indexer.chunk.ParentChunk>();
+            state.chunkResult().parents().forEach(parent -> parents.put(parent.ordinal(), parent));
+            for (ChildChunk child : state.chunkResult().children()) {
+                var parent = parents.get(child.parentOrdinal());
+                String title = parent == null ? "" : com.hirain.aiagent.rag.store.HeadingTitleResolver.parentTitle(parent.headingPath(), parent.title());
+                documents.add(new LexicalDocument(ids.childIds().get(child), title, child.text()));
+            }
         }
         return new LexicalIndexBuilder(new CjkLatinLexicalAnalyzer(LexicalAnalyzerConfig.v1()), LexicalAnalyzerConfig.v1()).build(documents);
     }
@@ -137,7 +153,10 @@ public final class DevelopmentBuildPipeline {
                 config.fingerprint(), RagIndexerMain.VERSION, "5.4.0", hnswFingerprint(),
                 fingerprint(config.canonicalJson().path("parser")), fingerprint(config.canonicalJson().path("chunking")),
                 "sha256:" + Sha256.file(context.arguments().corpus()), Set.of("PDF", "STATIC_HTML", "MARKDOWN"), formats,
-                states.size(), parents, children, lexical.postingsByTerm().size(), lexical.averageDocumentLength(), context.startedAt().toEpochMilli());
+                states.size(), parents, children,
+                lexical.titlePostingsByTerm().size() + lexical.bodyPostingsByTerm().size(),
+                lexical.averageTitleLength(), lexical.averageBodyLength(),
+                context.startedAt().toEpochMilli());
     }
 
     private static BuildReport report(BuildExecutionContext context, CorpusDefinition corpus, List<DocumentBuildState> states,
@@ -151,10 +170,10 @@ public final class DevelopmentBuildPipeline {
         var file = new com.hirain.aiagent.rag.indexer.artifact.BundleFileHasher().hash(BundleLayout.data(context.arguments().output().getParent()
                 .resolve("." + context.arguments().output().getFileName() + ".staging-" + context.runId())));
         return new BuildReport(context.runId(), approved, List.of(), List.of(), sourceFormatCounts(corpus),
-                Map.of("documents", (long) states.size(), "parents", parents, "children", children, "terms", (long) lexical.postingsByTerm().size()),
+                Map.of("documents", (long) states.size(), "parents", parents, "children", children, "terms", (long) (lexical.titlePostingsByTerm().size() + lexical.bodyPostingsByTerm().size())),
                 new ParserBuildSummary(sourceFormatCounts(corpus), sourceFormatCounts(corpus), Map.of(), Map.of("PDF", "v1", "STATIC_HTML", "v1", "MARKDOWN", "v1")),
                 new ChunkBuildSummary(parents, children, 0, 0, 0), new EmbeddingBuildSummary(children, 0, children, 0, 0),
-                new StoreBuildSummary(states.size(), parents, children, lexical.postingsByTerm().size(), file.sizeBytes(), file.sha256(), 0), documents);
+                new StoreBuildSummary(states.size(), parents, children, lexical.titlePostingsByTerm().size() + lexical.bodyPostingsByTerm().size(), file.sizeBytes(), file.sha256(), 0), documents);
     }
 
     private static Map<String, Long> sourceFormatCounts(CorpusDefinition corpus) {
@@ -165,7 +184,7 @@ public final class DevelopmentBuildPipeline {
     private static Map<String, Object> parserDetails(RagBuildConfig config) { ObjectMapper mapper = new ObjectMapper(); return Map.of("pdf", mapper.convertValue(config.canonicalJson().path("parser").path("pdf"), Map.class), "html", mapper.convertValue(config.canonicalJson().path("parser").path("html"), Map.class), "markdown", mapper.convertValue(config.canonicalJson().path("parser").path("markdown"), Map.class)); }
     private static String fingerprint(com.fasterxml.jackson.databind.JsonNode value) { return DeterministicJson.sha256(value); }
     private static String hnswFingerprint() { return DeterministicJson.sha256(new ObjectMapper().valueToTree(KnowledgeStoreContract.hnswManifestDetails())); }
-    private static void checkpoint(Path run, BuildPhase phase, RagBuildConfig config) throws IOException { new BuildCheckpointStore().save(run, new BuildCheckpoint(phase, config.fingerprint(), fingerprint(config.canonicalJson().path("parser")), fingerprint(config.canonicalJson().path("chunking")), "embedding-template-v1")); }
+    private static void checkpoint(Path run, BuildPhase phase, RagBuildConfig config) throws IOException { new BuildCheckpointStore().save(run, new BuildCheckpoint(phase, config.fingerprint(), fingerprint(config.canonicalJson().path("parser")), fingerprint(config.canonicalJson().path("chunking")), "embedding-template-v2-title-body")); }
 
     public record BuildResult(Path bundleDirectory, boolean publishable) { }
 }

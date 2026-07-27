@@ -1,0 +1,5 @@
+{
+  "version": 2,
+  "template": "二级标题：{parentTitle}\n内容：{content}",
+  "cases": [{"id": "maintenance-brake-fluid", "documentTitle": "车辆保养手册", "headingPath": "保养 > 制动系统", "parentTitle": "制动系统", "chunkType": "PROCEDURE", "content": "每 24 个月检查制动液。", "expected": "二级标题：制动系统\n内容：每 24 个月检查制动液。"}]
+}

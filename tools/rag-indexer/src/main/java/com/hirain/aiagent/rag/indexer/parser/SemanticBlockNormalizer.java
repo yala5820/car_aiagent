@@ -14,6 +14,10 @@ import java.util.Objects;
  */
 public final class SemanticBlockNormalizer {
     public ParseResult normalize(ParseResult parsed) {
+        // PDF 已由坐标解析器输出视觉行；句子级归一化会破坏列顺序，段落恢复留给 Parent 阶段。
+        if (!parsed.blocks().isEmpty() && parsed.blocks().get(0).locator().sourceFormat() == SourceFormat.PDF) {
+            return parsed;
+        }
         List<StructuredBlock> output = new ArrayList<>();
         List<StructuredBlock> pendingPdf = new ArrayList<>();
         for (StructuredBlock block : parsed.blocks()) {

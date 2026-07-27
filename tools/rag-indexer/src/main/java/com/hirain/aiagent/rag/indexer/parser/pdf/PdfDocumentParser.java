@@ -49,7 +49,18 @@ public final class PdfDocumentParser implements DocumentParser {
         try {
             List<PdfPageLayout> layouts = layoutAnalyzer.analyze(document.path());
             Set<String> headersAndFooters = new PdfHeaderFooterDetector().detectRepeatedEdgeLines(layouts);
+            PdfTocReference tocReference = new PdfTocReferenceExtractor().extract(layouts);
             List<ParseDiagnostic> diagnostics = new java.util.ArrayList<>();
+            for (int tocPage : tocReference.tocPages()) {
+                diagnostics.add(new ParseDiagnostic("PDF_TOC_PAGE_EXCLUDED", DiagnosticSeverity.WARNING,
+                        document.metadata().documentId(), locator(tocPage), "PDF 目录页仅用于标题层级参考，未进入正文 Evidence"));
+            }
+            if (!tocReference.entries().isEmpty()) {
+                int firstTocPage = tocReference.tocPages().stream().min(Integer::compareTo).orElse(0);
+                diagnostics.add(new ParseDiagnostic("PDF_TOC_REFERENCE_APPLIED", DiagnosticSeverity.WARNING,
+                        document.metadata().documentId(), locator(firstTocPage),
+                        "已提取 " + tocReference.entries().size() + " 条目录标题用于正文层级校正"));
+            }
             for (String finding : unsafeContentInspector.inspect(document.path())) {
                 diagnostics.add(new ParseDiagnostic(finding, DiagnosticSeverity.WARNING, document.metadata().documentId(),
                         locator(0), "PDF 主动内容已忽略，未执行也未提取为语料"));
@@ -66,14 +77,14 @@ public final class PdfDocumentParser implements DocumentParser {
                 }
             }
             List<StructuredBlock> blocks = new PdfWarningDetector().markWarnings(
-                    new PdfBlockAssembler().assemble(layouts, headersAndFooters));
+                    new PdfBlockAssembler().assemble(layouts, headersAndFooters, tocReference));
             for (StructuredBlock block : blocks) {
                 if (block.type() == BlockType.HEADING && block.structure().headingLevel() == 0) {
                     diagnostics.add(new ParseDiagnostic("PDF_HEADING_LEVEL_UNRESOLVED", DiagnosticSeverity.WARNING,
                             document.metadata().documentId(), block.locator(), "标题候选缺少可靠层级，仅保留为标题文本且不伪造深层路径"));
                 }
             }
-            List<TableBlock> tables = extractTables(document, diagnostics);
+            List<TableBlock> tables = extractTables(document, diagnostics, tocReference);
             return new ParseResult(blocks, tables, diagnostics);
         } catch (Exception exception) {
             return failure(document, "PDF_EXTRACTION_FAILED", "PDF 文本提取失败");
@@ -90,10 +101,11 @@ public final class PdfDocumentParser implements DocumentParser {
         return new SourceLocator(SourceFormat.PDF, physicalPage, physicalPage, null, 0, 0, null, physicalPage);
     }
 
-    private List<TableBlock> extractTables(SourceDocument document, List<ParseDiagnostic> diagnostics) {
+    private List<TableBlock> extractTables(SourceDocument document, List<ParseDiagnostic> diagnostics, PdfTocReference tocReference) {
         try {
             return new PdfCrossPageTableMerger().merge(tableExtractor.extract(document.path(), page ->
-                    PdfTableStrategy.valueOf(pdfConfig.tableStrategyFor(document.metadata().documentId(), page))));
+                    PdfTableStrategy.valueOf(pdfConfig.tableStrategyFor(document.metadata().documentId(), page)))).stream()
+                    .filter(table -> !tocReference.isTocPage(table.locator().pdfPageStart())).toList();
         } catch (Exception exception) {
             diagnostics.add(new ParseDiagnostic("PDF_TABLE_EXTRACTION_FAILED", DiagnosticSeverity.WARNING,
                     document.metadata().documentId(), locator(0), "PDF 表格提取失败，未将不可靠内容并入正文"));

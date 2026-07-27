@@ -36,6 +36,9 @@ public final class RagIndexerCommand {
             case "verify" -> new VerifyCommand(cancellationToken).execute(commandArguments, standardOut);
               case "evaluate" -> new EvaluateCommand(cancellationToken).execute(commandArguments, standardOut);
               case "evaluate-rerank" -> new EvaluateRerankCommand(cancellationToken).execute(commandArguments, standardOut);
+              case "evaluate-v2" -> new EvaluateV2Command(cancellationToken, false).execute(commandArguments, standardOut);
+              case "evaluate-v2-rerank" -> new EvaluateV2Command(cancellationToken, true).execute(commandArguments, standardOut);
+              case "evaluate-v2-ablation" -> new EvaluateAblationCommand(cancellationToken).execute(commandArguments, standardOut);
             default -> throw new CliCommandException(CliExitCode.ARGUMENT_OR_CONFIG_ERROR, "CLI_COMMAND_UNKNOWN");
         };
     }
@@ -51,17 +54,20 @@ public final class RagIndexerCommand {
 
     private static void printHelp(PrintStream output) {
         output.println("车辆知识 RAG 离线索引器");
-        output.println("用法：rag-indexer <validate|build|verify|evaluate> [选项]");
+        output.println("用法：rag-indexer <validate|build|verify|evaluate|evaluate-v2|evaluate-v2-rerank|evaluate-v2-ablation> [选项]");
         output.println("  validate --corpus <corpus.json> --config <rag-build.json> --work-dir <dir>");
         output.println("  build    --corpus <corpus.json> --config <rag-build.json> --output <dir> --work-dir <dir>");
         output.println("  verify   --bundle <output-dir> --config <rag-build.json>");
         output.println("  evaluate --bundle <output-dir> --dataset <evaluation.json> --report <file>");
+        output.println("  evaluate-v2 --bundle <output-dir> --dataset <evaluation-v2.json> --report <file>");
+        output.println("  evaluate-v2-rerank --bundle <output-dir> --dataset <evaluation-v2.json> --report <file>");
+        output.println("  evaluate-v2-ablation --bundle <output-dir> --dataset <evaluation-v2.json> --report <file>");
         output.println("使用 rag-indexer <command> --help 查看命令边界；API Key 可来自环境变量或仓库根目录 local.properties，绝不写入语料配置和构建报告。");
     }
 
     private static void printCommandHelp(String command, PrintStream output) {
         switch (command) {
-            case "validate", "build", "verify", "evaluate" -> {
+            case "validate", "build", "verify", "evaluate", "evaluate-v2", "evaluate-v2-rerank", "evaluate-v2-ablation" -> {
                 printHelp(output);
                 output.println("validate 只执行输入与 Parser 质量校验，并在 work/runs/<runId>/ 生成不含正文的 parser-review.json；"
                         + "build 生成 Bundle；verify 独立验证 Bundle；evaluate 只读计算与 Android 对齐的 Dense+BM25+RRF Hybrid 指标。");

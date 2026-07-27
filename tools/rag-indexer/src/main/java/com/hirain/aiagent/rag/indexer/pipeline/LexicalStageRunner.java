@@ -16,7 +16,9 @@ public final class LexicalStageRunner {
         List<LexicalDocument> documents = new ArrayList<>();
         for (var child : state.chunkResult().children()) {
             String id = ids.childIds().get(child); if (id == null) throw new IllegalStateException("Child 稳定 ID 缺失");
-            documents.add(new LexicalDocument(id, child.text()));
+            var parent = state.chunkResult().parents().stream().filter(value -> value.ordinal() == child.parentOrdinal()).findFirst().orElseThrow();
+            String title = com.hirain.aiagent.rag.store.HeadingTitleResolver.parentTitle(parent.headingPath(), parent.title());
+            documents.add(new LexicalDocument(id, title, child.text()));
         }
         return builder.build(documents);
     }

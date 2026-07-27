@@ -30,10 +30,10 @@ public final class DeterministicEntityWriter {
         model.chunks().stream().filter(chunk -> "CHILD".equals(chunk.chunkLevel)).sorted(Comparator.comparing(chunk -> chunk.chunkId)).forEach(child -> {
             requireNew(child.id, "Child"); childEntityIds.put(child.chunkId, chunks.put(child));
         });
-        model.lexicalIndex().postingsByTerm().entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
-            LexicalTermEntity term = lexicalMapper.map(entry.getKey(), entry.getValue(), childEntityIds);
-            terms.put(term);
-        });
+        model.lexicalIndex().titlePostingsByTerm().entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry ->
+                terms.put(lexicalMapper.map("TITLE", entry.getKey(), entry.getValue(), childEntityIds)));
+        model.lexicalIndex().bodyPostingsByTerm().entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry ->
+                terms.put(lexicalMapper.map("BODY", entry.getKey(), entry.getValue(), childEntityIds)));
         requireNew(model.metadata().id, "Metadata"); metadata.put(model.metadata());
     }
 

@@ -18,6 +18,9 @@ public class LexicalTermEntity {
     @Unique
     @Index(type = IndexType.VALUE)
     public String term;
+    /** TITLE 或 BODY；term 使用 field 前缀保证旧版单字段唯一约束仍然可用。 */
+    public String field;
+    public String rawTerm;
     public int documentFrequency;
     public long[] chunkEntityIds;
     public int[] termFrequencies;

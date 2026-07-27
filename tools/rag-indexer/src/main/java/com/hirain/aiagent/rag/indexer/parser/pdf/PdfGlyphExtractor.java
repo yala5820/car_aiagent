@@ -32,7 +32,9 @@ public final class PdfGlyphExtractor {
                 stripper.setStartPage(page);
                 stripper.setEndPage(page);
                 stripper.getText(document);
-                output.add(new PdfPageLayout(page, new PdfReadingOrderResolver().resolve(stripper.glyphs)));
+                float pageWidth = document.getPage(page - 1).getCropBox().getWidth();
+                List<PdfTextLine> lines = new PdfReadingOrderResolver().resolve(stripper.glyphs, pageWidth);
+                output.add(new PdfPageLayout(page, pageWidth, PdfColumnLayout.infer(pageWidth, lines), lines));
             }
             return List.copyOf(output);
         }
@@ -40,6 +42,7 @@ public final class PdfGlyphExtractor {
 
     private static final class PositionCapturingStripper extends PDFTextStripper {
         private final List<PdfGlyph> glyphs = new ArrayList<>();
+        private int sourceGroup;
 
         private PositionCapturingStripper() throws IOException {
             setSortByPosition(false);
@@ -47,11 +50,12 @@ public final class PdfGlyphExtractor {
 
         @Override
         protected void writeString(String ignoredText, List<TextPosition> positions) {
+            int group = ++sourceGroup;
             for (TextPosition position : positions) {
                 String unicode = position.getUnicode();
                 if (unicode != null && !unicode.isBlank()) {
                     glyphs.add(new PdfGlyph(unicode, position.getXDirAdj(), position.getYDirAdj(),
-                            position.getWidthDirAdj(), position.getHeightDir(), position.getFontSizeInPt()));
+                            position.getWidthDirAdj(), position.getHeightDir(), position.getFontSizeInPt(), group));
                 }
             }
         }

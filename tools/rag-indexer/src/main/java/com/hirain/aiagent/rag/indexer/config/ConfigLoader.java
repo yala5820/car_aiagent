@@ -10,7 +10,7 @@ import java.nio.file.Path;
 import java.util.Iterator;
 import java.util.Set;
 
-/** G102 构建配置读取器：只接受 V1 已定义域并锁定跨端不变量。 */
+/** G102 构建配置读取器：锁定标题向量与字段化 BM25 的跨端不变量。 */
 public final class ConfigLoader {
  private static final ObjectMapper MAPPER=new ObjectMapper();
  private static final Set<String> ROOT=Set.of("schemaVersion","parser","chunking","embedding","objectBox","lexical","qualityGate");
@@ -26,15 +26,15 @@ public final class ConfigLoader {
    unknown(parser.get("pdf"),Set.of("tableStrategy","tableStrategyOverrides"));
    int chunkingVersion=chunking.path("configVersion").asInt(1);
    if(chunkingVersion==1) unknown(chunking,Set.of("maxChildTokens","overlapTokens","tableRowsPerChild"));
-   else if(chunkingVersion==2) { fields(chunking,Set.of("configVersion","tokenEstimatorVersion","parentIdealMinTokens","parentSoftMaxTokens","parentHardMaxTokens","childIdealMinTokens","childTargetTokens","childSoftMaxTokens","childHardMaxTokens","fallbackOverlapMinRatio","fallbackOverlapMaxRatio","tableRowsPerChild","semanticStrategyVersion")); unknown(chunking,Set.of("configVersion","tokenEstimatorVersion","parentIdealMinTokens","parentSoftMaxTokens","parentHardMaxTokens","childIdealMinTokens","childTargetTokens","childSoftMaxTokens","childHardMaxTokens","fallbackOverlapMinRatio","fallbackOverlapMaxRatio","tableRowsPerChild","semanticStrategyVersion")); }
+   else if(chunkingVersion==2) { fields(chunking,Set.of("configVersion","tokenEstimatorVersion","parentIdealMinTokens","parentSoftMaxTokens","parentHardMaxTokens","childIdealMinTokens","childTargetTokens","childSoftMaxTokens","childHardMaxTokens","fallbackOverlapMinRatio","fallbackOverlapMaxRatio","tableRowsPerChild","semanticStrategyVersion","paragraphReconstructionVersion","pdfColumnLayoutVersion","paragraphCosineThreshold","childMergeMaxTokens","parentSplitOverlapRatio","childForceMergeMaxTokens","childDirectMergeMaxTokens","pdfTocReferenceVersion")); unknown(chunking,Set.of("configVersion","tokenEstimatorVersion","parentIdealMinTokens","parentSoftMaxTokens","parentHardMaxTokens","childIdealMinTokens","childTargetTokens","childSoftMaxTokens","childHardMaxTokens","fallbackOverlapMinRatio","fallbackOverlapMaxRatio","tableRowsPerChild","semanticStrategyVersion","paragraphReconstructionVersion","pdfColumnLayoutVersion","paragraphCosineThreshold","childMergeMaxTokens","parentSplitOverlapRatio","childForceMergeMaxTokens","childDirectMergeMaxTokens","pdfTocReferenceVersion")); }
    else fail("CONFIG_CHUNKING_VERSION_UNSUPPORTED");
    unknown(embedding,Set.of("provider","model","dimension","templateVersion","batchSize","maxRetries"));
    unknown(lexical,Set.of("algorithm","analyzerVersion","languages","tokenization","k1","b"));
    unknown(quality,Set.of("state","thresholds"));
    if(!"STATIC_DOM_ONLY".equals(parser.path("html").path("mode").asText()) || parser.path("html").path("networkAccess").asBoolean(true) || parser.path("html").path("scriptExecution").asBoolean(true)) fail("CONFIG_HTML_MODE_INVALID");
    if(!"COMMONMARK".equals(parser.path("markdown").path("syntax").asText()) || !parser.path("markdown").path("extensions").toString().contains("GFM_TABLE")) fail("CONFIG_MARKDOWN_MODE_INVALID");
-   if(!"DashScope".equals(embedding.path("provider").asText())||!"text-embedding-v4".equals(embedding.path("model").asText())||embedding.path("dimension").asInt()!=1024||embedding.path("templateVersion").asInt()!=1) fail("CONFIG_EMBEDDING_INVALID");
-   if(!"BM25".equals(lexical.path("algorithm").asText())||lexical.path("analyzerVersion").asInt()!=1) fail("CONFIG_LEXICAL_INVALID");
+   if(!"DashScope".equals(embedding.path("provider").asText())||!"text-embedding-v4".equals(embedding.path("model").asText())||embedding.path("dimension").asInt()!=1024||embedding.path("templateVersion").asInt()!=2) fail("CONFIG_EMBEDDING_INVALID");
+   if(!"BM25".equals(lexical.path("algorithm").asText())||lexical.path("analyzerVersion").asInt()!=2) fail("CONFIG_LEXICAL_INVALID");
    String state=quality.path("state").asText(); if(!Set.of("TEST_ONLY","APPROVED").contains(state)) fail("CONFIG_QUALITY_GATE_INVALID");
    PdfParserConfig pdfConfig=pdfConfig(parser.get("pdf")); HtmlParserConfig htmlConfig=htmlConfig(parser.get("html")); MarkdownParserConfig markdownConfig=markdownConfig(parser.get("markdown")); ChunkingConfig chunkingConfig=chunkingConfig(chunking);
    JsonNode canonical=DeterministicJson.sort(root); RagBuildConfig config=new RagBuildConfig(canonical,ConfigFingerprint.of(canonical),pdfConfig,htmlConfig,markdownConfig,chunkingConfig); new ConfigValidator().validate(config); return config;
@@ -67,7 +67,7 @@ public final class ConfigLoader {
   return new MarkdownParserConfig(node.path("syntax").asText(),extensions);
  }
  private static ChunkingConfig chunkingConfig(JsonNode node){
-  if(node.path("configVersion").asInt(1)==2) try{return new ChunkingConfig(2,node.path("tokenEstimatorVersion").asText(),node.path("parentIdealMinTokens").asInt(-1),node.path("parentSoftMaxTokens").asInt(-1),node.path("parentHardMaxTokens").asInt(-1),node.path("childIdealMinTokens").asInt(-1),node.path("childTargetTokens").asInt(-1),node.path("childSoftMaxTokens").asInt(-1),node.path("childHardMaxTokens").asInt(-1),node.path("fallbackOverlapMinRatio").asDouble(-1),node.path("fallbackOverlapMaxRatio").asDouble(-1),node.path("tableRowsPerChild").asInt(-1),node.path("semanticStrategyVersion").asText());}catch(IllegalArgumentException e){fail("CONFIG_CHUNKING_INVALID");throw new AssertionError(e);}
+  if(node.path("configVersion").asInt(1)==2) try{return new ChunkingConfig(2,node.path("tokenEstimatorVersion").asText(),node.path("parentIdealMinTokens").asInt(-1),node.path("parentSoftMaxTokens").asInt(-1),node.path("parentHardMaxTokens").asInt(-1),node.path("childIdealMinTokens").asInt(-1),node.path("childTargetTokens").asInt(-1),node.path("childSoftMaxTokens").asInt(-1),node.path("childHardMaxTokens").asInt(-1),node.path("fallbackOverlapMinRatio").asDouble(-1),node.path("fallbackOverlapMaxRatio").asDouble(-1),node.path("tableRowsPerChild").asInt(-1),node.path("semanticStrategyVersion").asText(),node.path("paragraphReconstructionVersion").asText(),node.path("pdfColumnLayoutVersion").asText(),node.path("paragraphCosineThreshold").asDouble(-1),node.path("childMergeMaxTokens").asInt(-1),node.path("parentSplitOverlapRatio").asDouble(-1),node.path("childForceMergeMaxTokens").asInt(-1),node.path("childDirectMergeMaxTokens").asInt(-1),node.path("pdfTocReferenceVersion").asText());}catch(IllegalArgumentException e){fail("CONFIG_CHUNKING_INVALID");throw new AssertionError(e);}
   ChunkingConfig defaults=ChunkingConfig.v1Default();
   try{return new ChunkingConfig(node.path("maxChildTokens").asInt(defaults.maxChildTokens()),node.path("overlapTokens").asInt(defaults.overlapTokens()),node.path("tableRowsPerChild").asInt(defaults.tableRowsPerChild()));}catch(IllegalArgumentException e){fail("CONFIG_CHUNKING_INVALID");throw new AssertionError(e);}
  }

@@ -832,6 +832,7 @@ ActiveRequestRegistry.tryComplete(terminalState)  ← success / failure / timeou
 | Trace | 代码完成 | 主 Trace 树、Context 来源、最终消息、工具 schema、裁剪/压缩和 Tool 阶段已接通；业务层全文输出，Phoenix 设备显示待验收 |
 | 虚拟车辆状态机 | Demo 完成、Eval 已接入 | 8 个状态子系统、参数校验和状态收敛已用于 Demo 车控；Eval 复用同一实例提供不可变快照、原子 Patch、reset 与 environmentRevision |
 | Debug Eval 适配 | AIAgent 侧代码完成 | Debug-only `EvalDebugService` 支持 Acquire/Reset/Apply/Read/Release/GetVersion；UID + token 租约隔离，TEXT 根 Trace 记录关联与环境版本；TestApp Bridge、电脑端结果通道及三方设备验收待完成 |
+| RAG Parent-Child V2 | 代码与自动化验证完成、发布 Gate 未完成 | 离线端已生成 Model Y 2026 中国大陆后驱版 `TEST_ONLY` Bundle；检索链为 Child Dense/BM25 → RRF → 去重 → Child Rerank → Parent 聚合 → 完整 Parent Evidence，支持二级标题 Dense/BM25 字段化检索。离线 CLI 160 tests、Android JVM 452 tests、APK 和 Lint 已通过；人工 Eval Gate、DEV/TEST 冻结、置信度校准及 AVD 验收仍待完成，不进入主 APK |
 | SoaService 真车通信 | 未完成 | 方法体仍为空；当前车控结果来自 VehicleStateMachine，不代表真实车辆执行 |
 | 动作语义闭环 | 待完善 | ToolGroup 已限制模型可见工具，Safety 已控制风险动作；Dispatch 前本轮授权复核、ActionReceipt、状态回读和最终答复真实性仍待建立 |
 | 场景 / VLM / VR | 部分完成 | 主动场景识别、前向视觉问答与 VR/TTS 均保留；前向视觉仅完成预存图片 Demo，Camera SDK 与真实视觉输入仍依赖目标设备和后续接入 |
@@ -852,6 +853,19 @@ ActiveRequestRegistry.tryComplete(terminalState)  ← success / failure / timeou
 - Eval case 的跨系统关联复用 `clientMessageId`：TestApp 将电脑端 `correlationId` 写入该字段，根 Trace 记录 `client_message.id`、`eval.environment.active`、`eval.environment.revision`。AgentResponse、状态快照与 Trace 分别保持结果、环境与观测事实边界。
 - Release variant 不合并 Eval Debug Service；leaseToken 只在 Android 内部传递，不能进入 Prompt、Trace、Logcat 或电脑端结果。完整接入细节见 [AIAgent Eval 接入契约](docs/overview/eval/aiagent-eval-integration-contract.md)。
 - 已通过 AIAgent 侧 JVM、Debug/Release 构建与 merged manifest 边界验证；TestApp Bridge、电脑端结果通道、Phoenix 及安全确认的三方设备验收尚未关闭。
+
+### 6.1.2 RAG Parent-Child V2 当前边界
+
+- 离线构建端使用静态 PDF/HTML/Markdown 输入，当前候选车型范围为 Model Y、2026 焕新版、中国大陆、后驱版。
+- Parent 是最小语义完整小节，Child 仅用于 Dense/BM25/RRF/Rerank 定位；最终返回完整 Parent，不返回裸 Child 作为 Evidence。
+- Dense 输入包含二级标题与 Child 正文；BM25 将标题和正文作为 TITLE/BODY 独立字段，初始权重为 `2.0 : 1.0`。
+- RRF 后执行完全重复、高相似和同 Parent 占位去重；Rerank 只处理 Child，Rerank 失败时回退 RRF。
+- 当前 Bundle 位于 `tools/rag-indexer/trial-output/model-y-2026-refresh-title-v2`，状态为 `TEST_ONLY`，未复制到 `app/src/main/assets`。
+- 当前候选 Bundle 已合并到 Debug `androidTest` 资产并完成 Manifest、Scope 与 `data.mdb` SHA-256 一致性校验；Android JVM 强制重跑 `452 tests / 0 failures`，Debug APK 与 lint 通过。该资产仍不进入 main APK。
+- Eval V2 当前以项目负责人最新手动更新后的 33 条样本为准，Query 与 caseId 均唯一；仅修正了 4 个重复 caseId，未改变审核后的问题或证据标注。最新 RRF Coverage@1/@2/@3/@4=`0.7879/0.9394/0.9394/0.9697`、MRR=`0.8712`；Rerank 为 `0.8182/0.8485/0.9091/0.9394`、MRR=`0.8611`，详见 `docs/testresult/rag/parent_evidence_eval_v2_latest_report.md`。当前数据下 Rerank 仅提升 Coverage@1，不能宣称整体优于 RRF。Rerank 置信度已按 DEV 校准：HIGH=`score>=0.94 && margin>=0.05`、MEDIUM=`score>=0.90 && margin>=0.02`；RRF fallback 或缺少分数仍输出 `UNASSESSED`，详见 `docs/testresult/rag/parent_evidence_confidence_calibration_v2.md`。
+- 已在 `Automotive_1408p_landscape(AVD) - 15` 完成 Android 设备回归：`connectedDebugAndroidTest --rerun-tasks` 共执行 7 项，`7/7 passed`。期间修复了候选 Manifest V2 必填字段、开发候选 Store 版本一致性以及 Fixture 的 TITLE/BODY 倒排字段不一致；该验证仍只覆盖 Debug/Test 资产，Bundle 继续为 `TEST_ONLY`，不代表已进入主 APK 或正式发布。
+- 已补齐 Eval V2 消融矩阵：`evaluate-v2-ablation` 在同一 Bundle/数据集上执行 Dense-only、BM25-only、RRF raw、Exact/Near Dedup、Rerank 和 fallback；结果见 `docs/testresult/rag/parent_evidence_ablation_v2.md`。当前 BM25-only 在本语料上表现最佳，但生产链路仍保留 Dense + BM25 + RRF；Rerank 只改善 Coverage@1，不能宣称全面优于 RRF。
+- 当前评测集没有 `NO_EVIDENCE` 样本，因此 No-Evidence 阈值尚无经验校准证据；33 条数据集是“先跑通”批准口径，不等同于正式 50 条质量 Gate。Bundle 继续保持 `TEST_ONLY`。
 
 ### 6.2 Agent 当前设计边界
 

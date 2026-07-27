@@ -12,6 +12,6 @@ public final class DocumentBuildStageRunner {
         token.throwIfCancelled();
         var parsed = parser.parse(state.sourceDocument());
         token.throwIfCancelled();
-        return state.withParse(parsed).withChunks(chunker.chunk(state.sourceDocument(), parsed));
+        return state.withParse(parsed).withChunks(chunker.chunk(state.sourceDocument(), parsed, token));
     }
 }

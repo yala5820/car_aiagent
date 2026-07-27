@@ -8,4 +8,9 @@ public record EmbeddingCacheKey(String value) {
         return new EmbeddingCacheKey(Sha256.ofUtf8(String.join("\u001F", provider, model, String.valueOf(dimension),
                 String.valueOf(templateVersion), Sha256.ofUtf8(embeddingText))));
     }
+    public static EmbeddingCacheKey of(String provider, String model, int dimension, int templateVersion,
+                                       String strategyVersion, String embeddingText) {
+        return new EmbeddingCacheKey(Sha256.ofUtf8(String.join("\u001F", provider, model, String.valueOf(dimension),
+                String.valueOf(templateVersion), strategyVersion, Sha256.ofUtf8(embeddingText))));
+    }
 }

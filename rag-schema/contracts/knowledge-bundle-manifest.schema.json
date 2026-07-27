@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hirain.com/aiagent/rag/contracts/knowledge-bundle-manifest-v1.schema.json",
-  "title": "Vehicle Knowledge Bundle Manifest V1",
+    "title": "Vehicle Knowledge Bundle Manifest V2",
   "type": "object",
   "additionalProperties": false,
   "required": ["formatVersion", "bundleId", "bundleVersion", "knowledgeScopeId", "builderVersion", "builtAtEpochMs", "objectBoxVersion", "schemaFingerprint", "sourceLocatorSchemaVersion", "dataFile", "embedding", "hnsw", "scope", "parsers", "lexical", "chunking", "corpus"],
   "properties": {
-    "formatVersion": {"const": 1},
+      "formatVersion": {"const": 2},
     "bundleId": {"type": "string", "minLength": 1},
     "bundleVersion": {"type": "string", "minLength": 1},
     "knowledgeScopeId": {"type": "string", "minLength": 1},
@@ -16,19 +16,22 @@
     "schemaFingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "sourceLocatorSchemaVersion": {"const": 1},
     "dataFile": {"type": "object", "additionalProperties": false, "required": ["name", "sizeBytes", "sha256"], "properties": {"name": {"const": "data.mdb"}, "sizeBytes": {"type": "integer", "minimum": 1}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}},
-    "embedding": {"type": "object", "additionalProperties": false, "required": ["provider", "model", "dimension", "distanceType", "templateVersion"], "properties": {"provider": {"const": "DashScope"}, "model": {"const": "text-embedding-v4"}, "dimension": {"const": 1024}, "distanceType": {"const": "COSINE"}, "templateVersion": {"const": 1}}},
+      "embedding": {"type": "object", "additionalProperties": false, "required": ["provider", "model", "dimension", "distanceType", "templateVersion"], "properties": {"provider": {"const": "DashScope"}, "model": {"const": "text-embedding-v4"}, "dimension": {"const": 1024}, "distanceType": {"const": "COSINE"}, "templateVersion": {"const": 2}}},
     "hnsw": {"type": "object", "additionalProperties": false, "required": ["configFingerprint", "neighborsPerNode", "indexingSearchCount", "reparationBacklinkProbability", "vectorCacheHintSizeKB", "flags"], "properties": {"configFingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "neighborsPerNode": {"type": "integer", "minimum": 1}, "indexingSearchCount": {"type": "integer", "minimum": 1}, "reparationBacklinkProbability": {"type": "number", "minimum": 0.0, "maximum": 1.0}, "vectorCacheHintSizeKB": {"type": "integer", "minimum": 0}, "flags": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}}},
     "scope": {"type": "object", "additionalProperties": false, "required": ["vehicleModel", "modelYear", "region", "softwareVersion", "configurationCode"], "properties": {"vehicleModel": {"type": "string", "minLength": 1}, "modelYear": {"type": "string", "minLength": 1}, "region": {"type": "string", "minLength": 1}, "softwareVersion": {"type": "string", "minLength": 1}, "configurationCode": {"type": "string", "minLength": 1}}},
     "parsers": {"type": "object", "additionalProperties": false, "required": ["configHash", "supportedSourceFormats", "pdf", "html", "markdown"], "properties": {"configHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "supportedSourceFormats": {"const": ["PDF", "STATIC_HTML", "MARKDOWN"]}, "pdf": {"type": "object"}, "html": {"type": "object", "additionalProperties": false, "required": ["contentRootSelector", "excludeSelectors", "mode", "networkAccess", "scriptExecution"], "properties": {"contentRootSelector": {"type": "string"}, "excludeSelectors": {"type": "array", "items": {"type": "string"}}, "mode": {"const": "STATIC_DOM_ONLY"}, "networkAccess": {"const": false}, "scriptExecution": {"const": false}, "embeddedDataExtraction": {"enum": ["NONE", "TESLA_SERVICE_CENTERS_V1"]}}}, "markdown": {"type": "object"}}},
-    "lexical": {"type": "object", "additionalProperties": false, "required": ["analyzerVersion", "languages", "algorithm", "tokenization"], "properties": {"analyzerVersion": {"const": 1}, "languages": {"type": "array", "minItems": 1}, "algorithm": {"const": "BM25"}, "tokenization": {"const": "CJK_BIGRAM_TRIGRAM_WITH_EXACT_LATIN"}}},
+      "lexical": {"type": "object", "additionalProperties": false, "required": ["analyzerVersion", "languages", "algorithm", "tokenization"], "properties": {"analyzerVersion": {"const": 2}, "languages": {"type": "array", "minItems": 1}, "algorithm": {"const": "BM25"}, "tokenization": {"const": "CJK_BIGRAM_TRIGRAM_WITH_EXACT_LATIN"}}},
     "chunking": {
       "oneOf": [
         {"type": "object", "additionalProperties": false, "required": ["configVersion", "configHash"], "properties": {"configVersion": {"const": 1}, "configHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}},
-        {"type": "object", "additionalProperties": false, "required": ["configVersion", "configHash", "tokenEstimatorVersion", "parentIdealMinTokens", "parentSoftMaxTokens", "parentHardMaxTokens", "childIdealMinTokens", "childTargetTokens", "childSoftMaxTokens", "childHardMaxTokens", "fallbackOverlapMinRatio", "fallbackOverlapMaxRatio", "tableRowsPerChild", "semanticStrategyVersion"], "properties": {
+        {"type": "object", "additionalProperties": false, "required": ["configVersion", "configHash", "tokenEstimatorVersion", "parentIdealMinTokens", "parentSoftMaxTokens", "parentHardMaxTokens", "childIdealMinTokens", "childTargetTokens", "childSoftMaxTokens", "childHardMaxTokens", "fallbackOverlapMinRatio", "fallbackOverlapMaxRatio", "tableRowsPerChild", "semanticStrategyVersion", "paragraphReconstructionVersion", "pdfColumnLayoutVersion", "paragraphCosineThreshold", "childMergeMaxTokens", "parentSplitOverlapRatio", "childForceMergeMaxTokens", "childDirectMergeMaxTokens", "pdfTocReferenceVersion"], "properties": {
           "configVersion": {"const": 2}, "configHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}, "tokenEstimatorVersion": {"const": "rag-token-estimator-v2"},
           "parentIdealMinTokens": {"type": "integer", "minimum": 0}, "parentSoftMaxTokens": {"type": "integer", "minimum": 0}, "parentHardMaxTokens": {"type": "integer", "minimum": 0},
           "childIdealMinTokens": {"type": "integer", "minimum": 0}, "childTargetTokens": {"type": "integer", "minimum": 0}, "childSoftMaxTokens": {"type": "integer", "minimum": 0}, "childHardMaxTokens": {"type": "integer", "minimum": 0},
-          "fallbackOverlapMinRatio": {"type": "number", "minimum": 0, "maximum": 0.1}, "fallbackOverlapMaxRatio": {"type": "number", "minimum": 0, "maximum": 0.1}, "tableRowsPerChild": {"type": "integer", "minimum": 1}, "semanticStrategyVersion": {"type": "string", "minLength": 1}
+          "fallbackOverlapMinRatio": {"type": "number", "minimum": 0, "maximum": 0.1}, "fallbackOverlapMaxRatio": {"type": "number", "minimum": 0, "maximum": 0.1}, "tableRowsPerChild": {"type": "integer", "minimum": 1}, "semanticStrategyVersion": {"type": "string", "minLength": 1},
+          "paragraphReconstructionVersion": {"type": "string", "minLength": 1}, "pdfColumnLayoutVersion": {"type": "string", "minLength": 1},
+          "paragraphCosineThreshold": {"type": "number", "exclusiveMinimum": 0, "maximum": 1}, "childMergeMaxTokens": {"type": "integer", "minimum": 1},
+          "parentSplitOverlapRatio": {"type": "number", "minimum": 0, "maximum": 0.2}, "childForceMergeMaxTokens": {"type": "integer", "minimum": 1}, "childDirectMergeMaxTokens": {"type": "integer", "minimum": 1}, "pdfTocReferenceVersion": {"type": "string", "minLength": 1}
         }}
       ]
     },

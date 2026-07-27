@@ -1,11 +1,25 @@
 # RAG Parent-Child 分块、Parent Evidence 与 Eval V2 详细实施计划
 
-> 文档状态：待项目负责人审批后执行  
+> 文档状态：已获项目负责人批准，执行中
 > 计划类型：Goal 模式执行计划  
 > 适用工程：`AIAgent` Monorepo 内的 `tools/rag-indexer`、`rag-schema`、`app` 与 RAG 评测资产  
 > 上位设计：`docs/plan_overall/rag/vehicle_agent_rag_design.md`  
 > 现状台账：`docs/plan_overall/rag/rag_execution_status.md`  
 > 本计划不授权直接发布正式 Bundle，也不授权将 TEST_ONLY 资产复制到主 APK
+
+> **2026-07-24 修订说明：** 旧计划 Phase 0 保持有效；Phase 1 的 PDF Block 语义恢复、Parent 内 Child 划分部分暂由 `09-rag-pdf-line-paragraph-child-rechunking-plan.md` 覆盖。必须先完成新的两列行读取、Parent Paragraph Reconstruction、Paragraph Embedding 语义合并和人工审核，再继续本计划 Phase 2。旧 Phase 1 生成的 Chunk、Embedding、Bundle 不得作为新策略基线。
+
+> **2026-07-25 标题检索协议补充：** 09 计划完成后，08 的剩余实现必须增加 Parent 二级标题参与检索的统一协议。该补充不要求重新执行 09 的 PDF/HTML 解析、Parent 划分或 Child 分块；沿用 09 已生成且 ID 稳定的 Parent/Child 产物，仅重新生成检索索引和 Bundle。离线端与 Android 端必须共同遵守以下规则：
+>
+> - 每个 Parent 显式确定 `parentTitle`，其语义为该 Parent 对应的二级标题；完整一级/二级标题路径仍保存在 `headingPath` 元数据中。若输入缺少二级标题，按 `headingPath` 的最后有效标题回退，并在构建诊断中记录回退原因。
+> - Dense 向量输入使用“二级标题 + Child 正文”固定模板。模板版本递增，Embedding Cache Key 必须包含模板版本和完整输入文本；已有 Child 正文和 ID 不变时不重跑分块，只重新生成向量。
+> - BM25 使用 TITLE 与 BODY 两个独立字段：分别计算字段分词、TF、DF、文档长度和平均文档长度；禁止把标题与正文直接拼接成单字段后计算长度。初始排序公式为 `BM25_TITLE × 2.0 + BM25_BODY × 1.0`，权重通过版本化配置传递到离线评测和 Android 查询端。
+> - ObjectBox Bundle、Manifest、Schema Fingerprint 和 Android Gateway 必须同步升级，确保字段 posting、字段长度和元数据版本一致；旧单字段词法索引不得与新字段索引混用。
+> - 本补充完成后，继续执行原 Phase 2 及后续阶段：RRF 候选统一合并与去重、Child Rerank、Child→Parent 映射、Parent Evidence 预算选择、Eval V2 和人工复核。标题协议变更后的向量/BM25 重建属于 08 的索引阶段，不视为重新执行 09。
+
+> **执行台账（2026-07-27）：** Phase 2 的标题检索 Bundle、Child→Parent Evidence、Android 候选去重和 Parent 预算已实现；当前人工审核后的 Eval V2 为 33 条唯一 Query（DEV 9、TEST 24），RRF、Rerank 与 7 模式消融均已成功执行。Phase 4 的 Android JVM、Debug APK、Lint 和 Automotive AVD 已通过；DEV/TEST 置信度阈值已完成一次校准。所有 Bundle 继续保持 `TEST_ONLY`，本台账不构成发布批准。
+
+> **评测规模决策补充（2026-07-27）：** 计划原始目标为至少 50 条，但项目负责人已确认当前以最新人工审核后的 33 条作为“先跑通”验收集；本轮不擅自补题或扩充样本。该规模偏差已记录，后续若要进行正式质量结论或发布审批，仍需补足覆盖面并重新冻结 DEV/TEST。当前数据集没有 `NO_EVIDENCE` 样本，因此 No-Evidence 阈值仅保留受控默认策略，未声称完成经验校准。
 
 ---
 
@@ -1895,6 +1909,24 @@ CLI 与 Android 不必共享实现类，但必须消费同一 Golden 并得到�
 
 子 Agent 获取本计划后，必须从 `RAG-EV2-G001` 开始，不得直接进入 Chunk 编码。
 
+---
+
+## 12. 最终 DoD 审计记录（2026-07-27）
+
+本节是对当前工作区实际产物和命令结果的最终审计，不修改历史 Goal 记录。
+
+| Gate | 审计结论 | 证据 |
+|---|---|---|
+| Chunk/Parent/Child | 通过 | `parent_child_chunk_v2_report.md`、Chunk 审核产物、V2 Manifest/Bundle |
+| Dense/BM25/RRF/Dedup/Rerank/Evidence | 通过 | `parent_evidence_ablation_v2.md`、`evaluation_parent_evidence_v2_ablation_v2.json` |
+| Confidence | 通过（当前先跑通口径） | `parent_evidence_confidence_calibration_v2.md`；DEV 选择、TEST 一次确认、Android `RetrievalConfidencePolicy` |
+| Bundle/Schema/Android | 通过 | Manifest/Store Verify；Android JVM 454 tests；APK/Lint；Automotive AVD 7/7 |
+| Eval 样本规模 | 批准例外 | 当前 33 条（DEV 9、TEST 24），项目负责人批准作为先跑通验收集；正式 50 条质量集延期，不伪装为已完成 |
+| No-Evidence 阈值 | 不适用例外 | 当前数据集没有 `NO_EVIDENCE` 样本；保留受控默认策略，不声称有经验校准结论 |
+| 发布 | 按计划保留 | Bundle 继续 `TEST_ONLY`，未复制到 `app/src/main/assets`，未提升 `APPROVED` |
+
+在上述批准例外范围内，08 计划的实现与分阶段验证目标已完成；正式质量扩展和发布审批不属于本次“先跑通”交付。
+
 首轮只执行：
 
 1. `git status --short`；
@@ -1905,4 +1937,3 @@ CLI 与 Android 不必共享实现类，但必须消费同一 Golden 并得到�
 6. 汇报发现的规范冲突或工作区风险。
 
 完成 G001 并给出真实验证证据后，才能进入 G002。
-

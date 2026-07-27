@@ -124,14 +124,14 @@ val prepareRagTestAssets by tasks.registering(Sync::class) {
         include("data.mdb", "manifest.json")
         into("rag/development_candidate")
     }
-    /**
-     * V4 是本机生成的 TEST_ONLY 真实资料候选，只允许进入 androidTest APK 做安装和检索验收。
-     * 该候选不进入 main assets；在未生成候选的干净工作区中保持为空，设备测试会明确跳过而非伪造资产。
-     */
-    from(rootProject.file("tools/rag-indexer/trial-output/model-y-2026-refresh-expanded-v4")) {
-        include("data.mdb", "manifest.json")
-        into("rag/model_y_v4_candidate")
-    }
+      /**
+       * Parent-Child V2 是本机生成的 TEST_ONLY 真实资料候选，只允许进入 androidTest APK 做安装和检索验收。
+       * 该候选不进入 main assets；在未生成候选的干净工作区中保持为空，设备测试会明确跳过而非伪造资产。
+       */
+      from(rootProject.file("tools/rag-indexer/trial-output/model-y-2026-refresh-title-v2")) {
+          include("data.mdb", "manifest.json")
+          into("rag/model_y_title_v2_candidate")
+      }
     into(layout.buildDirectory.dir("generated/ragTestAssets"))
 }
 

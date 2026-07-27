@@ -1,0 +1,780 @@
+{
+  "schemaVersion": 2,
+  "datasetVersion": "model-y-2026-refresh-parent-evidence-v2-reviewed-final",
+  "knowledgeScopeId": "model-y-2026-cn-2026-refresh-rwd",
+  "cases": [
+    {
+      "caseId": "basic-vehicle-warranty",
+      "query": "车辆基本有限质量保证是什么？",
+      "category": "WARRANTY",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明车辆基本有限质量保证的覆盖范围、期限和主要限制"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "b8c0c230c512ac2498efd54bae90ed224c6fb2544582aa90784041eaae8532bd"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "车辆基本有限质量保证小节完整说明适用范围和期限"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "直接问题"
+      ],
+      "split": "DEV"
+    },
+    {
+      "caseId": "seatbelt-and-airbag-warranty",
+      "query": "座椅安全带和气囊系统有限质量保证是什么？",
+      "category": "WARRANTY",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明座椅安全带和气囊系统有限质量保证的覆盖范围和期限"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "f1f1aa2d7c1a28ec63dbef22810033750bed3850d711036504865121dfb2210a"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "该 Parent 对应座椅安全带和气囊系统保证小节"
+        }
+      ],
+      "tags": [
+        "PDF"
+      ],
+      "split": "DEV"
+    },
+    {
+      "caseId": "front-passenger-airbag-for-child",
+      "query": "儿童坐在副驾驶座椅时，前排乘客安全气囊应该处于什么状态？",
+      "category": "SAFETY",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "给出前排乘客安全气囊状态",
+        "说明儿童乘坐时的安全条件"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "0186c30613a694599222d4506940b1c78e18c2e065661dabe976be5b87ecd2cd"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "前排乘客安全气囊小节直接说明儿童乘坐时的状态"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "安全"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "diy-remove-wheel-nut-cap",
+      "query": "Model Y 的轮毂螺母罩如何拆卸和安装？",
+      "category": "DIY_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明拆卸工具和操作步骤",
+        "说明重新安装方法"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "9c096d4086260905714f0ba095e37eea3a14b7e8c16488bcbb623838a79a0954"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "轮毂螺母罩小节完整包含拆卸和安装步骤"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "DIY"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "diy-cabin-air-filter-cn-interval",
+      "query": "中国大陆 Model Y 空调滤清器建议多久更换一次？",
+      "category": "DIY_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "只给出中国大陆空调滤清器建议更换时间或周期"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "40607d84979a97c3c36aa9614d8729ecb0f51581535211446519984002ee31bf"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "空调滤清器小节直接给出中国大陆更换时间"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "DIY",
+        "地区条件"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "diy-tire-pressure-location",
+      "query": "Model Y 在哪里查看胎压和推荐冷胎压力？",
+      "category": "VEHICLE_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明查看胎压的车辆菜单位置",
+        "说明推荐冷胎压力来源"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "5ab917f72db32aac6172c8a7dcbafbcb381ae373a57e6cb6d9063fc17b5d9250"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "胎压小节同时说明显示位置和推荐压力"
+        }
+      ],
+      "tags": [
+        "PDF"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "diy-roof-rack-installation",
+      "query": "安装 Model Y 车顶行李架前有什么要求和步骤？",
+      "category": "DIY_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明适用的车顶行李架",
+        "说明安装位置和关键限制"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "e6012018a0a23970d2f3e70b8df7144902aab40cc99c231142be0fb6ac07a919"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "车顶行李架安装小节包含适配要求和安装步骤"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "DIY"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "diy-door-handle-ice",
+      "query": "冬天车门把手结冰时应如何处理？",
+      "category": "DIY_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "给出车门把手除冰步骤",
+        "说明禁止的处理方式"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "463b3207184a9670f13ea6efe91420b0f535b21ed9b4f3bf990ab89442b91f2b"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "车门把手除冰小节包含 WD-40 和操作限制"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "DIY",
+        "警告"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "diy-phone-app-unlock-start",
+      "query": "如何使用手机应用程序解锁并启动车辆？",
+      "category": "VEHICLE_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明手机应用解锁操作",
+        "说明手机应用启动车辆操作"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "c2474b851114e3e92a07f5311c18fd068e11d37aca00917d1f04dc6ebb9e33b4"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "手机应用控制车辆小节涵盖解锁和启动"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "手机应用"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "diy-hepa-filter",
+      "query": "如何更换 Model Y 的 HEPA 空调滤清器？",
+      "category": "DIY_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明 HEPA 滤清器更换步骤",
+        "说明中国大陆周期或适用条件"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "2a1086def50be2e05cbd1ffdf385a794a618229ddef4792f611f978028282c43"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "HEPA 空调滤清器小节包含更换步骤"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "DIY"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "diy-front-headrest",
+      "query": "前排座椅头枕如何拆卸和重新安装？",
+      "category": "DIY_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明头枕拆卸步骤",
+        "说明重新安装要求"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "7074fde625e43c6f025efbc6db12a7d4229cd80f03c3831acf7af5cd9d1b1fb9"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "前排头枕小节包含拆卸和安装说明"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "DIY"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "service-center-beijing-liuliqiao",
+      "query": "北京六里桥特斯拉中心的地址和服务中心电话是什么？",
+      "category": "SERVICE_CENTER",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "给出北京六里桥中心地址",
+        "给出服务中心电话"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "656953a9bf1a3b4dd60a836f660c29abbe831ab4766bd6881d5297f0faf5ab84"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "服务中心记录同时包含六里桥地址和电话"
+        }
+      ],
+      "tags": [
+        "HTML",
+        "服务中心"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "service-center-shanghai-jinqiao",
+      "query": "上海金桥特斯拉中心的地址和服务中心电话是什么？",
+      "category": "SERVICE_CENTER",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "给出上海金桥中心地址",
+        "给出服务中心电话"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "7d4dc35c3583ef80c3a3e72e3806fabd6af521038f65ea043907cb43791d6148"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "服务中心记录同时包含金桥地址和电话"
+        }
+      ],
+      "tags": [
+        "HTML",
+        "服务中心"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "software-update",
+      "query": "Model Y 如何检查并排除蓝牙故障？",
+      "category": "VEHICLE_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明检查更新、下载或安装更新的步骤和前提"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "273c3c4db4db6b9405cb6233334c2150441872e714eae1829129bba2ba24cd55"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "审核备注将该问题改为蓝牙故障排查，使用对应蓝牙 Parent"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "软件",
+        "新增"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "driver-profile",
+      "query": "如何授予另一位驾驶员访问权限？",
+      "category": "VEHICLE_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明创建、选择或切换驾驶员访问权限的方法"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "08117c218014f6fb5ddbf4329a90e4ffec7b3781ff885b6b1400663395a38f47"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "手机应用小节"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "个性化",
+        "新增"
+      ],
+      "split": "DEV"
+    },
+    {
+      "caseId": "phone-key-setup",
+      "query": "如何将手机设置为 Model Y 的钥匙？",
+      "category": "VEHICLE_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明手机钥匙的配对或启用步骤"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "122ae884d2f43bb1aa19a897d2da814b3fa22783cdea5ef3438073957f89e178"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "手机钥匙小节"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "钥匙",
+        "新增"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "chengdu-service-center",
+      "query": "成都锦江特斯拉中心的地址是什么？",
+      "category": "SERVICE_CENTER",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "给出该服务中心的完整地址"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "02976ed0f4702fa7da8e3a6fc34f4f05cbba108c560bf5e71c4e8d9dba3e26b0"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "成都服务中心信息小节"
+        }
+      ],
+      "tags": [
+        "HTML",
+        "服务中心",
+        "新增"
+      ],
+      "split": "DEV"
+    },
+    {
+      "caseId": "hangzhou-service-center",
+      "query": "杭州余杭区仓前街道有没有特斯拉服务中心？",
+      "category": "SERVICE_CENTER",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "给出该服务中心的完整地址"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "5f65786012dd34ce99829a3147b50939fc23fec8fda2bf2cb671d431374009c7"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "杭州服务中心信息小节"
+        }
+      ],
+      "tags": [
+        "HTML",
+        "服务中心",
+        "新增"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "haikou-service-center",
+      "query": "海口龙华区特斯拉服务中心电话号码是多少？",
+      "category": "SERVICE_CENTER",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "给出服务中心的完整信息"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "68898643c7a7c6d8f6441cfdd11a520e594b7d49ff7352addaafe57bed2ce711"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "海口服务中心信息小节"
+        }
+      ],
+      "tags": [
+        "HTML",
+        "服务中心",
+        "新增"
+      ],
+      "split": "DEV"
+    },
+    {
+      "caseId": "door-open",
+      "query": "如何使用车门外把手？",
+      "category": "VEHICLE_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明车内开门控制位置和操作方法"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "4bfa27420567c59fc3dc79ff22553ba42fabc02f109683d2dbb887c1521eeffe"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "车门操作小节"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "车辆操作",
+        "新增"
+      ],
+      "split": "DEV"
+    },
+    {
+      "caseId": "vehicle-data-collection",
+      "query": "车辆会收集哪些驾驶和车辆数据？",
+      "category": "OTHER",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "概括文档中说明的车辆或驾驶数据采集范围"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "1693bc357c889040eaed905e63cb7541b6feea97ecba2ff4c47bab8ea106a8a9"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "车辆数据与隐私小节"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "隐私",
+        "新增"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "edr-purpose",
+      "query": "Model Y 的事件数据记录器 EDR 记录什么信息？",
+      "category": "OTHER",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明 EDR 的用途以及可能记录的数据类型"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "2661de543c9cd1ff9e4883d8a76d2493343ecbd3bb3a98a04fea2d2294eabefa"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "EDR 小节"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "数据",
+        "新增"
+      ],
+      "split": "DEV"
+    },
+    {
+      "caseId": "outside-mirror-adjustment",
+      "query": "如何调节 Model Y 的外后视镜？",
+      "category": "VEHICLE_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明调节左右外后视镜的位置和步骤"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "d7d47be054d8f0ea0ba4bab6dcc982656cb92944637095c60f96a75c325289aa"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "外后视镜调节小节"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "车辆操作",
+        "新增"
+      ],
+      "split": "DEV"
+    },
+    {
+      "caseId": "pre-drive-check",
+      "query": "炎热天气下，Model Y 驾驶前可以做哪些准备？",
+      "category": "SAFETY",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "列出驾驶前需要准备的项目"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "17545d9c45238e723708e34415eafb1d5b23fbf82933579b67324337b2f681e8"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "驾驶前检查小节"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "安全",
+        "新增"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "camp-mode",
+      "query": "如何打开 Model Y 的载货区？",
+      "category": "VEHICLE_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明打开载货区方法"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "2e64b63be43460c8b256f23c2e40025e747d6c1440ad142c7ad066a9555ecdae"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "打开载货区小节"
+        }
+      ],
+      "tags": [
+        "PDF",
+        "车辆操作",
+        "新增"
+      ],
+      "split": "TEST"
+    },
+    {
+    "caseId": "driver-assist-suspension",
+      "query": "什么情况下，辅助驾驶功能的使用将被暂停？",
+      "category": "VEHICLE_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明辅助驾驶暂停原因"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "46cfcb315c942fbe5ac2fddb97d6699f07b430ae6581f220f93b2dcd3a1f9ed4"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "辅助驾驶暂停小节"
+        }
+      ],
+      "tags": [
+        "PDF"
+      ],
+      "split": "TEST"
+    },
+    {
+    "caseId": "energy-usage-estimate",
+      "query": "如何查看车辆的实时和预计能量使用情况？",
+      "category": "VEHICLE_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明如何查看车辆的实时和预计能量使用情况"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "e3d403291d2da2024fe1e99c97a642baaf6e2f26a1a27e64bb83e2ffaca1be32"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "“能量”应用程序小节"
+        }
+      ],
+      "tags": [
+        "PDF"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "lamp-condensation",
+      "query": "大灯或尾灯中出现冷凝，应该怎么处理？",
+      "category": "VEHICLE_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明是否需要处理"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "1ae0ba6ad4ac3442dd6ff2585d9bba390329763ac51b9e75a4357b8936de0067"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "大灯或尾灯中的冷凝小节"
+        }
+      ],
+      "tags": [
+        "PDF"
+      ],
+      "split": "TEST"
+    },
+    {
+    "caseId": "pedestrian-warning-sound",
+      "query": "什么情况下，Model Y 的行人警示系统会发出警示音？",
+      "category": "VEHICLE_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明行人警示系统发出警示音的条件"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "3a9fb9f5f5a7cbdabaed16251d26584bda22742e50b55e04bd151a7dd1bfb45c"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "行人警示系统小节"
+        }
+      ],
+      "tags": [
+        "PDF"
+      ],
+      "split": "DEV"
+    },
+        {
+      "caseId": "trunk-load-limit",
+      "query": "后备箱最大载重是多少？",
+      "category": "VEHICLE_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明后备箱负载极限"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "4e16ed39bbd3c8230f4182ef4eadbaddfa646e5f755261bc1c978b96cda82f61"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "后备箱负载极限小节"
+        }
+      ],
+      "tags": [
+        "PDF"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "interior-lock-unlock",
+      "query": "坐在车内，如何锁定和解锁？",
+      "category": "VEHICLE_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明内部锁定和解锁"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "325b50e793150c5353d57ae85818dcea25c46c5d80090d0bd86cf2a1323b7780"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "内部锁定和解锁小节"
+        }
+      ],
+      "tags": [
+        "PDF"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "wireless-charging-power",
+      "query": "五座版 MODEL Y 的手机无线充电最大功率是多少？",
+      "category": "VEHICLE_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明是否是正确的答案"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "df4d94553bc27606d9d8b8cfb79a56a3fb2bfdeaf4abad11fcd25f0a65cb9074"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "五座版 MODEL Y 的手机无线充电最大功率小节"
+        }
+      ],
+      "tags": [
+        "PDF"
+      ],
+      "split": "TEST"
+    },
+    {
+      "caseId": "supercharger-fee-info",
+      "query": "如何查看超级充电站费用信息？",
+      "category": "VEHICLE_OPERATION",
+      "answerability": "ANSWERABLE",
+      "answerCriteria": [
+        "说明费用信息的查看方法"
+      ],
+      "acceptableEvidenceSets": [
+        {
+          "requiredParentIds": [
+            "ed858967cebc796757431ceddccf9a7bd5a8b5a85f256037324da8ee89993c81"
+          ],
+          "optionalLocatorChildIds": [],
+          "rationale": "超级充电站费用小节"
+        }
+      ],
+      "tags": [
+        "PDF"
+      ],
+      "split": "TEST"
+    }
+  ]
+}

@@ -9,7 +9,7 @@ import java.util.Map;
  */
 public final class KnowledgeStoreContract {
 
-    public static final int FORMAT_VERSION = 1;
+    public static final int FORMAT_VERSION = 2;
     public static final int EMBEDDING_DIMENSION = 1024;
     public static final String EMBEDDING_PROVIDER = "DashScope";
     public static final String EMBEDDING_MODEL = "text-embedding-v4";
@@ -22,6 +22,10 @@ public final class KnowledgeStoreContract {
     public static final int HNSW_VECTOR_CACHE_HINT_SIZE_KB = 0;
     public static final List<String> HNSW_FLAGS = List.of();
     public static final int SOURCE_LOCATOR_SCHEMA_VERSION = 1;
+    public static final int EMBEDDING_TEMPLATE_VERSION = 2;
+    public static final int LEXICAL_FIELD_VERSION = 2;
+    public static final double BM25_TITLE_WEIGHT = 2.0D;
+    public static final double BM25_BODY_WEIGHT = 1.0D;
     public static final String EMPTY_NUMERIC_LOCATOR_SEMANTIC = "NOT_APPLICABLE_STORED_AS_ZERO";
 
     private KnowledgeStoreContract() {

@@ -5,7 +5,7 @@
   "entities": [
     {
       "id": "1:2739228543630617458",
-      "lastPropertyId": "32:9223130039144062256",
+      "lastPropertyId": "35:1172837465102384194",
       "name": "KnowledgeChunkEntity",
       "properties": [
         {
@@ -188,6 +188,21 @@
           "indexId": "10:3933451276062475910",
           "type": 28,
           "flags": 8
+        },
+        {
+          "id": "33:1172837465102384192",
+          "name": "parentTitle",
+          "type": 9
+        },
+        {
+          "id": "34:1172837465102384193",
+          "name": "lexicalTitleDocumentLength",
+          "type": 5
+        },
+        {
+          "id": "35:1172837465102384194",
+          "name": "lexicalBodyDocumentLength",
+          "type": 5
         }
       ],
       "relations": []
@@ -285,7 +300,7 @@
     },
     {
       "id": "3:2592972128871532546",
-      "lastPropertyId": "27:8499374435460138503",
+      "lastPropertyId": "32:1172837465102384199",
       "name": "KnowledgeStoreMetadataEntity",
       "properties": [
         {
@@ -423,13 +438,38 @@
           "id": "27:8499374435460138503",
           "name": "builtAtEpochMs",
           "type": 6
+        },
+        {
+          "id": "28:1172837465102384195",
+          "name": "averageLexicalTitleLength",
+          "type": 8
+        },
+        {
+          "id": "29:1172837465102384196",
+          "name": "averageLexicalBodyLength",
+          "type": 8
+        },
+        {
+          "id": "30:1172837465102384197",
+          "name": "bm25TitleWeight",
+          "type": 8
+        },
+        {
+          "id": "31:1172837465102384198",
+          "name": "bm25BodyWeight",
+          "type": 8
+        },
+        {
+          "id": "32:1172837465102384199",
+          "name": "lexicalFieldVersion",
+          "type": 5
         }
       ],
       "relations": []
     },
     {
       "id": "4:5885898894327830605",
-      "lastPropertyId": "5:3644412166548025057",
+      "lastPropertyId": "7:1172837465102384201",
       "name": "LexicalTermEntity",
       "properties": [
         {
@@ -459,6 +499,16 @@
           "id": "5:3644412166548025057",
           "name": "termFrequencies",
           "type": 26
+        },
+        {
+          "id": "6:1172837465102384200",
+          "name": "field",
+          "type": 9
+        },
+        {
+          "id": "7:1172837465102384201",
+          "name": "rawTerm",
+          "type": 9
         }
       ],
       "relations": []
