@@ -23,7 +23,7 @@ public final class VehicleKnowledgeTool {
     private final VehicleKnowledgeToolResultMapper mapper=new VehicleKnowledgeToolResultMapper();
     private final RagJsonCodec codec=new RagJsonCodec();
     public VehicleKnowledgeTool(VehicleKnowledgeService service) { this.service=service; }
-    @Tool(name="searchVehicleKnowledge", value="查询当前车辆的官方使用条件、维护与更换步骤、故障提示、功能限制和版本差异。仅传入需要检索的问题。")
+    @Tool(name="searchVehicleKnowledge", value="检索 Tesla Model Y 车主手册、DIY 维护指南、服务中心信息和车辆质保政策，用于回答车辆功能使用、系统设置、故障排查、维护操作、维修网点及质保三包问题。不负责直接控制车辆、读取实时车辆状态或执行导航。仅传入需要检索的问题。")
     public String searchVehicleKnowledge(@P("车辆知识检索问题") String query) {
         RequestExecutionContext.State context=RequestExecutionContext.current();
         if(context==null||context.knowledgeRequestState()==null||service==null) return failure("KNOWLEDGE_REQUEST_CONTEXT_MISSING");

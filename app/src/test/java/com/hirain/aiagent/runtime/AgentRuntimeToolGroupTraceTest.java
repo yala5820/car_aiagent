@@ -1,6 +1,7 @@
 package com.hirain.aiagent.runtime;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import com.hirain.aiagent.AgentRequest;
 import com.hirain.aiagent.context.ContextPrepareResult;
@@ -46,11 +47,13 @@ public class AgentRuntimeToolGroupTraceTest {
         testSession.close();
 
         SpanData root = testSession.exporter.spans.get(0);
-        assertEquals("AC_GROUP,BASIC_STATUS_GROUP", root.getAttributes()
+        assertEquals("AC_GROUP,BASIC_STATUS_GROUP,VEHICLE_KNOWLEDGE_GROUP", root.getAttributes()
                 .get(AttributeKey.stringKey("agent.tool_group.selected_group_ids")));
-        assertEquals("set_ac_status", root.getAttributes()
-                .get(AttributeKey.stringKey("agent.tool_group.selected_tool_names")));
-        assertEquals("intent:VEHICLE_AC", root.getAttributes()
+        String selectedTools = root.getAttributes()
+                .get(AttributeKey.stringKey("agent.tool_group.selected_tool_names"));
+        assertTrue(selectedTools.contains("set_ac_status"));
+        assertTrue(selectedTools.contains("searchVehicleKnowledge"));
+        assertEquals("knowledge:auto:intent:VEHICLE_AC", root.getAttributes()
                 .get(AttributeKey.stringKey("agent.tool_group.selection_reason")));
         assertEquals("SELECTED", root.getAttributes()
                 .get(AttributeKey.stringKey("agent.tool_group.selection_status")));

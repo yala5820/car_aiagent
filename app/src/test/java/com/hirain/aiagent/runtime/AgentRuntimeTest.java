@@ -193,7 +193,8 @@ public class AgentRuntimeTest {
         RequestSession session = runtime.startSession(request, null);
         RuntimeResult result = runtime.execute(session);
 
-        assertEquals(List.of(ToolGroupId.AC_GROUP, ToolGroupId.BASIC_STATUS_GROUP),
+        assertEquals(List.of(ToolGroupId.AC_GROUP, ToolGroupId.BASIC_STATUS_GROUP,
+                        ToolGroupId.VEHICLE_KNOWLEDGE_GROUP),
                 session.toolGroupSelectionResult().selectedGroupIds());
         assertTrue(result.success());
         // Phase 6: Context 独占链路，prepareResult 直接驱动 AgentLoop
