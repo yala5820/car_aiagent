@@ -14,6 +14,14 @@ import java.util.List;
  */
 public class DefaultToolGroupSelector implements ToolGroupSelector {
 
+    private static final String[] CONTROL_ACTIONS = {
+            "打开", "关闭", "开启", "关掉", "启动", "停止", "调高", "调低",
+            "升高", "降低", "设置", "切换", "解锁", "上锁"
+    };
+    private static final String[] GENERIC_VEHICLE_TARGETS = {
+            "车", "车辆", "汽车", "本车", "车里", "车内"
+    };
+
     private final ToolGroupRegistry registry;
 
     public DefaultToolGroupSelector(ToolGroupRegistry registry) {
@@ -50,15 +58,15 @@ public class DefaultToolGroupSelector implements ToolGroupSelector {
             case VISION_QA:
                 return selected(List.of(ToolGroupId.VISION_GROUP), tag, confidence);
             case CHAT:
-                return hasWeakVehicleKeyword(text)
+                return hasAmbiguousVehicleControlRequest(text)
                         ? ToolGroupSelectionResult.clarificationRequired(
-                                "clarification:chat_vehicle_keyword", confidence)
+                                "clarification:chat_ambiguous_vehicle_control", confidence)
                         : ToolGroupSelectionResult.chatOnly("intent:CHAT", confidence);
             case UNKNOWN:
             default:
-                return hasWeakVehicleKeyword(text)
+                return hasAmbiguousVehicleControlRequest(text)
                         ? ToolGroupSelectionResult.clarificationRequired(
-                                "clarification:unknown_vehicle_keyword", confidence)
+                                "clarification:unknown_ambiguous_vehicle_control", confidence)
                         : ToolGroupSelectionResult.chatOnly("intent:UNKNOWN_CHAT_ONLY", confidence);
         }
     }
@@ -77,11 +85,19 @@ public class DefaultToolGroupSelector implements ToolGroupSelector {
         return userInput != null ? userInput.trim().toLowerCase() : "";
     }
 
-    static boolean hasWeakVehicleKeyword(String text) {
+    /**
+     * 只有用户明确表达“控制动作”，同时仅给出泛化车辆对象时才要求澄清。
+     * 单纯出现“车”或车辆部件可能是知识问答，必须继续交给模型并保留只读知识工具。
+     */
+    static boolean hasAmbiguousVehicleControlRequest(String text) {
         if (text == null || text.isEmpty()) return false;
-        return text.contains("车") || text.contains("空调") || text.contains("车窗")
-                || text.contains("窗户") || text.contains("座椅") || text.contains("车门")
-                || text.contains("底盘") || text.contains("悬架") || text.contains("香氛")
-                || text.contains("香薰") || text.contains("dms") || text.contains("驾驶员");
+        return containsAny(text, CONTROL_ACTIONS) && containsAny(text, GENERIC_VEHICLE_TARGETS);
+    }
+
+    private static boolean containsAny(String text, String[] values) {
+        for (String value : values) {
+            if (text.contains(value)) return true;
+        }
+        return false;
     }
 }

@@ -318,6 +318,32 @@ public class AgentRuntimeTest {
     }
 
     @Test
+    public void execute_compoundKnowledgeClarificationReturnsAccurateText() {
+        AtomicInteger executorCalls = new AtomicInteger();
+        ToolGroupSelector selector = (intentResult, userInput) ->
+                ToolGroupSelectionResult.clarificationRequired(
+                        com.hirain.aiagent.rag.policy.KnowledgeCapabilityPlanner.COMPOUND_REQUEST_REQUIRES_SPLIT,
+                        IntentConfidence.LOW);
+        AgentRuntime runtime = new AgentRuntime(
+                (session, prepareResult) -> {
+                    executorCalls.incrementAndGet();
+                    return AgentResult.success("不应执行", 1, 1L, List.of());
+                },
+                (text, sourceInputType) -> IntentResult.of(
+                        IntentTag.CHAT, IntentConfidence.LOW, List.of(), text,
+                        sourceInputType, "fallback_chat"),
+                selector,
+                () -> "req-fixed",
+                () -> 3000L);
+
+        RuntimeResult result = runtime.execute(runtime.startSession(createRequest("查询后再操作"), null));
+
+        assertTrue(result.success());
+        assertEquals("当前请求同时包含知识查询与其他操作，请拆分为两条消息分别发送。", result.output());
+        assertEquals(0, executorCalls.get());
+    }
+
+    @Test
     public void execute_expiredAdmissionDeadlineStopsBeforeExecutor() {
         AtomicInteger executorCalls = new AtomicInteger();
         AgentRuntime runtime = new AgentRuntime(

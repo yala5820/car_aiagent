@@ -61,16 +61,15 @@ public class DefaultToolGroupSelectorTest {
     }
 
     @Test
-    public void select_unknownWithWeakVehicleKeywordRequiresClarification() {
-        IntentResult intent = IntentResult.unknown("车窗好像有问题", "TEXT", "empty_text");
+    public void select_unknownVehicleKnowledgeQuestionReturnsChatOnly() {
+        IntentResult intent = IntentResult.unknown("车辆质保多久", "TEXT", "empty_text");
 
-        ToolGroupSelectionResult result = selector.select(intent, "车窗好像有问题");
+        ToolGroupSelectionResult result = selector.select(intent, "车辆质保多久");
 
-        assertEquals(ToolGroupSelectionStatus.CLARIFICATION_REQUIRED, result.status());
-        assertTrue(result.selectedGroupIds().isEmpty());
+        assertEquals(ToolGroupSelectionStatus.CHAT_ONLY, result.status());
+        assertEquals(List.of(ToolGroupId.CHAT_ONLY_GROUP), result.selectedGroupIds());
         assertTrue(result.selectedToolNames().isEmpty());
-        assertEquals("clarification:unknown_vehicle_keyword", result.selectionReason());
-        assertTrue(result.fallbackUsed());
+        assertEquals("intent:UNKNOWN_CHAT_ONLY", result.selectionReason());
     }
 
     @Test
@@ -110,19 +109,27 @@ public class DefaultToolGroupSelectorTest {
     }
 
     @Test
-    public void select_chatWithVehicleKeywordRequiresClarification() {
-        // "车里有点不舒服" → KeywordIntentRouter 返回 CHAT/LOW（无特定业务关键词）
-        // DefaultToolGroupSelector 应识别弱车载关键词"车"，走车辆 fallback
+    public void select_chatWithVehicleKnowledgeTextReturnsChatOnly() {
         IntentResult intent = IntentResult.of(IntentTag.CHAT, IntentConfidence.LOW,
-                List.of(), "车里有点不舒服", "TEXT", "fallback_chat");
+                List.of(), "这辆车的质保多久", "TEXT", "fallback_chat");
 
-        ToolGroupSelectionResult result = selector.select(intent, "车里有点不舒服");
+        ToolGroupSelectionResult result = selector.select(intent, "这辆车的质保多久");
+
+        assertEquals(ToolGroupSelectionStatus.CHAT_ONLY, result.status());
+        assertEquals(List.of(ToolGroupId.CHAT_ONLY_GROUP), result.selectedGroupIds());
+        assertTrue(result.selectedToolNames().isEmpty());
+        assertEquals("intent:CHAT", result.selectionReason());
+    }
+
+    @Test
+    public void select_chatWithAmbiguousVehicleControlRequiresClarification() {
+        IntentResult intent = IntentResult.of(IntentTag.CHAT, IntentConfidence.LOW,
+                List.of(), "帮我打开车里的设备", "TEXT", "fallback_chat");
+
+        ToolGroupSelectionResult result = selector.select(intent, "帮我打开车里的设备");
 
         assertEquals(ToolGroupSelectionStatus.CLARIFICATION_REQUIRED, result.status());
-        assertTrue(result.selectedGroupIds().isEmpty());
-        assertTrue(result.selectedToolNames().isEmpty());
-        assertEquals("clarification:chat_vehicle_keyword", result.selectionReason());
-        assertTrue(result.fallbackUsed());
+        assertEquals("clarification:chat_ambiguous_vehicle_control", result.selectionReason());
     }
 
     @Test
@@ -131,12 +138,11 @@ public class DefaultToolGroupSelectorTest {
         KeywordIntentRouter router = new KeywordIntentRouter();
         DefaultToolGroupSelector selector = new DefaultToolGroupSelector(ToolGroupRegistry.defaultRegistry());
 
-        // "车里有点不舒服" → KWR 无业务关键词命中 → CHAT/LOW
-        // → selector 因含弱车载关键词而要求澄清，不暴露聚合工具组
+        // 车辆场景描述不是明确控制命令，应继续正常对话。
         IntentResult chatWithVehicle = router.route("车里有点不舒服", "TEXT");
         assertEquals(IntentTag.CHAT, chatWithVehicle.intentTag());
         ToolGroupSelectionResult r1 = selector.select(chatWithVehicle, "车里有点不舒服");
-        assertEquals(ToolGroupSelectionStatus.CLARIFICATION_REQUIRED, r1.status());
+        assertEquals(ToolGroupSelectionStatus.CHAT_ONLY, r1.status());
         assertTrue(r1.selectedToolNames().isEmpty());
 
         // "讲个笑话" → KWR 无关键词 → CHAT/LOW

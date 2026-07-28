@@ -48,6 +48,10 @@ public class AgentRuntime {
     private static final String CHAT_PERSONA = "chat";
     private static final String TOOL_CLARIFICATION_TEXT =
             "请明确要控制空调、车窗、座椅、车门还是底盘。";
+    private static final String COMPOUND_KNOWLEDGE_CLARIFICATION_TEXT =
+            "当前请求同时包含知识查询与其他操作，请拆分为两条消息分别发送。";
+    private static final String COMPOUND_VISION_CLARIFICATION_TEXT =
+            "当前请求同时包含前向视觉识别与车辆操作，请拆分为两条消息分别发送。";
 
     private final AgentExecutor chatExecutor;
     private final ContextOrchestrator contextOrchestrator;
@@ -292,7 +296,7 @@ public class AgentRuntime {
             return RuntimeResult.success(
                     session.requestId(), session.sessionId(),
                     session.userId(), session.personaId(), session.clientMessageId(),
-                    TOOL_CLARIFICATION_TEXT, timeProvider.nowMillis(), 0, 0);
+                    clarificationText(selection), timeProvider.nowMillis(), 0, 0);
         }
         if (selectionStatus == null || selectionStatus == ToolGroupSelectionStatus.FAILED_CLOSED) {
             String reason = selection != null
@@ -358,6 +362,20 @@ public class AgentRuntime {
         } finally {
             loopSpan.end();
         }
+    }
+
+    /**
+     * 按澄清原因返回准确提示，避免把知识/视觉复合请求错误描述成“车控对象不明确”。
+     */
+    private static String clarificationText(ToolGroupSelectionResult selection) {
+        String reason = selection != null ? selection.selectionReason() : null;
+        if (KnowledgeCapabilityPlanner.COMPOUND_REQUEST_REQUIRES_SPLIT.equals(reason)) {
+            return COMPOUND_KNOWLEDGE_CLARIFICATION_TEXT;
+        }
+        if ("clarification:compound_vision_vehicle".equals(reason)) {
+            return COMPOUND_VISION_CLARIFICATION_TEXT;
+        }
+        return TOOL_CLARIFICATION_TEXT;
     }
 
     private boolean isStopped(RequestSession session) {
