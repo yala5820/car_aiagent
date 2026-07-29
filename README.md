@@ -4,7 +4,7 @@
 
 AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎**。它是一个持续运行在后台的**前台 Service**，本身**无任何 UI**，对外通过 AIDL（`IAIAgentAidlInterface`）暴露 LLM 对话能力，供 Launcher 或其他 App 调用。
 
-**核心业务：** 利用大语言模型（LLM）和多模态视觉模型（VLM），为驾驶员提供自然语言对话、车辆控制、场景感知、前向视野问答等智能座舱能力。
+**核心业务：** 利用大语言模型（LLM）、多模态视觉模型（VLM）和车辆知识 RAG，为驾驶员提供自然语言对话、车辆控制、场景感知、前向视野问答、车主手册与维护知识检索等智能座舱能力。
 
 **架构定位：** AIAgent 是“确定性控制面 + 模型驱动 Tool Loop”的领域约束型单 Agent。AIDL Service、Runtime、Context、ToolGroup、Safety 与请求终态由项目代码控制；模型只在本轮允许的上下文和工具空间内完成自然语言理解、参数生成和多轮工具决策。LangChain4j 提供模型、消息、ChatMemory 与 Tool Calling 原语，不负责项目的业务编排。
 
@@ -22,6 +22,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 - **虚拟车辆状态机（VehicleStateMachine）**：Demo 阶段车控 tool 的状态托管中心，参数校验 + 状态收敛
 - **Context 上下文模块**：以 8 个请求级 Provider + 3 个迭代级 Provider 统一采集 Prompt、Memory、Tool、车辆与时间信息；独占装配 TEXT 模型输入，并支持集中策略、预算裁剪、Memory 摘要恢复和完整 Trace
 - **前向视觉问答 Tool**：以 TEXT 提问触发 `front_camera_interaction`；Demo 模式从受白名单保护的 assets 图片读取内容，经 `qwen-vl-max` 生成视觉证据，再由主对话模型组织最终答复
+- **受控 Agentic RAG**：APK 内置 Model Y `TEST_ONLY` ObjectBox 知识库；Runtime 以规则识别和默认只读暴露共同保证知识 Tool 可达，模型可在 AgentLoop 内调用 `searchVehicleKnowledge`，但车型 Scope、候选召回、Rerank、Evidence 预算、降级与引用均由确定性代码控制
 - **Debug Eval 适配**：仅 Debug APK 提供独立 AIDL 环境控制入口；复用唯一 VehicleStateMachine 的快照、原子 Patch、临时租约和 Trace 关联，为 TestApp/电脑端评测提供可重复环境，不改变主业务 AIDL
 
 > **当前范围：** TEXT 是唯一进入 Runtime / Context / TextAgentLoop 的业务主路径；IMAGE、VOICE 返回结构化不支持响应，CONTROL 与主动场景链保留兼容实现。前向视觉问答使用受控 Demo assets 图片与 `qwen-vl-max`，不代表实时摄像头能力。Demo 车控由 `VehicleStateMachine` 托管，`SoaService` 尚未形成真实车辆执行与回执闭环，因此 README 中的“完成”均不代表量产车控验收完成。
@@ -53,6 +54,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 | **Phase 21** | **Context 长会话与语义收口**：完整 Session 历史、集中 ContextPolicy、可选数据裁剪、真实摘要压缩与一次重装配、结构化 Tool outcome、FULL_DEBUG 全文 Trace、Token 误差字段和 Legacy 清理 |
 | **Phase 22** | **TEXT 前向视觉问答**：收敛 IMAGE / VOICE 主入口；新增视觉意图策略、60 秒视觉 Tool deadline、Demo 图片白名单配置与 `front_camera_interaction`；视觉模型只产出结构化证据，最终自然语言答复仍由 TEXT AgentLoop 生成 |
 | **Phase 23** | **Debug Eval 适配**：新增仅 Debug 合并的 `IAIAgentEvalDebug` / `EvalDebugService`；唯一车辆状态机支持结构化快照、原子 Patch、revision 与 reset；以 UID + token 租约隔离 Eval 环境，并在根 Trace 记录跨端关联与环境版本 |
+| **Phase 24** | **车辆知识 RAG**：独立离线 CLI 完成 PDF/静态 HTML/Markdown 解析、Parent-Child V2、Embedding/BM25、ObjectBox Bundle 和 Eval；Android 完成 Asset 安装、Hybrid Retrieval、Child Rerank、Parent Evidence 与 `searchVehicleKnowledge` Agent Tool 接入 |
 
 ---
 
@@ -115,7 +117,13 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 │  │           Tool 调用层（集中式反射调度）         │            │
 │  │  ToolRegistry (Map<String, ToolDispatcher>)   │            │
 │  │  ToolDispatcher (反射扫描 @Tool 方法)         │            │
-│  │  Vehicle*Manager | WeatherUtils | FrontViewVisionTool │   │
+│  │  Vehicle*Manager | WeatherUtils               │            │
+│  │  FrontViewVisionTool | VehicleKnowledgeTool   │            │
+│  ├─────────────────────────────────────────────┤            │
+│  │           车辆知识 RAG                         │            │
+│  │  Asset Bundle → ObjectBox Store               │            │
+│  │  Child Dense/BM25 → RRF → 去重 → Rerank      │            │
+│  │  → Parent 聚合 → 完整 Parent Evidence         │            │
 │  ├─────────────────────────────────────────────┤            │
 │  │           Prompt 管理                         │            │
 │  │  assets/prompts/（11 个 .txt 模板）           │            │
@@ -149,6 +157,7 @@ AIAgent 是运行于 Android 车机系统上的 **AI 语音助手的后台引擎
 | 通信 | AIDL（Launcher ↔ AIAgent：主对话 + 会话 CRUD + 取消 + Listener；Debug TestApp ↔ AIAgent：独立 Eval 环境入口）、SOA 总线、Camera |
 | UI | **无**（纯后台 Service） |
 | 持久化 | SQLite（ChatMemory 持久化 + 长期记忆 + Session 管理） |
+| RAG 存储与检索 | ObjectBox 5.4.0 + HNSW/COSINE；TITLE/BODY BM25；Dense + BM25 + RRF + Rerank |
 | 网络 | OkHttp 4.12 |
 | Trace | OpenTelemetry 1.48.0 + Phoenix（开发调试用） |
 | VR/TTS | adapter_vr.jar（闭源） |
@@ -171,6 +180,9 @@ AIAgent/
 │   │   ├── assets/vision/demo/              # 前向视觉问答 Demo 图片与白名单配置
 │   │   │   ├── vision-demo-config.json      # 默认图片、大小上限、图片元数据
 │   │   │   └── images/                      # 仅允许配置文件声明的本地图片
+│   │   ├── assets/rag/knowledge_db/          # APK 内置 TEST_ONLY 车辆知识 Bundle
+│   │   │   ├── data.mdb                     # ObjectBox 数据、向量和 BM25 索引
+│   │   │   └── manifest.json                # Scope、Schema、Hash 与构建协议
 │   │   ├── java/com/hirain/aiagent/
 │   │   │   ├── AIAgentService.kt           # 前台 Service，AIDL Binder 实现
 │   │   │   ├── AIAgent.java                # Facade 单例（客户端使用，JAR 中）
@@ -716,6 +728,37 @@ ToolSafetyEngine 是独立、轻量、确定性的车控安全审核入口。Age
 
 **所有与硬件通信的方法体均为空**（仅 `Log.d` 日志输出），这是当前最大的功能性断点。
 
+### 4.18 车辆知识 RAG（受控 Agentic RAG）
+
+**核心目录：**
+
+- Android 消费端：`app/src/main/java/com/hirain/aiagent/rag/`
+- Agent Tool：`tools/knowledge/VehicleKnowledgeTool.java`
+- APK Bundle：`app/src/main/assets/rag/knowledge_db/`
+- 离线生产端：`tools/rag-indexer/`
+- 共享协议：`rag-schema/`
+
+Android 不解析原始 PDF、HTML 或 Markdown，也不在车机上生成文档向量。离线 Indexer 将资料构建为 ObjectBox Bundle，APK 只内置 `data.mdb` 和 `manifest.json`。Service 启动后，`KnowledgeStoreCoordinator` 在独立线程完成 Hash、Schema、车型 Scope、Store Metadata 和空间检查，再将候选安装到应用私有目录并激活；安装失败只降级知识能力，不阻塞普通对话和车控。
+
+检索采用 Parent-Child V2：
+
+- Child 是检索单元：标题路径与正文共同生成 Dense 向量；BM25 对 TITLE/BODY 独立字段检索。
+- Dense 与 BM25 各召回候选，RRF 融合后按 Chunk ID、正文相似度和同 Parent 占位进行去重。
+- Rerank 只处理 Child，不直接对完整 Parent 排序；Rerank 失败时保留 RRF 顺序。
+- 高分 Child 映射回完整 Parent，同一 Parent 只保留一次，最终按 Parent Evidence 预算返回。
+- ToolResult 包含 Evidence ID、完整 Parent 正文、标题路径、文档版本、来源定位、适用范围和检索置信度。
+
+“受控 Agentic”指模型可以自主决定何时调用只读知识 Tool，但不能决定以下边界：
+
+- 模型不能选择或伪造车型 Scope；Scope 来自 `VehicleStateMachineVehicleProfileProvider`。
+- 模型不能修改 TopK、RRF、Rerank、去重、置信度或 Evidence 预算。
+- 模型不能直接访问 ObjectBox、原始文档或云端 API。
+- 知识 Tool 不执行车控、不读取实时车辆状态、不导航，也不绕过 ToolGroup、deadline 和请求取消。
+- 高置信知识意图由 `RuleBasedKnowledgeNeedDetector` 强制收敛到知识 Tool；普通 TEXT 同时默认暴露只读知识 Tool，降低规则漏判导致的不可达。
+- 知识查询与车辆操作/视觉识别的复合请求会要求拆分，避免一次请求混合不同权限和期限。
+
+完整的离线构建、分块、向量化、评测和打包说明见 [AIAgent RAG README](tools/README.md)。
+
 ---
 
 ## 5. 初始化流程与运行流程
@@ -738,9 +781,11 @@ AIAgentService.onCreate()
     ├─ 启动 1 秒定时器：requestCapture()
     ├─ PromptManager(this)                 ← Prompt 模板管理器
     ├─ vehicleStateMachine = VehicleStateMachine() ← 虚拟车辆状态机
+    ├─ KnowledgeStoreCoordinator.initializeAsync(vehicleProfile)
+    │    └─ 校验并安装 assets/rag/knowledge_db → 激活 ObjectBox Store
     ├─ toolSafetyEngine = ToolSafetyEngine(vehicleStateMachine, defaultRules) ← 全 Persona 共享
     ├─ frontViewVisionTool = FrontViewVisionTool(DemoFrontViewImageProvider, QwenVisionAnalyzer)
-    ├─ toolRegistry.registerAll(9 tool providers) ← 注册车控、天气与前向视觉模型工具（SpeedManager 不注册）
+    ├─ toolRegistry.registerAll(10 tool providers) ← 注册车控、天气、视觉与知识工具（SpeedManager 不注册）
     ├─ memoryOrchestrator(...)             ← 记忆系统初始化
     ├─ traceManager = TraceManager(...)    ← Trace 系统初始化
     ├─ chatOrchestrator = AgentLoopOrchestrator(..., toolSafetyEngine) ← 兼容链路共用安全引擎
@@ -771,7 +816,9 @@ AIAgentService.handleTextRequest()
     │    └─ 普通文本 → 取消旧 PendingAction，继续主链
     ├─ agentRuntime.startSession(request, traceContext, deadline)
     │    ├─ KeywordIntentRouter → IntentResult
+    │    ├─ KnowledgeNeedDetector + VisionIntentPolicy
     │    ├─ DefaultToolGroupSelector → SELECTED / CHAT_ONLY / CLARIFICATION / FAILED_CLOSED
+    │    ├─ KnowledgeCapabilityPlanner → 强制知识组或默认追加只读知识组
     │    └─ RequestSession（不可变请求事实快照）
     └─ timeout runnable + TEXT worker + RequestExecutionContext
     │
@@ -808,6 +855,30 @@ ActiveRequestRegistry.tryComplete(terminalState)  ← success / failure / timeou
     └─ Worker 完全退出后 release 单槽位
 ```
 
+### 5.3 车辆知识问答流程
+
+```text
+用户 TEXT 问题
+    → RuleBasedKnowledgeNeedDetector
+    │    ├─ 明确手册/维护/质保/服务中心/故障知识 → REQUIRED
+    │    └─ 未明确命中 → 普通 TEXT 仍默认可见只读知识 Tool
+    → KnowledgeCapabilityPlanner
+    → ContextMessageAssembler 将 searchVehicleKnowledge 规格提供给模型
+    → 模型按问题需要发起 Tool Call
+    → VehicleKnowledgeTool
+    → VehicleKnowledgeService
+    │    ├─ 获取当前 VehicleProfile 与 knowledgeScopeId
+    │    ├─ Query 标准化和 Store readiness 检查
+    │    ├─ Child BM25 Top 20 + Dense Top 20
+    │    ├─ RRF → 候选去重 → Child Rerank
+    │    ├─ Child → Parent → Parent 去重与 Evidence 预算
+    │    └─ Answerability / Confidence / Citation 数据
+    → 结构化 ToolResult 写回 AgentLoop
+    → 主模型只基于 Evidence 组织最终自然语言答复
+```
+
+当 Query Embedding 失败但 BM25 有结果时，链路降级为 Lexical-only；Rerank 失败时回退 RRF。系统不会把降级结果伪装为 Rerank 置信度。Store 未就绪、Scope 不匹配或证据不足时，Tool 返回结构化不可回答状态，由模型如实向用户说明。
+
 ---
 
 ## 6. 当前开发状态
@@ -820,8 +891,8 @@ ActiveRequestRegistry.tryComplete(terminalState)  ← success / failure / timeou
 | AgentRuntime | 基本完成 | TEXT 已具备单槽位准入、30 秒主链 deadline、HTTP Call 取消、唯一终态与 requestId 防重放；IMAGE / VOICE 已明确返回不支持，CONTROL 与场景链保留兼容实现 |
 | TEXT Context | 代码完成、部分设备验收 | 8 静态 + 3 动态 Provider；独占消息和工具规格；集中策略、裁剪、压缩重试和 Legacy 清理已完成；Automotive 模拟器 AIDL、基础 TEXT、会话/用户隔离与 52 条消息长历史已通过，压缩、工具和 Phoenix 专项仍待验收 |
 | TEXT AgentLoop | 基本完成 | 多轮循环、整批 Safety 预检、确认与状态复核已接通；模型同步 HTTP Call 可取消，真实车控执行仍未接入 |
-| IntentRouter | Demo 完成 | 11 类关键词/正则意图，低成本且可解释；当前为单标签 winner，复合领域和查询/控制语义尚未强类型化 |
-| ToolGroup | P0 基线完成 | 13 个工具组；明确意图最小暴露，普通聊天空工具，不确定/异常/聚合结果失败关闭 |
+| IntentRouter | Demo 完成 | 11 类关键词/正则意图，低成本且可解释；知识需求另由 KnowledgeNeedDetector 判定，当前仍缺少统一的强类型任务语义层 |
+| ToolGroup | P0 基线完成 | 13 个工具组；明确车控意图最小暴露，普通 TEXT 默认追加无副作用的只读知识 Tool；不确定/异常/聚合结果仍失败关闭 |
 | ToolRegistry / Dispatcher | 基本完成 | 46 个 `@Tool` 统一反射注册和调度；TEXT 使用结构化 ToolDispatchOutcome 描述技术分发结果，但尚未形成统一车辆动作回执 |
 | 前向视觉问答 | Demo 完成、待设备验收 | TEXT → 视觉意图策略 → `front_camera_interaction` → 白名单 Demo 图片 → qwen-vl-max 结构化证据 → 主模型答复已接通；支持默认图片配置、文件校验、60 秒独立期限与视觉 Trace，不支持真实摄像头 |
 | Tool Safety Engine | P0 基线完成 | 统一入口、HIGH 规则漏配拒绝、文本确认、30 秒 PendingAction、确认前复核和最多一次执行已接通；仍不是量产功能安全方案 |
@@ -832,7 +903,7 @@ ActiveRequestRegistry.tryComplete(terminalState)  ← success / failure / timeou
 | Trace | 代码完成 | 主 Trace 树、Context 来源、最终消息、工具 schema、裁剪/压缩和 Tool 阶段已接通；业务层全文输出，Phoenix 设备显示待验收 |
 | 虚拟车辆状态机 | Demo 完成、Eval 已接入 | 8 个状态子系统、参数校验和状态收敛已用于 Demo 车控；Eval 复用同一实例提供不可变快照、原子 Patch、reset 与 environmentRevision |
 | Debug Eval 适配 | AIAgent 侧代码完成 | Debug-only `EvalDebugService` 支持 Acquire/Reset/Apply/Read/Release/GetVersion；UID + token 租约隔离，TEXT 根 Trace 记录关联与环境版本；TestApp Bridge、电脑端结果通道及三方设备验收待完成 |
-| RAG Parent-Child V2 | 代码与自动化验证完成、发布 Gate 未完成 | 离线端已生成 Model Y 2026 中国大陆后驱版 `TEST_ONLY` Bundle；检索链为 Child Dense/BM25 → RRF → 去重 → Child Rerank → Parent 聚合 → 完整 Parent Evidence，支持二级标题 Dense/BM25 字段化检索。离线 CLI 160 tests、Android JVM 452 tests、APK 和 Lint 已通过；人工 Eval Gate、DEV/TEST 冻结、置信度校准及 AVD 验收仍待完成，不进入主 APK |
+| RAG Parent-Child V2 | Demo 主链已打通、正式发布 Gate 未完成 | Model Y 2026 中国大陆后驱版 `TEST_ONLY` Bundle 已进入 main APK；Service 可异步安装激活，Agent 可调用 `searchVehicleKnowledge`。检索链为 Child Dense/BM25 → RRF → 去重 → Child Rerank → Parent 聚合 → 完整 Parent Evidence；资料完整性、正式 Eval 与量产发布审批仍未完成 |
 | SoaService 真车通信 | 未完成 | 方法体仍为空；当前车控结果来自 VehicleStateMachine，不代表真实车辆执行 |
 | 动作语义闭环 | 待完善 | ToolGroup 已限制模型可见工具，Safety 已控制风险动作；Dispatch 前本轮授权复核、ActionReceipt、状态回读和最终答复真实性仍待建立 |
 | 场景 / VLM / VR | 部分完成 | 主动场景识别、前向视觉问答与 VR/TTS 均保留；前向视觉仅完成预存图片 Demo，Camera SDK 与真实视觉输入仍依赖目标设备和后续接入 |
@@ -860,10 +931,10 @@ ActiveRequestRegistry.tryComplete(terminalState)  ← success / failure / timeou
 - Parent 是最小语义完整小节，Child 仅用于 Dense/BM25/RRF/Rerank 定位；最终返回完整 Parent，不返回裸 Child 作为 Evidence。
 - Dense 输入包含二级标题与 Child 正文；BM25 将标题和正文作为 TITLE/BODY 独立字段，初始权重为 `2.0 : 1.0`。
 - RRF 后执行完全重复、高相似和同 Parent 占位去重；Rerank 只处理 Child，Rerank 失败时回退 RRF。
-- 当前 Bundle 位于 `tools/rag-indexer/trial-output/model-y-2026-refresh-title-v2`，状态为 `TEST_ONLY`，未复制到 `app/src/main/assets`。
-- 当前候选 Bundle 已合并到 Debug `androidTest` 资产并完成 Manifest、Scope 与 `data.mdb` SHA-256 一致性校验；Android JVM 强制重跑 `452 tests / 0 failures`，Debug APK 与 lint 通过。该资产仍不进入 main APK。
+- 当前运行 Bundle 仍为 `TEST_ONLY`，离线候选位于 `tools/rag-indexer/trial-output/`；`data.mdb` 与 `manifest.json` 已复制到 `app/src/main/assets/rag/knowledge_db/` 并进入 main APK。
+- 当前 Asset Manifest 标识 4 份逻辑文档、951 个 Parent、1878 个 Child；APK 构建通过共享 ObjectBox Schema Hash、Manifest、Scope 与 `data.mdb` SHA-256 一致性 Gate。
 - Eval V2 当前以项目负责人最新手动更新后的 33 条样本为准，Query 与 caseId 均唯一；仅修正了 4 个重复 caseId，未改变审核后的问题或证据标注。最新 RRF Coverage@1/@2/@3/@4=`0.7879/0.9394/0.9394/0.9697`、MRR=`0.8712`；Rerank 为 `0.8182/0.8485/0.9091/0.9394`、MRR=`0.8611`，详见 `docs/testresult/rag/parent_evidence_eval_v2_latest_report.md`。当前数据下 Rerank 仅提升 Coverage@1，不能宣称整体优于 RRF。Rerank 置信度已按 DEV 校准：HIGH=`score>=0.94 && margin>=0.05`、MEDIUM=`score>=0.90 && margin>=0.02`；RRF fallback 或缺少分数仍输出 `UNASSESSED`，详见 `docs/testresult/rag/parent_evidence_confidence_calibration_v2.md`。
-- 已在 `Automotive_1408p_landscape(AVD) - 15` 完成 Android 设备回归：`connectedDebugAndroidTest --rerun-tasks` 共执行 7 项，`7/7 passed`。期间修复了候选 Manifest V2 必填字段、开发候选 Store 版本一致性以及 Fixture 的 TITLE/BODY 倒排字段不一致；该验证仍只覆盖 Debug/Test 资产，Bundle 继续为 `TEST_ONLY`，不代表已进入主 APK 或正式发布。
+- 已在 Automotive AVD 完成 Asset 安装、AIDL、RAG Tool 调用和真实问题联调；该验证证明 Demo 主链可用，但 Bundle 继续为 `TEST_ONLY`，不代表正式发布。
 - 已补齐 Eval V2 消融矩阵：`evaluate-v2-ablation` 在同一 Bundle/数据集上执行 Dense-only、BM25-only、RRF raw、Exact/Near Dedup、Rerank 和 fallback；结果见 `docs/testresult/rag/parent_evidence_ablation_v2.md`。当前 BM25-only 在本语料上表现最佳，但生产链路仍保留 Dense + BM25 + RRF；Rerank 只改善 Coverage@1，不能宣称全面优于 RRF。
 - 当前评测集没有 `NO_EVIDENCE` 样本，因此 No-Evidence 阈值尚无经验校准证据；33 条数据集是“先跑通”批准口径，不等同于正式 50 条质量 Gate。Bundle 继续保持 `TEST_ONLY`。
 
@@ -943,6 +1014,8 @@ adb reverse tcp:6006 tcp:6006
 - [Trace 模块概览](docs/overview/trace-module-overview.md)
 - [AIAgent Eval 接入契约](docs/overview/eval/aiagent-eval-integration-contract.md)
 - [前向视觉问答 Tool 概览](docs/overview/front-view-vision-tool-overview.md)
+- [AIAgent RAG：离线构建、打包与 Android 接入](tools/README.md)
+- [AIAgent RAG 模块：Android 调用链与受控 Agentic RAG](docs/overview/rag-module-overview.md)
 - [前向视觉问答人工验收清单](docs/testresult/2026-07-17-front-view-vision-manual-acceptance-checklist.md)
 - [Agent 设计与架构评估（当前）](docs/overview/agent-design-and-architecture-evaluation.md)
 - [Agent 架构与运行流程历史评估](docs/overview/agent-architecture-and-runtime-flow-evaluation.md)
@@ -950,4 +1023,4 @@ adb reverse tcp:6006 tcp:6006
 - [三个 P0 改进计划与实施状态](docs/plan/2026-07-13-agent-p0-runtime-tool-safety-improvement-plan.md)
 - [Context Full Control 设计](docs/design/2026-07-11-context-full-control-design.md)
 
-**当前结论：** AIAgent 已形成“确定性控制面 + 模型驱动 Tool Loop”的车载领域单 Agent 主链；AIDL、TEXT Runtime、Context 输入控制、工具调度、Prompt、会话记忆、安全确认、Trace 与 Demo 前向视觉问答已可协同运行。视觉能力通过受控 Tool 保持在 TEXT 主链内，预存图片配置和 VLM 结果均有明确边界，不代表实时摄像头能力。下一阶段应优先完成本轮工具执行授权、结构化动作回执、执行后状态确认、最终答复真实性和 AIDL 调用方身份，再推进真实 SOA、目标车机故障评测、Phoenix 展示、真实 Qwen Token 校准与真实摄像头接入评估。
+**当前结论：** AIAgent 已形成“确定性控制面 + 模型驱动 Tool Loop”的车载领域单 Agent 主链；AIDL、TEXT Runtime、Context 输入控制、工具调度、Prompt、会话记忆、安全确认、Trace、Demo 前向视觉问答和车辆知识 RAG 已可协同运行。RAG 通过只读 Tool 接入，模型负责决定是否检索和组织答案，车型 Scope、检索、Rerank、Evidence、降级和引用边界由代码控制；当前内置 Bundle 仍是 `TEST_ONLY` Demo 数据。下一阶段应继续提升知识资料与 Eval 覆盖，同时完成工具执行授权、结构化动作回执、执行后状态确认、最终答复真实性和 AIDL 调用方身份，再推进真实 SOA 与目标车机验收。

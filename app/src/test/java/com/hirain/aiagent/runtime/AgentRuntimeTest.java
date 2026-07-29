@@ -114,6 +114,23 @@ public class AgentRuntimeTest {
     }
 
     @Test
+    public void startSession_driverProfileHowToQuestionUsesKnowledgeInsteadOfClarification() {
+        AgentRuntime runtime = new AgentRuntime(
+                (session, prepareResult) -> AgentResult.success("完成", 1, 10L, List.of()),
+                () -> "req-driver-profile",
+                () -> 3000L);
+
+        RequestSession session = runtime.startSession(createRequest("如何切换驾驶员设定"), null);
+
+        assertEquals(ToolGroupSelectionStatus.SELECTED,
+                session.toolGroupSelectionResult().status());
+        assertEquals(List.of(ToolGroupId.VEHICLE_KNOWLEDGE_GROUP),
+                session.toolGroupSelectionResult().selectedGroupIds());
+        assertTrue(session.toolGroupSelectionResult().selectedToolNames()
+                .contains("searchVehicleKnowledge"));
+    }
+
+    @Test
     public void startSession_routerExceptionFallsBackToUnknownAndExecuteContinues() {
         IntentRouter router = (text, sourceInputType) -> {
             throw new IllegalStateException("router failed");
